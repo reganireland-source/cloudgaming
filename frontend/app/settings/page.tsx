@@ -131,6 +131,17 @@ const TROUBLESHOOTING: { cloud: string; title: string; fixes: string[] }[] = [
   },
   {
     cloud: 'GCP',
+    title: 'Service account key creation is disabled (iam.disableServiceAccountKeyCreation)',
+    fixes: [
+      'Your project sits inside a Google Cloud "organisation". One is created automatically if you sign in with a Google Workspace or custom-domain email, and new organisations turn this policy on by default. Check with the project picker: an organisation name above the project means you have one.',
+      'Give yourself permission to change policies: switch the project picker to the ORGANISATION (not the project) → IAM & Admin → IAM → Grant access → your email → role "Organisation Policy Administrator" → Save. Being the organisation\'s owner isn\'t enough on its own; this role must be added explicitly.',
+      'Switch the picker back to your PROJECT → IAM & Admin → Organisation Policies → search "Disable service account key creation" → Manage policy → "Override parent\'s policy" → Add a rule → Enforcement: Off → Set policy. This only affects this project; the rest of the organisation stays protected.',
+      'If the list also shows a "managed" version of the same constraint (iam.managed.disableServiceAccountKeyCreation), turn that one off the same way.',
+      'Wait 1–2 minutes, then create the JSON key again. Or, in Cloud Shell: gcloud resource-manager org-policies disable-enforce iam.disableServiceAccountKeyCreation --project=YOUR_PROJECT_ID',
+    ],
+  },
+  {
+    cloud: 'GCP',
     title: 'Permission "compute.instances.create" denied / 403 Forbidden',
     fixes: [
       'The service account needs the Compute Admin and Service Account User roles. Add them under IAM & Admin → IAM → Grant access.',

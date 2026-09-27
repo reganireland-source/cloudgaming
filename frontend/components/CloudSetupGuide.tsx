@@ -229,7 +229,7 @@ const GUIDES: Record<ProviderKey, Guide> = {
       {
         title: 'Create a JSON key',
         detail:
-          'Click the new service account → Keys tab → Add key → Create new key → JSON → Create. A .json file downloads. If you see "Key creation is disabled", your organisation blocks it with the policy iam.disableServiceAccountKeyCreation — an organisation admin has to allow it for this project.',
+          'Click the new service account → Keys tab → Add key → Create new key → JSON → Create. A .json file downloads. If you see "Service account key creation is disabled", see that error under TROUBLESHOOTING below: the fix is to switch the policy off for this one project.',
       },
       {
         title: 'Paste the WHOLE file',
