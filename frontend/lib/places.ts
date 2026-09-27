@@ -69,6 +69,12 @@ const COUNTRY_ALIASES: Record<string, string> = {
   holland: 'Netherlands', 'czech republic': 'Czechia', nz: 'New Zealand', oz: 'Australia',
 };
 
+// Other names people type for cities.
+const CITY_ALIASES: Record<string, string> = {
+  bangalore: 'Bengaluru', bombay: 'Mumbai', madras: 'Chennai', calcutta: 'Kolkata', saigon: 'Ho Chi Minh City',
+  nyc: 'New York', hawaii: 'Honolulu', oahu: 'Honolulu',
+};
+
 // [city, admin/state, country code, lat, lng]
 const CITIES: Array<[string, string, string, number, number]> = [
   // Oceania
@@ -151,7 +157,7 @@ const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCa
 export function searchPlaces(q: string, limit = 8): Place[] {
   const [rawName, rawFilter] = q.split(',').map((p) => norm(p || ''));
   if (!rawName) return [];
-  const alias = COUNTRY_ALIASES[rawName];
+  const alias = COUNTRY_ALIASES[rawName] || CITY_ALIASES[rawName];
   const name = alias ? norm(alias) : rawName;
   const filterAlias = rawFilter && COUNTRY_ALIASES[rawFilter] ? norm(COUNTRY_ALIASES[rawFilter]) : null;
   const matchesFilter = (p: Place) =>

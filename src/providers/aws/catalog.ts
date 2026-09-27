@@ -89,11 +89,18 @@ export interface AwsRegion {
 }
 
 export const AWS_REGIONS: AwsRegion[] = [
-  { id: 'ap-southeast-1', name: 'Singapore', lat: 1.35, lng: 103.82, gpus: ['T4', 'A10G'], priceFactor: 1.4, egressPerGb: 0.12 },
+  // GPU lists checked against AWS's Spot Instance Advisor data (which types
+  // each region offers). Singapore has g4dn (T4) but no g5 (A10G).
+  { id: 'ap-southeast-1', name: 'Singapore', lat: 1.35, lng: 103.82, gpus: ['T4'], priceFactor: 1.4, egressPerGb: 0.12 },
   { id: 'ap-southeast-2', name: 'Sydney', lat: -33.87, lng: 151.21, gpus: ['T4', 'A10G'], priceFactor: 1.5, egressPerGb: 0.114 },
   { id: 'ap-northeast-1', name: 'Tokyo', lat: 35.68, lng: 139.69, gpus: ['T4', 'A10G'], priceFactor: 1.35, egressPerGb: 0.114 },
+  { id: 'ap-northeast-3', name: 'Osaka', lat: 34.69, lng: 135.5, gpus: ['T4'], priceFactor: 1.4, egressPerGb: 0.114 },
+  { id: 'ap-northeast-2', name: 'Seoul', lat: 37.57, lng: 126.98, gpus: ['T4', 'A10G'], priceFactor: 1.3, egressPerGb: 0.126 },
+  { id: 'ap-east-1', name: 'Hong Kong', lat: 22.32, lng: 114.17, gpus: ['T4', 'A10G'], priceFactor: 1.45, egressPerGb: 0.12 },
+  { id: 'ap-south-1', name: 'Mumbai', lat: 19.08, lng: 72.88, gpus: ['T4', 'A10G'], priceFactor: 1.1, egressPerGb: 0.1093 },
   { id: 'us-east-1', name: 'N. Virginia', lat: 38.95, lng: -77.45, gpus: ['T4', 'A10G'], priceFactor: 1.0, egressPerGb: 0.09 },
   { id: 'us-west-2', name: 'Oregon', lat: 45.84, lng: -119.7, gpus: ['T4', 'A10G'], priceFactor: 1.0, egressPerGb: 0.09 },
+  { id: 'us-west-1', name: 'N. California', lat: 37.35, lng: -121.96, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.09 },
   { id: 'eu-west-1', name: 'Ireland', lat: 53.35, lng: -6.26, gpus: ['T4', 'A10G'], priceFactor: 1.12, egressPerGb: 0.09 },
   { id: 'eu-central-1', name: 'Frankfurt', lat: 50.11, lng: 8.68, gpus: ['T4', 'A10G'], priceFactor: 1.25, egressPerGb: 0.09 },
 ];

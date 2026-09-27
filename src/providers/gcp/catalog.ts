@@ -96,11 +96,19 @@ export interface GcpRegion {
 
 export const GCP_REGIONS: GcpRegion[] = [
   { id: 'asia-southeast1', name: 'Singapore', lat: 1.35, lng: 103.82, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.23, egressPerGb: 0.12 },
-  { id: 'australia-southeast1', name: 'Sydney', lat: -33.87, lng: 151.21, zones: ['a', 'b', 'c'], gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.19 },
+  // GPU lists checked against Google's T4 and G2 (L4) price lists per location.
+  // Zones: the launch tries each listed zone and skips ones without the GPU.
+  { id: 'australia-southeast1', name: 'Sydney', lat: -33.87, lng: 151.21, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.35, egressPerGb: 0.19 },
+  { id: 'australia-southeast2', name: 'Melbourne', lat: -37.81, lng: 144.96, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.35, egressPerGb: 0.19 },
   { id: 'asia-northeast1', name: 'Tokyo', lat: 35.68, lng: 139.69, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.29, egressPerGb: 0.12 },
+  { id: 'asia-northeast2', name: 'Osaka', lat: 34.69, lng: 135.5, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.29, egressPerGb: 0.12 },
+  { id: 'asia-northeast3', name: 'Seoul', lat: 37.57, lng: 126.98, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.25, egressPerGb: 0.12 },
+  { id: 'asia-east2', name: 'Hong Kong', lat: 22.32, lng: 114.17, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.4, egressPerGb: 0.12 },
+  { id: 'asia-east1', name: 'Taiwan', lat: 24.07, lng: 120.54, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.08, egressPerGb: 0.12 },
   { id: 'asia-south1', name: 'Mumbai', lat: 19.08, lng: 72.88, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
   { id: 'us-central1', name: 'Iowa', lat: 41.26, lng: -95.86, zones: ['a', 'b', 'c', 'f'], gpus: ['T4', 'L4'], priceFactor: 1.0, egressPerGb: 0.12 },
   { id: 'us-west1', name: 'Oregon', lat: 45.6, lng: -121.18, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.0, egressPerGb: 0.12 },
+  { id: 'us-west2', name: 'Los Angeles', lat: 34.05, lng: -118.24, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
   { id: 'us-east4', name: 'N. Virginia', lat: 39.04, lng: -77.49, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.12, egressPerGb: 0.12 },
   { id: 'europe-west4', name: 'Netherlands', lat: 53.44, lng: 6.84, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.1, egressPerGb: 0.12 },
   { id: 'europe-west2', name: 'London', lat: 51.51, lng: -0.13, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
