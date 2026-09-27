@@ -22,7 +22,10 @@ import { API_BASE_URL, apiUrl } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 
 type Status = 'pass' | 'warn' | 'fail' | 'running';
-interface Check { group: string; id: string; label: string; status: Status; message: string; tip?: string; copy?: string[] }
+interface Check {
+  group: string; id: string; label: string; status: Status; message: string; tip?: string; copy?: string[];
+  vars?: Array<{ name: string; set: boolean; value: string; where: string; example?: string }>;
+}
 
 const ICON: Record<Status, { mark: string; className: string; word: string }> = {
   pass: { mark: '✓', className: 'text-neon-lime', word: 'OK' },
@@ -133,6 +136,22 @@ export default function PreflightPage() {
                     <p className="text-xs text-slate-400 break-words">{c.message}</p>
                     {c.tip && <p className="text-xs text-neon-amber mt-1">→ {c.tip}</p>}
                     {c.copy?.map((v) => <CopyLine key={v} value={v} />)}
+                    {c.vars && (
+                      <dl className="mt-2 space-y-2 border-t border-white/10 pt-2">
+                        {c.vars.map((v) => (
+                          <div key={v.name} className="text-xs">
+                            <dt className="flex items-center gap-2">
+                              <span className={v.set ? 'text-neon-lime' : 'text-neon-amber'} aria-label={v.set ? 'set' : 'not set'}>{v.set ? '✓' : '○'}</span>
+                              <code className="text-slate-100">{v.name}</code>
+                              <span className="text-[0.66rem] text-slate-500">{v.set ? 'set' : 'not set'}</span>
+                            </dt>
+                            <dd className="pl-5 text-slate-300">= {v.value}</dd>
+                            <dd className="pl-5 text-slate-500">From: {v.where}</dd>
+                            {v.example && <dd className="pl-5 text-slate-500 break-all">Looks like: <span className="text-slate-400">{v.example}</span></dd>}
+                          </div>
+                        ))}
+                      </dl>
+                    )}
                   </div>
                 </div>
               </li>

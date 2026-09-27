@@ -39,6 +39,43 @@ export interface PreflightCheck {
   message: string;
   tip?: string;
   copy?: string[];   // values worth copying somewhere (callback URLs...)
+  /** For sign-in: every variable 1:1 — what goes in it, where it comes from, whether it's set. */
+  vars?: Array<{ name: string; set: boolean; value: string; where: string; example?: string }>;
+}
+
+/** Exactly what each sign-in variable must contain (never the value itself). */
+function signInVars(p: 'google' | 'apple'): PreflightCheck['vars'] {
+  const apiHost = (() => { try { return new URL(env.API_PUBLIC_URL).host; } catch { return '<your-app>.up.railway.app'; } })();
+  if (p === 'google') {
+    return [
+      { name: 'GOOGLE_CLIENT_ID', set: !!env.GOOGLE_CLIENT_ID,
+        value: 'The OAuth "Client ID" of a Web application client',
+        where: 'console.cloud.google.com → APIs & Services → Credentials → Create credentials → OAuth client ID → Application type "Web application" → Authorized redirect URIs: add the callback URL below → Create. (First time: set up the OAuth consent screen, External, and publish it.)',
+        example: '<numbers>-<random letters>.apps.googleusercontent.com' },
+      { name: 'GOOGLE_CLIENT_SECRET', set: !!env.GOOGLE_CLIENT_SECRET,
+        value: 'The "Client secret" shown with that same client',
+        where: 'Same dialog, or Credentials → your client → Client secrets.',
+        example: 'GOCSPX-<random letters>' },
+    ];
+  }
+  return [
+    { name: 'APPLE_TEAM_ID', set: !!env.APPLE_TEAM_ID,
+      value: 'Your 10-character Apple Developer Team ID',
+      where: 'developer.apple.com → Account → Membership details → Team ID. (Needs a paid Apple Developer Program membership.)',
+      example: 'A1B2C3D4E5' },
+    { name: 'APPLE_CLIENT_ID', set: !!env.APPLE_CLIENT_ID,
+      value: 'The identifier of a SERVICES ID (not the App ID)',
+      where: `Certificates, Identifiers & Profiles → Identifiers → + → App IDs (create one with "Sign in with Apple" ticked) → then + → Services IDs → create, tick "Sign in with Apple" → Configure: Primary App ID = that App ID, Domains = ${apiHost}, Return URLs = the callback URL below.`,
+      example: 'com.gints.gaminghub.signin' },
+    { name: 'APPLE_KEY_ID', set: !!env.APPLE_KEY_ID,
+      value: 'The 10-character Key ID of a "Sign in with Apple" key',
+      where: 'Certificates, Identifiers & Profiles → Keys → + → tick "Sign in with Apple" → Configure → pick the App ID → Register. The Key ID is shown on the key.',
+      example: 'XYZ9876543' },
+    { name: 'APPLE_PRIVATE_KEY', set: !!env.APPLE_PRIVATE_KEY,
+      value: 'The FULL contents of that key\'s .p8 file, including the BEGIN/END lines',
+      where: 'Download it right after registering the key (Apple only lets you download it once). Open it in a text editor and paste everything; line breaks may be real or written as \\n.',
+      example: '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49…\n-----END PRIVATE KEY-----' },
+  ];
 }
 
 const RAILWAY_VARS = 'Railway → your backend service → Variables';
@@ -135,10 +172,11 @@ export async function runPreflight(opts: { origin?: string; authorization?: stri
     const label = p === 'google' ? 'Sign in with Google' : 'Sign in with Apple';
     if (enabled[p]) {
       add({ group: 'sign-in', id: p, label, status: 'pass', message: 'Configured. Make sure this exact callback URL is registered with ' + (p === 'google' ? 'Google (Credentials → your OAuth client → Authorized redirect URIs).' : 'Apple (Services ID → Return URLs).'),
-        copy: [callbackUrl(p)] });
+        copy: [callbackUrl(p)], vars: signInVars(p) });
     } else {
       add({ group: 'sign-in', id: p, label, status: 'warn', message: `Off — missing ${missingConfig(p).join(', ')}. Email sign-in still works.`,
-        tip: `Optional. Add the missing variables in ${RAILWAY_VARS}.`, copy: env.API_PUBLIC_URL ? [callbackUrl(p)] : undefined });
+        tip: `Optional. Set each variable below in ${RAILWAY_VARS}, then redeploy. The callback URL to register with ${p === 'google' ? 'Google' : 'Apple'} is:`,
+        copy: env.API_PUBLIC_URL ? [callbackUrl(p)] : undefined, vars: signInVars(p) });
     }
   }
 
