@@ -1,28 +1,67 @@
+/**
+ * ============================================================================
+ * src/providers/Provider.ts — THE CONTRACT EVERY CLOUD MUST FOLLOW
+ * ============================================================================
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * AWS, Azure, Google Cloud (GCP) and Oracle all do the same basic things —
+ * start a server, stop it, back up its disk — but each has a completely
+ * different API for doing them. We don't want the rest of the app full of
+ * "if AWS do this, else if Azure do that...".
+ *
+ * So we define ONE common list of operations here: the CloudProvider class.
+ * Each cloud gets its own file (AWSProvider.ts, AzureProvider.ts, ...) that
+ * fills in HOW to do each operation for that cloud. The rest of the app
+ * only ever talks to "a CloudProvider" and doesn't care which one it is.
+ * This is a classic design pattern: an ABSTRACTION or INTERFACE.
+ *
+ * KEY TERMS
+ * ---------
+ * - `abstract class`: a class you can't create directly — it's a template.
+ *   Other classes `extend` it.
+ * - `abstract` method: a method with only a signature (name, inputs, output)
+ *   and no body. Every class that extends CloudProvider MUST provide it, or
+ *   TypeScript refuses to compile. That guarantees every provider supports
+ *   every operation (even if, for now, the body just says "Not implemented").
+ * - `Promise<X>`: the method is asynchronous (it talks to the network) and
+ *   will eventually produce an X. Callers `await` it.
+ *
+ * CURRENT STATE: only AWSProvider is really implemented. Azure, GCP and
+ * Oracle are placeholders whose methods throw "Not implemented".
+ * ============================================================================
+ */
+
 import { Machine, RegionData, Snapshot } from '../types';
 
+/** Where and what to launch. */
 export interface ProviderConfig {
-  region: string;
-  instanceType: string;
+  region: string;          // e.g. 'ap-southeast-1'
+  instanceType: string;    // the machine size, e.g. 'g4dn.xlarge'
 }
 
+/** Extra launch settings. */
 export interface LaunchOptions {
-  imageId: string;
-  keyName: string;
-  securityGroupId: string;
-  spotInstance?: boolean;
+  imageId: string;         // the disk template to boot from (for AWS, an AMI id)
+  keyName: string;         // name of the SSH key pair allowed to log in
+  securityGroupId: string; // firewall rules: which ports are open to the internet
+  spotInstance?: boolean;  // true = use cheap "spare capacity" pricing (can be interrupted)
 }
 
+/** Basic facts about an existing snapshot. */
 export interface SnapshotInfo {
   id: string;
   sizeGb: number;
-  state: string;
+  state: string;           // e.g. 'pending' while being created, 'completed' when ready
 }
 
 export abstract class CloudProvider {
+  /** Which cloud this is. Each subclass sets it, e.g. name = 'aws'. */
   abstract name: 'aws' | 'azure' | 'gcp' | 'oracle';
 
   /**
-   * Launch a new instance
+   * Create and boot a brand-new virtual machine.
+   * Returns the provider's id for it, its IP address, and its hourly price.
    */
   abstract launchInstance(
     config: ProviderConfig,
@@ -30,22 +69,24 @@ export abstract class CloudProvider {
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }>;
 
   /**
-   * Stop a running instance (don't terminate)
+   * Power a machine OFF, keeping its disk. Compute billing stops; you still
+   * pay a little for the disk.
    */
   abstract stopInstance(instanceId: string): Promise<void>;
 
   /**
-   * Start a stopped instance
+   * Power a stopped machine back ON.
    */
   abstract startInstance(instanceId: string): Promise<void>;
 
   /**
-   * Terminate an instance and clean up
+   * DESTROY a machine and its disk permanently ("terminate" is the cloud
+   * term). All billing for it stops.
    */
   abstract terminateInstance(instanceId: string): Promise<void>;
 
   /**
-   * Get current instance status
+   * Ask the cloud what state a machine is in right now, and its IP address.
    */
   abstract getInstanceStatus(instanceId: string): Promise<{
     status: 'running' | 'stopped' | 'terminated' | 'unknown';
@@ -53,7 +94,7 @@ export abstract class CloudProvider {
   }>;
 
   /**
-   * Create a snapshot of an instance's disk
+   * Take a snapshot (point-in-time backup) of a machine's disk.
    */
   abstract createSnapshot(
     instanceId: string,
@@ -61,17 +102,18 @@ export abstract class CloudProvider {
   ): Promise<{ snapshotId: string; sizeGb: number }>;
 
   /**
-   * Get snapshot info
+   * Look up an existing snapshot.
    */
   abstract getSnapshot(snapshotId: string): Promise<SnapshotInfo>;
 
   /**
-   * Delete a snapshot
+   * Permanently delete a snapshot (stops its storage charges).
    */
   abstract deleteSnapshot(snapshotId: string): Promise<void>;
 
   /**
-   * Restore a snapshot to a new instance
+   * Create a new machine whose disk starts as a copy of a snapshot — i.e.
+   * bring back a machine with all your games already installed.
    */
   abstract restoreFromSnapshot(
     snapshotId: string,
@@ -91,12 +133,13 @@ export abstract class CloudProvider {
   ): Promise<{ snapshotId: string }>;
 
   /**
-   * Get available regions and their costs
+   * List the regions this cloud offers, with location and pricing.
    */
   abstract getRegions(): Promise<RegionData[]>;
 
   /**
-   * Get cost for a specific instance type in a region
+   * Hourly price of a machine type in a region. `spot` asks for the cheaper,
+   * interruptible spot price as well.
    */
   abstract getInstanceCost(
     region: string,
@@ -105,12 +148,14 @@ export abstract class CloudProvider {
   ): Promise<{ onDemandPrice: number; spotPrice?: number }>;
 
   /**
-   * Get egress cost for a region
+   * Price per gigabyte of data sent out of this region to the internet
+   * ("egress"). For game streaming this is a big part of the bill, because
+   * the video stream is all outgoing data.
    */
   abstract getEgressCostPerGb(region: string): Promise<number>;
 
   /**
-   * Query recent costs from the provider's billing API
+   * Ask the cloud's billing system what was actually spent between two dates.
    */
   abstract queryCosts(userId: string, startDate: Date, endDate: Date): Promise<{
     computeCost: number;
@@ -119,7 +164,7 @@ export abstract class CloudProvider {
   }>;
 
   /**
-   * Validate credentials
+   * Check that the stored credentials actually work (true) or not (false).
    */
   abstract validateCredentials(): Promise<boolean>;
 }

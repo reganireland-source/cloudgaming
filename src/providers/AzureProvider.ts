@@ -2,11 +2,43 @@ import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Pr
 import { RegionData } from '../types';
 
 /**
- * Azure Provider implementation
+ * ============================================================================
+ * src/providers/AzureProvider.ts — MICROSOFT AZURE (PLACEHOLDER, NOT YET IMPLEMENTED)
+ * ============================================================================
+ *
+ * WHAT THIS IS
+ * ------------
+ * The Azure version of the CloudProvider contract defined in Provider.ts.
+ * It exists so the rest of the app can already treat Azure as a supported
+ * cloud (it appears in menus, cost comparisons and the status lights), but
+ * the actual cloud operations are NOT built yet.
+ *
+ * CURRENT BEHAVIOUR
+ * -----------------
+ * Almost every method immediately does `throw new Error('Not implemented')`.
+ * Anything that tries to launch/stop/snapshot a Azure machine will fail
+ * with that error. The only working method is getEgressCostPerGb(), which
+ * returns a typical published price.
+ *
+ * Each method has an explicit return type (e.g. Promise<{ instanceId: ... }>)
+ * even though it only throws. That's required: without it TypeScript infers
+ * the wrong return type and complains the class doesn't match the contract.
+ *
+ * HOW TO IMPLEMENT IT LATER
+ * -------------------------
+ * Use AWSProvider.ts as the worked example. For Azure you'd use
+ * @azure/arm-compute and @azure/identity, create the SDK client in the constructor from
+ * `credentials`, and fill in each method — e.g. launchInstance would create
+ * Standard_NV6 (NVIDIA GPU VMs), and createSnapshot would use Azure Blob/managed-disk snapshots. What every method must do
+ * is described next to its declaration in Provider.ts.
+ * ============================================================================
  */
 export class AzureProvider extends CloudProvider {
   name = 'azure' as const;
 
+  // `credentials` = this user's saved login details for the cloud.
+  // `super()` runs the parent class's constructor — required first thing
+  // in a subclass constructor.
   constructor(credentials: any) {
     super();
     // Initialize Azure SDK

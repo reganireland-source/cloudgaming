@@ -1,9 +1,66 @@
+/**
+ * ============================================================================
+ * src/utils/CloudyPadSetup.ts — TURNING A BLANK CLOUD VM INTO A GAMING RIG
+ * ============================================================================
+ *
+ * WHAT THIS DOES
+ * --------------
+ * A freshly launched Windows VM can't stream games yet. This class connects
+ * to it over SSH (a secure remote command line) and runs a sequence of
+ * setup scripts on it:
+ *   1. wait until the machine has booted and accepts SSH
+ *   2. install GPU drivers
+ *   3. install CloudyPad/Sunshine (the streaming server)
+ *   4. write Sunshine's config for the chosen quality (resolution/fps/bitrate)
+ *   5. install game launchers (Battle.net; Steam is commented out)
+ *   6. start the Sunshine service
+ * It's used by MachineService.launchMachine (via setupSunshine) and
+ * MachineService.updateStreamingQuality (step 4 only).
+ *
+ * HOW IT RUNS REMOTE COMMANDS
+ * ---------------------------
+ * It doesn't use an SSH library. It builds an `ssh ...` command line as text
+ * and runs it with Node's `exec`, exactly as if you'd typed it into a
+ * terminal on the server. That means the machine running the backend must
+ * have the `ssh` program installed and the private key file present at
+ * SSH_KEY_PATH (see src/config/env.ts).
+ *
+ * PROGRESS REPORTING
+ * ------------------
+ * An optional `statusCallback` is called at each stage (with a stage name,
+ * a 0–100 progress number and a message). That's designed to feed the
+ * frontend's progress bar via the setup_status table — but nothing passes
+ * a callback in yet, so today progress only appears in the server logs.
+ *
+ * ⚠️  IMPORTANT: THE SCRIPTS BELOW ARE UNTESTED AGAINST A REAL MACHINE
+ * ---------------------------------------------------------------------
+ * Treat them as a first draft. Known problems:
+ *   - The CloudyPad download URL (github.com/ReplayCoding/cloudy-pad) is
+ *     not the real CloudyPad project, and the real CloudyPad
+ *     (github.com/PierreBeucher/cloudypad) is a command-line tool you run
+ *     on YOUR computer to create cloud machines — not a Windows installer.
+ *     Installing Sunshine directly (its official Windows installer) or baking
+ *     it into the Packer image (infrastructure/packer/) is the realistic path.
+ *   - The NVIDIA URL points at a web page, not a driver .exe.
+ *   - Windows' OpenSSH server runs commands in cmd.exe by default; sending a
+ *     multi-line batch script or a multi-line `powershell -Command "..."` as
+ *     one SSH argument is unlikely to run as intended.
+ *   - A pairing PIN is generated in setup() but never returned or used.
+ *   - `path`, `region` and `machineId` are stored/imported but unused.
+ * ============================================================================
+ */
+
+// `exec` runs a shell command from Node.js (like typing it in a terminal).
 import { exec } from 'child_process';
+// `promisify` converts old callback-style functions into Promise-returning
+// ones, so we can `await` them.
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { env } from '../config/env';
 
+// execAsync(cmd) returns a Promise of { stdout, stderr } — the command's
+// normal output and error output.
 const execAsync = promisify(exec);
 
 /**
@@ -17,6 +74,8 @@ const execAsync = promisify(exec);
  * - SSH_RETRY_DELAY_MS: Delay between connection retries (default: 10000ms / 10sec)
  */
 export class CloudyPadSetup {
+  // Everything the setup needs, stored on the object so every method can
+  // use it via `this.`. `?` marks optional fields.
   private ipAddress: string;
   private keyPath: string;
   private username: string;
@@ -27,6 +86,16 @@ export class CloudyPadSetup {
   private machineId?: string;
   private statusCallback?: (stage: string, progress: number, message: string) => Promise<void>;
 
+  /**
+   * @param ipAddress      the machine to connect to
+   * @param quality        'budget' | 'good' | 'high' | 'ultra'
+   * @param region         cloud region (stored, currently unused)
+   * @param keyPath        override SSH_KEY_PATH for this run (optional)
+   * @param username       override SSH_USERNAME (optional)
+   * @param machineId      our id for the machine (optional, currently unused)
+   * @param statusCallback function called with (stage, progress, message) at
+   *                       each step — e.g. to save progress for the UI (optional)
+   */
   constructor(
     ipAddress: string,
     quality: string,
@@ -47,7 +116,9 @@ export class CloudyPadSetup {
     this.timeoutMs = env.SSH_TIMEOUT_MS;
     this.retryDelayMs = env.SSH_RETRY_DELAY_MS;
 
-    // Validate SSH key exists
+    // Warn early (in the logs) if the private key file isn't there — every
+    // SSH attempt would fail without it. A warning rather than an error so
+    // that creating the object never crashes the caller.
     if (!fs.existsSync(this.keyPath)) {
       console.warn(
         `[CloudyPad] Warning: SSH key not found at ${this.keyPath}. ` +
@@ -56,6 +127,10 @@ export class CloudyPadSetup {
     }
   }
 
+  /**
+   * Pass a progress update to the callback, if one was provided. Called
+   * before and after every stage in setup().
+   */
   private async reportStatus(stage: string, progress: number, message: string): Promise<void> {
     if (this.statusCallback) {
       await this.statusCallback(stage, progress, message);
@@ -64,6 +139,14 @@ export class CloudyPadSetup {
 
   /**
    * Main orchestration: Wait for instance, install drivers, setup CloudyPad
+   *
+   * Runs the six stages strictly in order — each `await` waits for the
+   * previous step to finish before starting the next. If ANY stage throws,
+   * we jump to the `catch`, report 'failed', and re-throw so the caller
+   * knows. The progress numbers (10, 15, 20 ... 100) are rough milestones
+   * for a progress bar, not measured percentages.
+   *
+   * @returns the Sunshine web address and 'ready' when everything succeeded
    */
   async setup(): Promise<{ sunshineUrl: string; status: string }> {
     try {
@@ -110,6 +193,9 @@ export class CloudyPadSetup {
       console.log(`[CloudyPad] Setup complete - Sunshine web UI: ${sunshineUrl}`);
 
       // Generate a random 6-digit PIN for Sunshine pairing
+      // (100000 + a random number below 900000 always gives 6 digits.)
+      // ⚠️ Not used anywhere yet: it isn't returned, reported, or given to
+      // Sunshine. Real Sunshine pairing shows its own PIN in the client app.
       const sunshinePin = Math.floor(100000 + Math.random() * 900000).toString();
 
       await this.reportStatus('complete', 100, 'Setup complete and streaming service is ready!');
@@ -129,6 +215,12 @@ export class CloudyPadSetup {
    * Wait for Windows instance SSH to be ready
    * Retries based on SSH_TIMEOUT_MS and SSH_RETRY_DELAY_MS environment variables
    */
+  //
+  // A new VM takes a few minutes to boot. We repeatedly try a harmless
+  // command (`echo ready`) until one succeeds:
+  //   attempts = total timeout ÷ delay between attempts
+  //   (defaults: 300000 ms ÷ 10000 ms = 30 attempts, 10 s apart ≈ 5 minutes)
+  // Math.ceil rounds UP so a partial attempt still counts.
   private async waitForInstanceReady(): Promise<void> {
     const maxRetries = Math.ceil(this.timeoutMs / this.retryDelayMs);
     const totalWaitMinutes = (maxRetries * this.retryDelayMs) / 60000;
@@ -149,6 +241,8 @@ export class CloudyPadSetup {
           `[CloudyPad] Waiting for instance... (attempt ${i + 1}/${maxRetries}, ` +
           `timeout in ${totalWaitMinutes.toFixed(1)} min)`
         );
+        // "Sleep" for retryDelayMs. setTimeout calls resolve() after the
+        // delay; wrapping it in a Promise lets us `await` the pause.
         await new Promise(resolve => setTimeout(resolve, this.retryDelayMs));
       }
     }
@@ -156,6 +250,14 @@ export class CloudyPadSetup {
 
   /**
    * Install NVIDIA GPU drivers via Windows Update or direct download
+   *
+   * The text in backticks below is a Windows batch script sent to the
+   * machine as-is: it checks the graphics card name with `wmic`, and if it's
+   * NVIDIA, downloads and silently runs a driver installer (-s = silent,
+   * -noreboot = don't restart). The AMD branch is a placeholder.
+   * ⚠️ The download URL is a web page, not an installer (see file header).
+   * (The Packer image in infrastructure/packer/ also installs drivers, so on
+   * that image this step should be redundant.)
    */
   private async installGPUDrivers(): Promise<void> {
     const driverScript = `
@@ -186,6 +288,14 @@ if %ERRORLEVEL% EQU 0 (
   /**
    * Download and run CloudyPad installer
    * CloudyPad handles Sunshine installation and configuration
+   *
+   * A PowerShell script: allow scripts to run (Set-ExecutionPolicy), hide
+   * the slow progress bar, download the installer, run it silently (/S)
+   * into C:\CloudyPad, then wait 30 s for it to finish.
+   * Note the `\$` in the script: inside a JavaScript template string `${...}`
+   * would be treated as a JS variable, so PowerShell's own `$variables` are
+   * escaped with a backslash to reach Windows unchanged.
+   * ⚠️ Wrong URL / wrong kind of tool — see the file header.
    */
   private async installCloudyPad(): Promise<void> {
     const cloudypadScript = `
@@ -213,6 +323,14 @@ powershell -Command "
 
   /**
    * Configure Sunshine streaming quality settings
+   *
+   * Looks up the resolution/fps/bitrate for the chosen quality, then writes
+   * a complete sunshine.conf file on the machine. Unlike the PowerShell
+   * `\$variables`, the `${qualitySettings.width}` parts here are real
+   * JavaScript placeholders — filled in with our values BEFORE the script is
+   * sent. `@' ... '@` is a PowerShell "here-string" (a multi-line text block),
+   * piped into Out-File to create the file.
+   * Also called on its own by MachineService.updateStreamingQuality.
    */
   private async configureSunshine(): Promise<void> {
     const qualitySettings = this.getQualityConfig();
@@ -259,6 +377,10 @@ encoder = auto
 
   /**
    * Install gaming clients (Battle.net, Steam, etc.)
+   *
+   * Downloads and silently installs the Battle.net launcher. Steam is
+   * prepared but commented out (the lines starting with #). The user still
+   * has to log in to the launcher and install games themselves.
    */
   private async installGamingClients(): Promise<void> {
     const clientScript = `
@@ -283,6 +405,10 @@ powershell -Command "
 
   /**
    * Start Sunshine service
+   *
+   * Sets the Sunshine Windows service to start automatically on every boot,
+   * starts it now, waits 5 s, and checks it's running. If it isn't, falls
+   * back to launching sunshine.exe directly.
    */
   private async startSunshine(): Promise<void> {
     const startScript = `
@@ -311,6 +437,24 @@ powershell -Command "
    * Execute command on remote Windows instance via SSH
    * Uses timeout from SSH_TIMEOUT_MS environment variable
    */
+  //
+  // Builds a terminal command like:
+  //   ssh -i /path/key.pem -o StrictHostKeyChecking=no ... Administrator@1.2.3.4 "<command>"
+  // Options used:
+  //   -i <file>                      the private key to log in with
+  //   StrictHostKeyChecking=no       don't stop to ask "trust this new machine?"
+  //   UserKnownHostsFile=/dev/null   don't remember machines (every VM is new)
+  //     (together these skip a security check that normally detects
+  //      impersonation — acceptable for throwaway VMs we just created, but
+  //      worth knowing)
+  //   ConnectTimeout=10              give up connecting after 10 s
+  // Double quotes inside `command` are escaped (\") so they don't end the
+  // quoted argument early. Only our own scripts are ever passed in here —
+  // never text typed by a user — which matters, because this string is run
+  // by a shell.
+  //
+  // @returns what the remote command printed (stdout)
+  // @throws  if SSH fails or the command exits with an error
   private async executeRemoteCommand(command: string): Promise<string> {
     const sshCommand = `
 ssh -i ${this.keyPath} \
@@ -327,6 +471,8 @@ ssh -i ${this.keyPath} \
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
       });
 
+      // SSH prints harmless notices like "Warning: Permanently added ... to
+      // the list of known hosts" on stderr; log anything else as a warning.
       if (stderr && !stderr.includes('Warning')) {
         console.warn(`[CloudyPad SSH] ${stderr}`);
       }
@@ -339,6 +485,14 @@ ssh -i ${this.keyPath} \
 
   /**
    * Map quality level to Sunshine configuration
+   *
+   *   width × height   picture resolution in pixels
+   *   fps              frames per second
+   *   bitrate          video data rate in megabits per second (Mbps)
+   *   gbPerHour        resulting data per hour of play:
+   *                    Mbps × 3600 s ÷ 8 bits-per-byte ÷ 1000 = GB/hour
+   *                    (e.g. 25 Mbps ≈ 11.25 GB/hour) — this drives egress cost
+   * Unknown quality names fall back to 'good'.
    */
   private getQualityConfig(): {
     width: number;
@@ -387,6 +541,10 @@ ssh -i ${this.keyPath} \
 
 /**
  * Get streaming connection details for a configured machine
+ *
+ * A standalone helper describing how a player connects (Sunshine web page
+ * on port 47990, Moonlight on port 47998). Note: nothing currently imports
+ * this — src/api/routes/streaming.ts has its own similar helper.
  */
 export interface StreamingConnectionDetails {
   protocol: 'sunshine' | 'moonlight';

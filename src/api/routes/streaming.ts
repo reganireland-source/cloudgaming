@@ -1,3 +1,42 @@
+/**
+ * ============================================================================
+ * src/api/routes/streaming.ts — "HOW DO I CONNECT TO MY MACHINE TO PLAY?"
+ * ============================================================================
+ *
+ * BACKGROUND: HOW CLOUD GAME STREAMING WORKS HERE
+ * -----------------------------------------------
+ * The game runs on the cloud machine. A program on that machine called
+ * SUNSHINE captures the screen, compresses it into video, and streams it to
+ * you; your keyboard/mouse/controller input is sent back. To watch that
+ * stream you use a CLIENT on your own device:
+ *   - Sunshine's own web page (browser)  -> http://<machine-ip>:47990
+ *   - MOONLIGHT, a free native app with the lowest latency -> <machine-ip>, port 47998
+ * A "port" is a numbered door on a machine; different services listen on
+ * different ports. 47990 and 47998 are Sunshine's standard ones.
+ *
+ * Mounted at /api/streaming in src/index.ts. The login check (authMiddleware)
+ * is applied to EACH route individually in this file rather than to the
+ * whole router — same effect, all routes still require login.
+ *
+ *   GET  /api/streaming                                     which client apps are supported
+ *   GET  /api/streaming/:machineId                          all connection details for a machine
+ *   POST /api/streaming/:machineId/moonlight-connection-string
+ *   GET  /api/streaming/:machineId/sunshine-web-ui
+ *   GET  /api/streaming/:machineId/streaming-status
+ *
+ * ⚠️  KNOWN ISSUES
+ * ---------------
+ * 1. These handlers read `machine.ip_address`, but the `machines` table has
+ *    no ip_address column (see database/schema.sql). So the IP is always
+ *    missing and the per-machine endpoints always answer 503 "IP pending".
+ *    The launch code needs to save the IP it gets from the cloud provider.
+ * 2. `machine.quality_tier` doesn't exist either (the column is
+ *    `streaming_quality`), so the quality always falls back to 'high'.
+ * 3. /streaming-status doesn't really check Sunshine — it assumes that a
+ *    running machine means a running Sunshine.
+ * ============================================================================
+ */
+
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 import { authMiddleware } from '../middleware/auth';
@@ -5,21 +44,18 @@ import { authMiddleware } from '../middleware/auth';
 const router = Router();
 
 /**
- * Streaming routes for managing game streaming client connections
- * Provides URLs and connection details for Sunshine, Moonlight, and web-based streaming
- */
-
-/**
  * GET /api/streaming/:machineId
- * Get streaming connection details for a machine
- * Returns Sunshine web UI URL, Moonlight connection string, and client instructions
+ * Everything needed to connect to a RUNNING machine.
+ * Passing `authMiddleware` as the second argument runs the login check for
+ * this route only, before the handler function.
  */
 router.get('/:machineId', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { machineId } = req.params;
     const userId = (req as any).userId;
 
-    // Verify machine ownership
+    // Find the machine only if it's mine AND running — you can't stream
+    // from a stopped machine.
     const machineResult = await query(
       'SELECT * FROM machines WHERE id = $1 AND user_id = $2 AND status = $3',
       [machineId, userId, 'running']
@@ -28,17 +64,18 @@ router.get('/:machineId', authMiddleware, async (req: Request, res: Response) =>
     if (machineResult.rows.length === 0) {
       return res.status(404).json({
         error: 'Machine not found or not running',
-        code: 'MACHINE_NOT_FOUND',
+        code: 'MACHINE_NOT_FOUND', // a stable code the frontend can check, unlike the wording of `error`
       });
     }
 
     const machine = machineResult.rows[0];
 
-    // Get the IP address from cloud provider if not stored
-    // In MVP, using stored IP address; in production, would query provider API
+    // A freshly launched machine may not have a public IP address yet.
+    // (See KNOWN ISSUE 1 — with the current schema this is always 'pending'.)
     const ipAddress = machine.ip_address || 'pending';
 
     if (ipAddress === 'pending') {
+      // 503 + retryAfter tells the frontend "try again in 30 seconds".
       return res.status(503).json({
         error: 'Machine IP address still being assigned',
         code: 'IP_PENDING',
@@ -50,7 +87,7 @@ router.get('/:machineId', authMiddleware, async (req: Request, res: Response) =>
       ipAddress,
       machine.provider,
       machine.region,
-      machine.quality_tier || 'high'
+      machine.quality_tier || 'high' // see KNOWN ISSUE 2
     );
 
     res.json({
@@ -71,8 +108,7 @@ router.get('/:machineId', authMiddleware, async (req: Request, res: Response) =>
 
 /**
  * POST /api/streaming/:machineId/moonlight-connection-string
- * Generate Moonlight client connection string
- * Moonlight is a native client - returns connection parameters
+ * What to type into the Moonlight app, plus download links for each platform.
  */
 router.post('/:machineId/moonlight-connection-string', authMiddleware, async (req: Request, res: Response) => {
   try {
@@ -98,8 +134,9 @@ router.post('/:machineId/moonlight-connection-string', authMiddleware, async (re
       });
     }
 
-    // Moonlight connection string format: moonlight://[username]:[password]@[host]:[port]/[appID]
-    // CloudGaming uses default Sunshine configuration
+    // Moonlight pairs with Sunshine using a one-time PIN rather than a
+    // password; `format` below is informational — Moonlight is normally set
+    // up by entering the host address in its "Add PC" screen.
     const connectionString = {
       protocol: 'moonlight',
       host: ipAddress,
@@ -131,8 +168,8 @@ router.post('/:machineId/moonlight-connection-string', authMiddleware, async (re
 
 /**
  * GET /api/streaming/:machineId/sunshine-web-ui
- * Get Sunshine web UI URL for browser-based access
- * Sunshine includes embedded web interface for no-client configuration
+ * The address of Sunshine's built-in web page on the machine, plus
+ * instructions. (Mainly used to configure Sunshine and pair clients.)
  */
 router.get('/:machineId/sunshine-web-ui', authMiddleware, async (req: Request, res: Response) => {
   try {
@@ -158,6 +195,7 @@ router.get('/:machineId/sunshine-web-ui', authMiddleware, async (req: Request, r
       });
     }
 
+    // Template literal (backticks): ${ipAddress} is replaced with the value.
     const webUiUrl = `http://${ipAddress}:47990`;
 
     res.json({
@@ -193,13 +231,16 @@ router.get('/:machineId/sunshine-web-ui', authMiddleware, async (req: Request, r
 
 /**
  * GET /api/streaming/:machineId/streaming-status
- * Check real-time streaming service status and connectivity
+ * Is streaming available right now? (See KNOWN ISSUE 3 — this is an
+ * assumption based on the machine's status, not a real check.)
  */
 router.get('/:machineId/streaming-status', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { machineId } = req.params;
     const userId = (req as any).userId;
 
+    // Note: no status filter here — we want to find stopped machines too,
+    // so we can explain WHY streaming isn't available.
     const machineResult = await query(
       'SELECT * FROM machines WHERE id = $1 AND user_id = $2',
       [machineId, userId]
@@ -211,7 +252,6 @@ router.get('/:machineId/streaming-status', authMiddleware, async (req: Request, 
 
     const machine = machineResult.rows[0];
 
-    // Check if instance is running
     if (machine.status !== 'running') {
       return res.json({
         machineId,
@@ -223,17 +263,13 @@ router.get('/:machineId/streaming-status', authMiddleware, async (req: Request, 
 
     const ipAddress = machine.ip_address;
 
-    // In production, would make HTTP request to Sunshine to verify it's running
-    // For MVP, we assume it's running if instance is running
+    // The URL a real health check would call. Not actually requested yet.
     const sunshineHealthEndpoint = `http://${ipAddress}:47990/health`;
 
-    // NOTE: In production with proper error handling:
-    // const response = await fetch(sunshineHealthEndpoint, { timeout: 5000 });
-    // For now, return assumed status
     const streamingStatus = {
       machineId,
       instanceStatus: machine.status,
-      streamingServiceRunning: true, // Would be verified via health check
+      streamingServiceRunning: true, // assumed, not verified
       sunshineWebUi: `http://${ipAddress}:47990`,
       moonlightPort: 47998,
       healthCheckUrl: sunshineHealthEndpoint,
@@ -252,8 +288,11 @@ router.get('/:machineId/streaming-status', authMiddleware, async (req: Request, 
 });
 
 /**
- * GET /api/streaming/clients
- * Get list of recommended streaming clients and their compatibility
+ * GET /api/streaming
+ * A static catalogue of supported client apps and their trade-offs.
+ * (An older comment called this /api/streaming/clients; the actual path is
+ * the router root, i.e. /api/streaming.) No database needed — it's a fixed
+ * list, so there's no try/catch.
  */
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   const clientsList = {
@@ -325,7 +364,11 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
 });
 
 /**
- * Helper function to generate streaming connection details
+ * Build the connection-details object returned by GET /api/streaming/:machineId.
+ * A plain helper function (not a route) — it only assembles data.
+ *
+ * @param quality one of budget / good / high / ultra; translated to a
+ *                human-readable label like "1440p 60fps"
  */
 function getStreamingConnectionDetails(
   ipAddress: string,
@@ -333,6 +376,8 @@ function getStreamingConnectionDetails(
   region: string,
   quality: string
 ) {
+  // Lookup table: quality name -> description. `Record<string, string>`
+  // means "an object whose keys and values are all strings".
   const qualityMap: Record<string, string> = {
     budget: '720p 30fps',
     good: '1080p 60fps',
@@ -356,6 +401,7 @@ function getStreamingConnectionDetails(
     instanceDetails: {
       provider,
       region,
+      // Unknown quality names fall back to the 'high' description.
       quality: qualityMap[quality] || qualityMap.high,
       status: 'ready',
       createdAt: new Date().toISOString(),

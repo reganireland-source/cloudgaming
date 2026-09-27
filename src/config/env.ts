@@ -1,38 +1,112 @@
+/**
+ * ============================================================================
+ * src/config/env.ts — ALL CONFIGURATION, READ IN ONE PLACE
+ * ============================================================================
+ *
+ * WHAT THIS FILE DOES
+ * -------------------
+ * Apps need settings that change between environments: the database address
+ * on your laptop is different from the one on Railway, and secret keys must
+ * never be written into the code. These settings are passed in as
+ * ENVIRONMENT VARIABLES — named text values the operating system hands to
+ * the program when it starts (on Railway you set them in the "Variables" tab).
+ *
+ * In Node.js, environment variables are available on `process.env`, e.g.
+ * `process.env.PORT`. Rather than sprinkling `process.env.X` all over the
+ * codebase, this file reads them ONCE, applies sensible defaults, converts
+ * numbers from text to actual numbers, and exports a single `env` object.
+ * Everywhere else just does `import { env } from '../config/env'`.
+ *
+ * WHY THIS MATTERS
+ * ----------------
+ * - One place to see every setting the app understands.
+ * - Missing REQUIRED settings stop the app immediately at startup with a
+ *   clear message ("Missing required environment variable: DATABASE_URL"),
+ *   instead of failing in a confusing way later.
+ *
+ * NOTE: every environment variable is a STRING. That's why numeric settings
+ * go through `parseInt(..., 10)` — the 10 means "read it as base-10 decimal".
+ * ============================================================================
+ */
+
+// `dotenv` lets you keep variables in a local file named `.env` during
+// development (copy .env.example to .env and fill it in). `dotenv.config()`
+// reads that file and copies its values into `process.env`.
+// On Railway there is no .env file — the platform sets the variables itself,
+// and this call simply finds nothing to load. It never overwrites a variable
+// that's already set.
 import dotenv from 'dotenv';
 
 dotenv.config();
 
+// The single, exported settings object. Pattern used for each line:
+//     NAME: process.env.NAME || 'default'
+// `||` means "use the left side if it has a value, otherwise the right side",
+// so the default kicks in whenever the variable is missing or empty.
 export const env = {
+  // 'development' on your laptop, 'production' when deployed. Code can use
+  // this to behave differently (e.g. more verbose errors in development).
   NODE_ENV: process.env.NODE_ENV || 'development',
+
+  // The network port the web server listens on. Railway sets PORT for you.
   PORT: parseInt(process.env.PORT || '3000', 10),
+
+  // Full connection address of the Postgres database, in the form
+  //   postgresql://USER:PASSWORD@HOST:PORT/DATABASE_NAME
+  // REQUIRED — checked at the bottom of this file.
   DATABASE_URL: process.env.DATABASE_URL || '',
+
+  // Secret used to SIGN login tokens (JWTs). Anyone who knows it could forge
+  // a login for any user, so it must be long, random, and never committed.
+  // REQUIRED — checked at the bottom of this file.
   JWT_SECRET: process.env.JWT_SECRET || '',
 
-  // Cloud providers
+  // ---- Cloud providers --------------------------------------------------
+  // Default AWS region: Singapore, the primary region for this project.
   AWS_REGION: process.env.AWS_REGION || 'ap-southeast-1',
   AZURE_SUBSCRIPTION_ID: process.env.AZURE_SUBSCRIPTION_ID || '',
   GCP_PROJECT_ID: process.env.GCP_PROJECT_ID || '',
 
-  // Gaming AMI Configuration
+  // ---- Gaming machine image ---------------------------------------------
+  // An AMI ("Amazon Machine Image") is a saved disk template that new AWS
+  // servers boot from. Ours is built with Packer (infrastructure/packer/)
+  // and has GPU drivers + Sunshine pre-installed, so machines start faster.
+  // The default here is only a placeholder — set your real AMI ID.
   CLOUDGAMING_AMI_ID: process.env.CLOUDGAMING_AMI_ID || 'ami-0c55b159cbfafe1f0',
 
-  // SSH Configuration for CloudyPad setup
+  // ---- SSH settings used by CloudyPadSetup ------------------------------
+  // SSH is a secure remote command line. After launching a Windows gaming
+  // machine, the backend SSHes into it to finish configuring it.
+  // Path to the PRIVATE KEY file that proves who we are to that machine.
   SSH_KEY_PATH: process.env.SSH_KEY_PATH || '/root/.ssh/cloudgaming-key.pem',
+  // Windows' built-in admin account name.
   SSH_USERNAME: process.env.SSH_USERNAME || 'Administrator',
+  // How long to keep trying before giving up (300000 ms = 5 minutes).
   SSH_TIMEOUT_MS: parseInt(process.env.SSH_TIMEOUT_MS || '300000', 10), // 5 minutes
+  // How long to wait between attempts while the machine is still booting.
   SSH_RETRY_DELAY_MS: parseInt(process.env.SSH_RETRY_DELAY_MS || '10000', 10), // 10 seconds
 
-  // Mail
+  // ---- Email (for future alerts; not wired up yet) ----------------------
   MAIL_SERVICE: process.env.MAIL_SERVICE || 'smtp',
   MAIL_FROM: process.env.MAIL_FROM || 'noreply@cloudgaming.dev',
 
-  // Logging
+  // ---- Logging -----------------------------------------------------------
+  // Intended to control how chatty logs are. Currently only printed at
+  // startup; nothing filters log output by it yet.
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
 };
 
-// Validate required env vars
+// ---------------------------------------------------------------------------
+// FAIL FAST on missing required settings.
+// This code runs the moment any file imports env.ts (i.e. at startup).
+// `throw new Error(...)` stops the whole program with that message — which is
+// exactly the "Missing required environment variable: DATABASE_URL" error you
+// saw in the Railway logs before the variable was set.
+// ---------------------------------------------------------------------------
 const requiredEnvs = ['DATABASE_URL', 'JWT_SECRET'];
 for (const key of requiredEnvs) {
+  // `process.env[key]` looks the variable up by the name stored in `key`.
+  // `!value` is true when it's missing (undefined) or an empty string.
   if (!process.env[key]) {
     throw new Error(`Missing required environment variable: ${key}`);
   }

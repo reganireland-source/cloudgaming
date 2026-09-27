@@ -1,18 +1,78 @@
+/**
+ * ============================================================================
+ * src/services/MachineService.ts — THE LIFE CYCLE OF A GAMING MACHINE
+ * ============================================================================
+ *
+ * WHAT A "SERVICE" IS
+ * -------------------
+ * Route files (src/api/routes/) deal with HTTP: reading requests and sending
+ * responses. SERVICES hold the actual business logic — the multi-step
+ * procedures — so they can be reused and read without HTTP noise.
+ * machines.ts (the route) calls these functions.
+ *
+ * WHAT THIS SERVICE DOES
+ * ----------------------
+ *   launchMachine          create a VM at the cloud, set it up, record it
+ *   stopMachine            (optionally snapshot, then) power it off
+ *   startMachine           power it back on
+ *   migrateMachine         move it to another region/cloud via a snapshot
+ *   updateStreamingQuality change the Budget/Good/High/Ultra preset
+ *   deleteMachine          destroy it and forget it
+ *
+ * THE PATTERN YOU'LL SEE REPEATED
+ * -------------------------------
+ *   1. Load the machine row, filtered by BOTH id and user_id (ownership).
+ *   2. Load that user's saved credentials for the machine's cloud.
+ *   3. getProvider(...) -> an object that knows how to talk to that cloud.
+ *   4. Ask the cloud to do the thing.
+ *   5. Update our database to match.
+ *
+ * `static` METHODS
+ * ----------------
+ * Every method is `static`, meaning you call it on the class itself
+ * (MachineService.launchMachine(...)) without creating an object first —
+ * the class is just a tidy namespace for related functions.
+ *
+ * ⚠️  KNOWN ISSUES (worth fixing before real use)
+ * ---------------------------------------------
+ * 1. launchMachine waits for the ENTIRE machine setup (SSH, driver install,
+ *    Sunshine…) before replying — potentially many minutes, during which the
+ *    browser's request just hangs and may time out. The setup should run in
+ *    the background, with the frontend polling /api/setup-status.
+ * 2. The machine's IP address is never saved (there's no ip_address column),
+ *    which breaks streaming details and the quality update below.
+ * 3. REGRESSION: stopMachine creates a snapshot via SnapshotService, but that
+ *    service does not write the new snapshot's id into machines.snapshot_id
+ *    (the older inline code did). migrateMachine relies on that column, so
+ *    migrating a machine that had no snapshot will now fail.
+ * 4. Credentials are read with JSON.parse — they are NOT encrypted.
+ * 5. Several methods read credsResult.rows[0] without checking it exists;
+ *    if the user has deleted their credentials that throws a confusing
+ *    "Cannot read properties of undefined" error.
+ * 6. launchMachine uses a placeholder security group id and a fixed key
+ *    name 'cloudgaming-key' — both must exist in your AWS account.
+ * ============================================================================
+ */
+
 import { query } from '../config/database';
 import { getProvider } from '../providers';
 import { Machine, Snapshot } from '../types';
+// uuid generates random unique ids like "3f1c9e2a-...". `v4 as uuidv4`
+// imports the function named v4 but lets us call it uuidv4 here.
 import { v4 as uuidv4 } from 'uuid';
-import crypto from 'crypto';
+import crypto from 'crypto'; // imported but currently unused (intended for encrypting credentials)
 import { CloudyPadSetup } from '../utils/CloudyPadSetup';
 import { SnapshotService } from './SnapshotService';
 import { env } from '../config/env';
 
-/**
- * MachineService handles machine lifecycle orchestration
- */
 export class MachineService {
   /**
-   * Launch a new gaming machine
+   * Launch a new gaming machine, end to end.
+   *
+   * @param streamingQuality defaults to 'high' if not given (the `= 'high'`)
+   * @returns the new row from the machines table
+   * @throws if the quality is invalid, the user has no credentials for the
+   *         cloud, the credentials are rejected, or the launch fails
    */
   static async launchMachine(
     userId: string,
@@ -22,7 +82,8 @@ export class MachineService {
     gameTitle: string,
     streamingQuality: string = 'high'
   ): Promise<Machine> {
-    // Validate quality
+    // Accept 'High', 'HIGH', 'high' alike by lower-casing first, then check
+    // it's one of the four presets.
     const validQualities = ['budget', 'good', 'high', 'ultra'];
     const normalizedQuality = streamingQuality.toLowerCase();
     if (!validQualities.includes(normalizedQuality)) {
@@ -31,7 +92,7 @@ export class MachineService {
       );
     }
     try {
-      // 1. Get cloud credentials for this provider
+      // 1. This user's saved credentials for the chosen cloud.
       const credsResult = await query(
         'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
         [userId, provider]
@@ -42,33 +103,41 @@ export class MachineService {
       }
 
       const encryptedCreds = credsResult.rows[0].encrypted_data;
+      // The stored text is JSON; parse it back into an object.
       const credentials = JSON.parse(encryptedCreds); // In production, decrypt first
 
-      // 2. Initialize cloud provider
+      // 2. Get the right cloud "driver" (AWSProvider for 'aws', etc.).
       const cloudProvider = getProvider(provider, credentials);
 
-      // 3. Validate credentials
+      // 3. Fail early with a clear message if the credentials don't work,
+      //    rather than halfway through launching.
       const valid = await cloudProvider.validateCredentials();
       if (!valid) {
         throw new Error('Invalid cloud credentials');
       }
 
-      // 4. Launch instance
+      // 4. Ask the cloud to create and boot the machine.
       console.log(`Launching ${instanceType} in ${region}...`);
       const launchResult = await cloudProvider.launchInstance(
         { region, instanceType },
         {
-          imageId: env.CLOUDGAMING_AMI_ID, // From CLOUDGAMING_AMI_ID env var
-          keyName: 'cloudgaming-key',
-          securityGroupId: 'sg-0123456789abcdef0', // TODO: Create security group
-          spotInstance: true,
+          imageId: env.CLOUDGAMING_AMI_ID, // From CLOUDGAMING_AMI_ID env var (our pre-built gaming image)
+          keyName: 'cloudgaming-key',      // must already exist in your AWS account (Known Issue 6)
+          securityGroupId: 'sg-0123456789abcdef0', // TODO: Create security group (placeholder!)
+          spotInstance: true,              // use cheaper spot pricing
         }
       );
 
-      // 5. Run Cloudy Pad setup on the instance
+      // 5. Install/configure the streaming software over SSH.
+      //    This can take many minutes (Known Issue 1). Errors inside it are
+      //    swallowed — see setupSunshine() — so a failed setup doesn't
+      //    cancel the launch.
       await this.setupSunshine(launchResult.ipAddress, region, streamingQuality);
 
-      // 6. Save machine to database
+      // 6. Record the new machine in our database.
+      //    NOW() = the database's current time. RETURNING * gives back the
+      //    saved row so we can return it without a second query.
+      //    Note: launchResult.ipAddress is NOT saved (Known Issue 2).
       const machineId = uuidv4();
       const insertResult = await query(
         `INSERT INTO machines (
@@ -91,13 +160,17 @@ export class MachineService {
 
       return insertResult.rows[0];
     } catch (error) {
+      // Log here (so it appears in Railway logs with context), then re-throw
+      // so the route can send the user an error response.
       console.error('Launch machine error:', error);
       throw error;
     }
   }
 
   /**
-   * Stop a machine (creates snapshot if requested)
+   * Power a machine off, optionally taking a snapshot first.
+   *
+   * @param snapshot true (default) = back up the games disk before stopping
    */
   static async stopMachine(
     machineId: string,
@@ -105,7 +178,7 @@ export class MachineService {
     snapshot: boolean = true
   ): Promise<void> {
     try {
-      // 1. Get machine info
+      // 1. Load the machine (ownership enforced by the user_id filter).
       const machineResult = await query(
         'SELECT * FROM machines WHERE id = $1 AND user_id = $2',
         [machineId, userId]
@@ -117,7 +190,10 @@ export class MachineService {
 
       const machine = machineResult.rows[0];
 
-      // 2. Create snapshot if requested
+      // 2. Snapshot first, if asked. Wrapped in its OWN try/catch so that a
+      //    failed snapshot is logged but doesn't prevent the stop — stopping
+      //    matters more, because a running machine keeps costing money.
+      //    ⚠️ See Known Issue 3: the snapshot id isn't saved on the machine.
       if (snapshot) {
         try {
           console.log('Creating game library snapshot...');
@@ -135,7 +211,7 @@ export class MachineService {
         }
       }
 
-      // 3. Get cloud provider and stop instance
+      // 3. Ask the cloud to power it off.
       const credsResult = await query(
         'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
         [userId, machine.provider]
@@ -146,7 +222,7 @@ export class MachineService {
 
       await cloudProvider.stopInstance(machine.instance_id);
 
-      // 5. Update machine status
+      // 4. Record the new state.
       await query(
         'UPDATE machines SET status = $1 WHERE id = $2',
         ['stopped', machineId]
@@ -158,7 +234,7 @@ export class MachineService {
   }
 
   /**
-   * Start a stopped machine
+   * Power a stopped machine back on, and note when it was started.
    */
   static async startMachine(machineId: string, userId: string): Promise<void> {
     try {
@@ -194,7 +270,15 @@ export class MachineService {
   }
 
   /**
-   * Migrate machine to a different region/provider
+   * Move a machine to another region or cloud.
+   *
+   * The idea: you can't "move" a VM, but you can copy its DISK. So:
+   *   snapshot the disk -> restore the snapshot as a new machine in the
+   *   target location -> record the new machine -> destroy the old one.
+   *
+   * ⚠️ Depends on machines.snapshot_id being set (Known Issue 3) and on
+   *    restoreFromSnapshot, which is incomplete for AWS and unimplemented
+   *    elsewhere — so migration doesn't work end-to-end yet.
    */
   static async migrateMachine(
     machineId: string,
@@ -203,7 +287,7 @@ export class MachineService {
     targetRegion: string
   ): Promise<Machine> {
     try {
-      // 1. Get current machine
+      // 1. The machine being moved.
       const currentMachineResult = await query(
         'SELECT * FROM machines WHERE id = $1 AND user_id = $2',
         [machineId, userId]
@@ -211,7 +295,9 @@ export class MachineService {
 
       const currentMachine = currentMachineResult.rows[0];
 
-      // 2. Get or create snapshot
+      // 2. Reuse the machine's latest snapshot if it has one; otherwise stop
+      //    it (which snapshots it) and re-read the machine to pick up the
+      //    snapshot id. `let` because snapshotId may be reassigned.
       let snapshotId = currentMachine.snapshot_id;
       if (!snapshotId) {
         await this.stopMachine(machineId, userId, true);
@@ -219,10 +305,10 @@ export class MachineService {
           'SELECT snapshot_id FROM machines WHERE id = $1',
           [machineId]
         );
-        snapshotId = updatedMachine.rows[0].snapshot_id;
+        snapshotId = updatedMachine.rows[0].snapshot_id; // ⚠️ still null — Known Issue 3
       }
 
-      // 3. Get snapshot details
+      // 3. The snapshot's details (we need the CLOUD's id for it).
       const snapshotResult = await query(
         'SELECT * FROM snapshots WHERE id = $1',
         [snapshotId]
@@ -230,7 +316,7 @@ export class MachineService {
 
       const snapshot = snapshotResult.rows[0];
 
-      // 4. Get target cloud credentials
+      // 4. Credentials for the DESTINATION cloud.
       const targetCredsResult = await query(
         'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
         [userId, targetProvider]
@@ -243,14 +329,14 @@ export class MachineService {
       const targetCredentials = JSON.parse(targetCredsResult.rows[0].encrypted_data);
       const targetCloudProvider = getProvider(targetProvider, targetCredentials);
 
-      // 5. Restore snapshot in target region
+      // 5. Create the new machine from the snapshot.
       console.log(`Restoring snapshot to ${targetProvider} ${targetRegion}...`);
       const restoreResult = await targetCloudProvider.restoreFromSnapshot(
         snapshot.snapshot_provider_id,
         { region: targetRegion, instanceType: currentMachine.instance_type }
       );
 
-      // 6. Create new machine record
+      // 6. Record the new machine (a fresh id; the old record is removed below).
       const newMachineId = uuidv4();
       const insertResult = await query(
         `INSERT INTO machines (
@@ -266,12 +352,12 @@ export class MachineService {
           currentMachine.instance_type,
           restoreResult.instanceId,
           'running',
-          currentMachine.cost_per_hour,
+          currentMachine.cost_per_hour, // copied from the old machine; the new region's price may differ
           snapshotId,
         ]
       );
 
-      // 7. Terminate old machine
+      // 7. Destroy the old machine at its (source) cloud.
       const sourceCredsResult = await query(
         'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
         [userId, currentMachine.provider]
@@ -281,7 +367,7 @@ export class MachineService {
       const sourceCloudProvider = getProvider(currentMachine.provider, sourceCredentials);
       await sourceCloudProvider.terminateInstance(currentMachine.instance_id);
 
-      // 8. Delete old machine record
+      // 8. Remove the old machine's record.
       await query('DELETE FROM machines WHERE id = $1', [machineId]);
 
       return insertResult.rows[0];
@@ -292,7 +378,9 @@ export class MachineService {
   }
 
   /**
-   * Update streaming quality for a machine
+   * Change a machine's streaming quality preset, and keep an audit trail.
+   * If the machine is running, also tries to push the new settings to its
+   * streaming software straight away.
    */
   static async updateStreamingQuality(
     machineId: string,
@@ -300,7 +388,6 @@ export class MachineService {
     newQuality: string
   ): Promise<Machine> {
     try {
-      // Validate quality
       const validQualities = ['budget', 'good', 'high', 'ultra'];
       const normalizedQuality = newQuality.toLowerCase();
       if (!validQualities.includes(normalizedQuality)) {
@@ -309,7 +396,8 @@ export class MachineService {
         );
       }
 
-      // Get current machine to verify ownership and get old quality
+      // Load the machine: confirms ownership and tells us the OLD quality
+      // (for the audit record).
       const machineResult = await query(
         'SELECT * FROM machines WHERE id = $1 AND user_id = $2',
         [machineId, userId]
@@ -322,7 +410,8 @@ export class MachineService {
       const machine = machineResult.rows[0];
       const oldQuality = machine.streaming_quality || 'high';
 
-      // If machine is running, apply quality changes via SSH
+      // If it's running, reconfigure Sunshine over SSH. Best-effort: failures
+      // are logged but don't stop the database update.
       if (machine.status === 'running') {
         try {
           const credsResult = await query(
@@ -331,16 +420,21 @@ export class MachineService {
           );
 
           const credentials = JSON.parse(credsResult.rows[0].encrypted_data);
+          // Created but not actually used below.
           const cloudProvider = getProvider(machine.provider, credentials);
 
-          // Update quality configuration on the instance
+          // ⚠️ machine.ip_address is always undefined (Known Issue 2), so this
+          // SSH attempt can't reach the machine yet.
           const setup = new CloudyPadSetup(
             machine.ip_address,
             normalizedQuality,
             machine.region
           );
 
-          // Call configureSunshine to apply new quality settings
+          // configureSunshine is marked `private` in CloudyPadSetup;
+          // `(setup as any)` bypasses TypeScript's access check to call it.
+          // It works at runtime, but it's a shortcut — making the method
+          // public would be cleaner.
           await (setup as any).configureSunshine();
           console.log(
             `[MachineService] Updated streaming quality to ${normalizedQuality} on ${machineId}`
@@ -351,13 +445,13 @@ export class MachineService {
         }
       }
 
-      // Update machine record
+      // Save the new preset.
       const updateResult = await query(
         'UPDATE machines SET streaming_quality = $1 WHERE id = $2 RETURNING *',
         [normalizedQuality, machineId]
       );
 
-      // Track quality change
+      // Audit trail: who changed what, from what, to what, and why.
       await query(
         `INSERT INTO quality_updates (machine_id, user_id, old_quality, new_quality, reason)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -382,7 +476,10 @@ export class MachineService {
   }
 
   /**
-   * Delete/terminate a machine
+   * Destroy a machine at the cloud, then delete it (and its snapshot
+   * records) from our database.
+   * Note: this deletes our snapshot RECORDS but not the snapshots stored at
+   * the cloud provider — those keep costing money until deleted there.
    */
   static async deleteMachine(machineId: string, userId: string): Promise<void> {
     try {
@@ -405,12 +502,12 @@ export class MachineService {
       const credentials = JSON.parse(credsResult.rows[0].encrypted_data);
       const cloudProvider = getProvider(machine.provider, credentials);
 
+      // Destroy at the cloud FIRST: if that fails, we keep our record so the
+      // machine isn't forgotten while still running (and billing).
       await cloudProvider.terminateInstance(machine.instance_id);
 
-      // Delete snapshots associated with this machine
       await query('DELETE FROM snapshots WHERE machine_id = $1', [machineId]);
 
-      // Delete machine
       await query('DELETE FROM machines WHERE id = $1', [machineId]);
     } catch (error) {
       console.error('Delete machine error:', error);
@@ -419,8 +516,15 @@ export class MachineService {
   }
 
   /**
-   * Setup Sunshine streaming server via CloudyPad
-   * Uses SSH to configure streaming on remote Windows instance
+   * Install and configure the streaming stack on a fresh machine using
+   * CloudyPadSetup (src/utils/CloudyPadSetup.ts), which connects over SSH.
+   *
+   * Deliberately NEVER throws: if setup fails, the machine still exists and
+   * is recorded, and the user can troubleshoot or retry. Swallowing the
+   * error here is a conscious choice — just be aware that a "successful"
+   * launch can therefore have a machine without working streaming.
+   * Note: no progress callback is passed to CloudyPadSetup, so nothing is
+   * written to setup_status for the frontend's progress bar yet.
    */
   private static async setupSunshine(
     ipAddress: string,
@@ -430,10 +534,10 @@ export class MachineService {
     try {
       console.log(`Setting up Sunshine on ${ipAddress}...`);
 
-      // Initialize CloudyPad setup orchestrator
       const setup = new CloudyPadSetup(ipAddress, quality, region);
 
-      // Run full setup pipeline (drivers, CloudyPad, Sunshine, gaming clients)
+      // Runs every stage in order: wait for SSH, GPU drivers, CloudyPad,
+      // Sunshine config, game launchers, start the service.
       const result = await setup.setup();
 
       console.log(`Sunshine setup complete: ${result.sunshineUrl}`);

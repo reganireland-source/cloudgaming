@@ -1,3 +1,28 @@
+/**
+ * ============================================================================
+ * src/api/routes/costs.ts — HOW MUCH HAVE I SPENT, AND WHERE IS IT HEADING?
+ * ============================================================================
+ *
+ * Mounted at /api/costs (login required). Reads the `costs` table, which
+ * holds one row per machine per day, split into three kinds of cost:
+ *   compute_cost  — paying for the machine to be switched on
+ *   egress_cost   — paying for data leaving the cloud (mostly the video stream)
+ *   storage_cost  — paying for disks and snapshots
+ * (Rows are written by the background job in src/jobs/SyncCosts.ts.)
+ *
+ *   GET  /api/costs/monthly    this month's totals per provider
+ *   GET  /api/costs/daily      a day-by-day history (for charts)
+ *   GET  /api/costs/forecast   projected end-of-month spend
+ *   POST /api/costs/budget     set a budget cap and alert threshold
+ *
+ * SQL TOOLS USED BELOW
+ *   SUM(x)           add up a column across rows
+ *   COALESCE(a, 0)   use a, but 0 if a is empty (SUM of zero rows is NULL)
+ *   GROUP BY p       produce one result row per distinct value of p
+ *   ... AS name      give a computed column a name to read it by
+ * ============================================================================
+ */
+
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 
@@ -5,12 +30,15 @@ const router = Router();
 
 /**
  * GET /api/costs/monthly
- * Get cost breakdown for current month
+ * Spend since the 1st of the current month, broken down by cloud provider.
  */
 router.get('/monthly', async (req: Request, res: Response) => {
   try {
     const userId = req.userId;
     const now = new Date();
+
+    // Midnight on the 1st of this month. JavaScript months are ZERO-based
+    // (January = 0), and getMonth() returns the same scheme, so this works.
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const result = await query(
@@ -27,6 +55,10 @@ router.get('/monthly', async (req: Request, res: Response) => {
       [userId, monthStart]
     );
 
+    // Add up all providers into one grand total.
+    // `reduce` walks the array carrying a running total (`sum`), starting at 0.
+    // Postgres returns DECIMAL columns as TEXT (to avoid rounding errors),
+    // hence parseFloat() to turn "12.34" into the number 12.34.
     const total = result.rows.reduce((sum: number, row: any) => {
       return sum + parseFloat(row.compute) + parseFloat(row.egress) + parseFloat(row.storage);
     }, 0);
@@ -43,8 +75,9 @@ router.get('/monthly', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/costs/daily
- * Get cost history by day
+ * GET /api/costs/daily?days=N
+ * One row per day for the last N days (default 30) — the data for the
+ * "daily trend" chart on the Costs page.
  */
 router.get('/daily', async (req: Request, res: Response) => {
   try {
@@ -52,6 +85,8 @@ router.get('/daily', async (req: Request, res: Response) => {
     const daysParam = req.query.days || '30';
     const days = parseInt(daysParam as string, 10);
 
+    // "N days ago": take today and subtract N days. setDate handles
+    // month/year boundaries automatically (e.g. 3 days before March 1st).
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
@@ -81,13 +116,17 @@ router.get('/daily', async (req: Request, res: Response) => {
 
 /**
  * GET /api/costs/forecast
- * Forecast end-of-month spend based on current usage
+ * A simple straight-line projection:
+ *   average per day so far  ×  number of days in the month
  */
 router.get('/forecast', async (req: Request, res: Response) => {
   try {
     const userId = req.userId;
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // Trick for "how many days are in this month": day 0 of NEXT month is
+    // the last day of THIS month, and its date number is the day count.
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const daysElapsed = now.getDate();
 
@@ -100,6 +139,8 @@ router.get('/forecast', async (req: Request, res: Response) => {
     );
 
     const totalSoFar = parseFloat(result.rows[0].total_so_far) || 0;
+
+    // Math.max(daysElapsed, 1) guards against dividing by zero.
     const dailyAverage = totalSoFar / Math.max(daysElapsed, 1);
     const projectedTotal = dailyAverage * daysInMonth;
 
@@ -118,13 +159,15 @@ router.get('/forecast', async (req: Request, res: Response) => {
 
 /**
  * POST /api/costs/budget
- * Set budget cap and alert threshold
+ * Save a monthly budget cap and the % at which to warn.
+ * Request body: { "budgetCap": 150, "alertThreshold": 80 }
  */
 router.post('/budget', async (req: Request, res: Response) => {
   try {
     const userId = req.userId;
     const { budgetCap, alertThreshold } = req.body;
 
+    // `=== undefined` (rather than `!value`) so that a legitimate 0 is allowed.
     if (budgetCap === undefined || alertThreshold === undefined) {
       return res.status(400).json({ error: 'Missing budget or alert threshold' });
     }
@@ -137,6 +180,7 @@ router.post('/budget', async (req: Request, res: Response) => {
       [budgetCap, alertThreshold, userId]
     );
 
+    // UPDATE matched no rows -> that user doesn't exist.
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }

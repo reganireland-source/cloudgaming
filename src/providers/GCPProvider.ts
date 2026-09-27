@@ -2,11 +2,43 @@ import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Pr
 import { RegionData } from '../types';
 
 /**
- * Google Cloud Platform Provider implementation
+ * ============================================================================
+ * src/providers/GCPProvider.ts — GOOGLE CLOUD (GCP) (PLACEHOLDER, NOT YET IMPLEMENTED)
+ * ============================================================================
+ *
+ * WHAT THIS IS
+ * ------------
+ * The GCP version of the CloudProvider contract defined in Provider.ts.
+ * It exists so the rest of the app can already treat GCP as a supported
+ * cloud (it appears in menus, cost comparisons and the status lights), but
+ * the actual cloud operations are NOT built yet.
+ *
+ * CURRENT BEHAVIOUR
+ * -----------------
+ * Almost every method immediately does `throw new Error('Not implemented')`.
+ * Anything that tries to launch/stop/snapshot a GCP machine will fail
+ * with that error. The only working method is getEgressCostPerGb(), which
+ * returns a typical published price.
+ *
+ * Each method has an explicit return type (e.g. Promise<{ instanceId: ... }>)
+ * even though it only throws. That's required: without it TypeScript infers
+ * the wrong return type and complains the class doesn't match the contract.
+ *
+ * HOW TO IMPLEMENT IT LATER
+ * -------------------------
+ * Use AWSProvider.ts as the worked example. For GCP you'd use
+ * @google-cloud/compute, create the SDK client in the constructor from
+ * `credentials`, and fill in each method — e.g. launchInstance would create
+ * N1 machines with attached NVIDIA GPUs, and createSnapshot would use persistent-disk snapshots. What every method must do
+ * is described next to its declaration in Provider.ts.
+ * ============================================================================
  */
 export class GCPProvider extends CloudProvider {
   name = 'gcp' as const;
 
+  // `credentials` = this user's saved login details for the cloud.
+  // `super()` runs the parent class's constructor — required first thing
+  // in a subclass constructor.
   constructor(credentials: any) {
     super();
     // Initialize GCP SDK

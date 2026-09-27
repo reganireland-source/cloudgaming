@@ -1,3 +1,27 @@
+/**
+ * ============================================================================
+ * src/api/routes/snapshots.ts — DISK BACKUPS YOU CAN CARRY BETWEEN CLOUDS
+ * ============================================================================
+ *
+ * A SNAPSHOT is a saved copy of a machine's disk — with all your installed
+ * games on it. Why it matters for cost:
+ *   - A running GPU machine costs ~50c/hour. A stored snapshot costs a few
+ *     cents per GB per MONTH. So: play, snapshot, delete the machine, and
+ *     restore later, instead of paying for a machine you're not using.
+ *   - Snapshots can be copied ("replicated") to other regions so you can
+ *     restore close to wherever you're playing from.
+ *
+ * Mounted at /api/snapshots (login required):
+ *   POST   /api/snapshots                          create a snapshot of a machine
+ *   GET    /api/snapshots                          list my snapshots (+ monthly cost)
+ *   GET    /api/snapshots/:snapshotId              one snapshot's details
+ *   POST   /api/snapshots/:snapshotId/replicate    copy it to another region/cloud
+ *   DELETE /api/snapshots/:snapshotId              delete it everywhere
+ *
+ * All real work is in src/services/SnapshotService.ts.
+ * ============================================================================
+ */
+
 import { Router, Request, Response } from 'express';
 import { SnapshotService } from '../../services/SnapshotService';
 
@@ -5,7 +29,8 @@ const router = Router();
 
 /**
  * POST /api/snapshots
- * Create snapshot of running machine game library
+ * Body: { machineId, paths?, description? }
+ * `paths` = which folders to back up; defaults to the games folder.
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -16,6 +41,8 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'machineId is required' });
     }
 
+    // Arguments passed as one object ({ ... }) rather than a long list, so
+    // each value is clearly labelled at the call site.
     const snapshot = await SnapshotService.createSnapshot({
       machineId,
       userId,
@@ -32,7 +59,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 /**
  * GET /api/snapshots
- * List all snapshots for user with cost breakdown
+ * Every snapshot I own, each with its estimated monthly storage cost.
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -47,7 +74,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * GET /api/snapshots/:snapshotId
- * Get snapshot metadata including replicas and cost
+ * One snapshot, including every region/cloud it has been copied to.
  */
 router.get('/:snapshotId', async (req: Request, res: Response) => {
   try {
@@ -64,7 +91,9 @@ router.get('/:snapshotId', async (req: Request, res: Response) => {
 
 /**
  * POST /api/snapshots/:snapshotId/replicate
- * Replicate snapshot to another provider/region
+ * Copy a snapshot to another region (and, in future, another cloud).
+ * Body: { "targetProvider": "aws", "targetRegion": "us-east-1" }
+ * NOTE: today only AWS -> AWS copies work; other clouds reply "not implemented".
  */
 router.post(
   '/:snapshotId/replicate',
@@ -99,7 +128,7 @@ router.post(
 
 /**
  * DELETE /api/snapshots/:snapshotId
- * Delete snapshot and all replicas
+ * Delete the snapshot and every copy of it, in every cloud. Irreversible.
  */
 router.delete('/:snapshotId', async (req: Request, res: Response) => {
   try {
