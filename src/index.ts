@@ -14,6 +14,7 @@ import performanceRoutes from './api/routes/performance';
 import streamingRoutes from './api/routes/streaming';
 import setupStatusRoutes from './api/routes/setup-status';
 import snapshotRoutes from './api/routes/snapshots';
+import costAnalysisRoutes from './api/routes/cost-analysis';
 
 // Middleware
 import { authMiddleware } from './api/middleware/auth';
@@ -57,6 +58,7 @@ app.use('/api/performance', authMiddleware, performanceRoutes);
 app.use('/api/streaming', streamingRoutes);
 app.use('/api/setup-status', authMiddleware, setupStatusRoutes);
 app.use('/api/snapshots', authMiddleware, snapshotRoutes);
+app.use('/api/cost-analysis', authMiddleware, costAnalysisRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
