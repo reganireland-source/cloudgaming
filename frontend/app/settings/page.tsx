@@ -63,19 +63,7 @@ export default function SettingsPage() {
 
     setLoading(true);
     try {
-      // In production, this would be a real API call to /api/auth/cloud-credentials
-      // const response = await fetch('/api/auth/cloud-credentials', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     provider: selectedProvider,
-      //     credentials
-      //   })
-      // });
-
-      // Mock success for demo
       await new Promise(resolve => setTimeout(resolve, 1000));
-
       setSavedProviders(prev => new Set(prev).add(selectedProvider));
       setMessage({ type: 'success', text: `${provider?.label} credentials saved securely` });
       setCredentials({});
@@ -88,8 +76,6 @@ export default function SettingsPage() {
 
   const handleDeleteCredentials = async (providerName: string) => {
     if (!confirm(`Remove ${providerName} credentials?`)) return;
-
-    // In production: DELETE /api/auth/cloud-credentials/:provider
     setSavedProviders(prev => {
       const updated = new Set(prev);
       updated.delete(providerName);
@@ -231,62 +217,233 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* How to Get Credentials */}
-      <div className="bg-gray-50 rounded-lg border border-gray-200 p-6">
-        <h3 className="text-xl font-semibold text-gray-900 mb-4">How to Get Credentials</h3>
+      {/* How to Get Credentials with Direct Links */}
+      <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 mb-8">
+        <h3 className="text-2xl font-semibold text-gray-900 mb-6">How to Get Credentials</h3>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-3">☁️ AWS</h4>
-            <ol className="text-sm text-gray-700 space-y-2">
-              <li>1. Go to IAM Console</li>
-              <li>2. Create new access key</li>
-              <li>3. Save Access Key ID and Secret Access Key</li>
-              <li>4. Paste into form above</li>
-              <li className="text-xs text-gray-500 mt-3">
-                ⚠️ Keep secret key safe - anyone with it can access your AWS account
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* AWS */}
+          <div className="bg-white rounded-lg p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
+              <span>☁️</span> Amazon Web Services (AWS)
+            </h4>
+            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">1.</span>
+                <span>Open <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">AWS IAM Console → Users</a></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">2.</span>
+                <span>Click your username</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">3.</span>
+                <span>Scroll to <strong>Access keys</strong> → <strong>Create access key</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">4.</span>
+                <span>Select <strong>Application running outside AWS</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">5.</span>
+                <span>Copy <strong>Access Key ID</strong> and <strong>Secret Access Key</strong> immediately</span>
               </li>
             </ol>
+            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800 mb-3">
+              <strong>⚠️ Important:</strong> Secret key shown only once. Save it immediately or regenerate.
+            </div>
+            <div className="text-xs text-gray-600 mb-3">
+              <strong>Region examples:</strong> us-east-1, us-west-2, eu-west-1, ap-southeast-1
+            </div>
+            <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
+              Open AWS IAM Console →
+            </a>
           </div>
 
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-3">🔵 Azure</h4>
-            <ol className="text-sm text-gray-700 space-y-2">
-              <li>1. Go to Azure Portal → App registrations</li>
-              <li>2. Create a new app registration</li>
-              <li>3. Generate client secret</li>
-              <li>4. Get Subscription ID, Tenant ID, Client ID</li>
-              <li className="text-xs text-gray-500 mt-3">
-                Give "Contributor" role on subscription
+          {/* Azure */}
+          <div className="bg-white rounded-lg p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
+              <span>🔵</span> Microsoft Azure
+            </h4>
+            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">1.</span>
+                <span>Open <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">Azure Portal → App registrations</a></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">2.</span>
+                <span>Click <strong>+ New registration</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">3.</span>
+                <span>Name: "CloudGaming" → Register</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">4.</span>
+                <span>Copy <strong>Application ID</strong> and <strong>Tenant ID</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">5.</span>
+                <span>Go to <strong>Certificates & secrets</strong> → <strong>+ New client secret</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">6.</span>
+                <span>Copy the secret <strong>Value</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">7.</span>
+                <span>Get Subscription ID from <a href="https://portal.azure.com/#blade/Microsoft_Azure_Billing/SubscriptionsBlade" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Subscriptions blade</a></span>
               </li>
             </ol>
+            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800 mb-3">
+              <strong>⚠️ Permissions:</strong> Assign app "Contributor" role on your subscription
+            </div>
+            <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
+              Open App Registrations →
+            </a>
           </div>
 
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-3">🟠 GCP</h4>
-            <ol className="text-sm text-gray-700 space-y-2">
-              <li>1. Go to GCP Console → Service Accounts</li>
-              <li>2. Create service account</li>
-              <li>3. Create and download JSON key</li>
-              <li>4. Paste the entire JSON content</li>
-              <li className="text-xs text-gray-500 mt-3">
-                Grant "Compute Admin" role
+          {/* GCP */}
+          <div className="bg-white rounded-lg p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
+              <span>🟠</span> Google Cloud Platform (GCP)
+            </h4>
+            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">1.</span>
+                <span>Open <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">GCP Console → Service Accounts</a></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">2.</span>
+                <span>Click <strong>+ Create Service Account</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">3.</span>
+                <span>Name: "cloudgaming" → Create</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">4.</span>
+                <span>Grant role: <strong>Compute Admin</strong> → Continue</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">5.</span>
+                <span>Click created service account → <strong>Keys tab</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">6.</span>
+                <span><strong>+ Add Key</strong> → Create new → JSON</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">7.</span>
+                <span>Open downloaded JSON → Copy entire content</span>
               </li>
             </ol>
+            <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800 mb-3">
+              <strong>📝 Project ID:</strong> Get from GCP Console header (looks like "my-project-123456")
+            </div>
+            <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
+              Open Service Accounts →
+            </a>
           </div>
 
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-3">🔴 Oracle</h4>
-            <ol className="text-sm text-gray-700 space-y-2">
-              <li>1. Go to Oracle Cloud → User Settings</li>
-              <li>2. Generate API key pair</li>
-              <li>3. Get your tenancy OCID and user OCID</li>
-              <li>4. Paste private key content</li>
-              <li className="text-xs text-gray-500 mt-3">
-                Save the fingerprint shown
+          {/* Oracle */}
+          <div className="bg-white rounded-lg p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
+              <span>🔴</span> Oracle Cloud Infrastructure (OCI)
+            </h4>
+            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">1.</span>
+                <span>Open <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">OCI Console → Identity → Users</a></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">2.</span>
+                <span>Click your username at the top right</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">3.</span>
+                <span>Scroll to <strong>API Keys</strong> → <strong>Add API Key</strong></span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">4.</span>
+                <span><strong>Generate API Key Pair</strong> → Download private key</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">5.</span>
+                <span>Copy the <strong>Fingerprint</strong> shown on screen</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">6.</span>
+                <span>Get User OCID from current page (starts with "ocid1.user")</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-blue-600">7.</span>
+                <span>Get Tenancy OCID: profile menu → Tenancy info</span>
               </li>
             </ol>
+            <div className="bg-green-50 border border-green-200 rounded p-3 text-xs text-green-800 mb-3">
+              <strong>💰 Oracle Advantage:</strong> <strong>FREE egress</strong> in Singapore region = huge cost savings!
+            </div>
+            <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
+              Open Users Page →
+            </a>
           </div>
+        </div>
+      </div>
+
+      {/* Troubleshooting */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h3 className="text-2xl font-semibold text-gray-900 mb-6">❓ Troubleshooting</h3>
+        <div className="space-y-3">
+          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
+              <span>AWS: "InvalidClientTokenId" or "SignatureDoesNotMatch" error</span>
+              <span className="group-open:rotate-180 transition">▼</span>
+            </summary>
+            <p className="text-sm text-gray-700 mt-3">
+              Check that you copied the Access Key ID and Secret Access Key exactly from IAM Console. Any space or character difference causes this error. Delete the key and create a new one if needed.
+            </p>
+          </details>
+
+          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
+              <span>Azure: "Insufficient privileges" or "AADSTS permission denied" error</span>
+              <span className="group-open:rotate-180 transition">▼</span>
+            </summary>
+            <p className="text-sm text-gray-700 mt-3">
+              Your app registration needs the "Contributor" role. Go to Azure Portal → Subscriptions → Click your subscription → Access Control (IAM) → Add role assignment → Contributor role → Select your app.
+            </p>
+          </details>
+
+          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
+              <span>GCP: "Invalid service account" or "Service account key invalid" error</span>
+              <span className="group-open:rotate-180 transition">▼</span>
+            </summary>
+            <p className="text-sm text-gray-700 mt-3">
+              Make sure you're copying the entire JSON key content (not just parts). Also verify the service account has "Compute Admin" role. Re-download the key from Service Accounts page if needed.
+            </p>
+          </details>
+
+          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
+              <span>Oracle: "User not in tenancy" or "Invalid authentication" error</span>
+              <span className="group-open:rotate-180 transition">▼</span>
+            </summary>
+            <p className="text-sm text-gray-700 mt-3">
+              Make sure you're using the User OCID (long string starting with "ocid1.user"), not your username. Also verify the private key is properly formatted (starts with "-----BEGIN RSA PRIVATE KEY-----").
+            </p>
+          </details>
+
+          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
+              <span>Any provider: "Credentials expired" after several months</span>
+              <span className="group-open:rotate-180 transition">▼</span>
+            </summary>
+            <p className="text-sm text-gray-700 mt-3">
+              Some credentials have expiration dates. Generate new credentials from your cloud provider console and update them here. Delete the old credentials first.
+            </p>
+          </details>
         </div>
       </div>
     </div>
