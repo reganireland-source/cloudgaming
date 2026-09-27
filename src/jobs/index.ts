@@ -24,14 +24,17 @@
  * `.catch(err => ...)` on each job: jobs are async; if one throws, we log
  * the error instead of letting an unhandled failure crash the server.
  *
- * ⚠️  THESE JOBS RUN IN PRODUCTION AS SOON AS YOU DEPLOY — READ THIS
- * ------------------------------------------------------------------
- * - checkIdleJob marks machines 'stopped' in OUR database after ~15 minutes
- *   WITHOUT stopping them at the cloud provider. They keep running and
- *   BILLING while the app shows them as stopped. See SyncCosts.ts.
- * - syncCostsJob writes RANDOM, made-up costs every hour.
- * - collectPerformanceMetricsJob writes RANDOM, made-up metrics every minute.
- * Consider disabling the idle job until it actually stops instances.
+ * WHAT RUNS IN PRODUCTION
+ * -----------------------
+ * - syncCostsJob (hourly): records each machine's ESTIMATED cost for the
+ *   hour — compute while running, disk storage while it exists.
+ * - checkIdleJob (every 5 min): despite its name, reconciles every machine's
+ *   status/IP with what its cloud reports (idle shutdown happens ON the
+ *   machine itself — see providers/shared/setupScript.ts auto-stop).
+ * - budgetAlertJob (daily): logs users over their budget threshold.
+ * - collectPerformanceMetricsJob is NOT scheduled: it only invented random
+ *   numbers, which would be misleading on the Performance page. Re-enable
+ *   it once it reads real metrics (cloud monitoring or an on-machine agent).
  * ============================================================================
  */
 
@@ -62,9 +65,9 @@ export function initializeJobs() {
   });
 
   // Collect performance metrics every minute (⚠️ currently writes mock data)
-  cron.schedule('* * * * *', () => {
-    collectPerformanceMetricsJob().catch(err => console.error('Performance collection job error:', err));
-  });
+  // Performance metrics: disabled — collectPerformanceMetricsJob only makes
+  // up random numbers (see src/jobs/CollectPerformance.ts).
+  void collectPerformanceMetricsJob;
 
   console.log('Background jobs initialized');
 }

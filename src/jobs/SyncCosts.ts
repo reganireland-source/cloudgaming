@@ -37,7 +37,7 @@ export async function syncCostsJob() {
   try {
     // Get all active machines
     const machinesResult = await query(
-      `SELECT DISTINCT user_id, provider FROM machines WHERE status = 'running'`
+      `SELECT DISTINCT user_id, provider FROM machines WHERE status IN ('running', 'stopped')`
     );
 
     // A Map is a key -> value collection. Only the KEYS matter here (a
@@ -89,7 +89,9 @@ async function syncCostsForUserProvider(userId: string, provider: string) {
   const catalog = CATALOGS[provider];
 
   const machinesResult = await query(
-    `SELECT id, cost_per_hour, disk_size_gb FROM machines WHERE user_id = $1 AND provider = $2 AND status = 'running'`,
+    // Stopped machines too: their disk is still billed.
+    `SELECT id, status, cost_per_hour, disk_size_gb FROM machines
+     WHERE user_id = $1 AND provider = $2 AND status IN ('running', 'stopped')`,
     [userId, provider]
   );
 
@@ -97,7 +99,7 @@ async function syncCostsForUserProvider(userId: string, provider: string) {
     await CostService.recordCosts(userId, {
       machineId: machine.id,
       provider,
-      computeCost: Number(machine.cost_per_hour) || 0,
+      computeCost: machine.status === 'running' ? Number(machine.cost_per_hour) || 0 : 0,
       egressCost: 0,
       storageCost: ((Number(machine.disk_size_gb) || catalog.defaultDiskGb) * catalog.diskPerGbMonth) / 730,
     });

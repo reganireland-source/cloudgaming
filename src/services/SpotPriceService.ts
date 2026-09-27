@@ -160,3 +160,14 @@ export async function getSpotInfo(provider: ProviderName, regionId: string, shap
 export function prewarmSpotPrices(): void {
   loadAwsAdvisor().catch(() => undefined);
 }
+
+/**
+ * For the pre-flight check: can we reach the live spot sources right now?
+ * (Forces a fresh fetch of the AWS feed if the cached copy is stale.)
+ */
+export async function spotFeedStatus(): Promise<{ aws: { ok: boolean; ageMinutes: number | null }; azure: { ok: boolean } }> {
+  const data = await loadAwsAdvisor().catch(() => undefined);
+  const aws = { ok: !!data, ageMinutes: data ? Math.round((Date.now() - awsAdvisor.at) / 60000) : null };
+  const az = await azurePrices('Standard_NC4as_T4_v3', 'eastus');
+  return { aws, azure: { ok: !!(az.spot && az.onDemand) } };
+}

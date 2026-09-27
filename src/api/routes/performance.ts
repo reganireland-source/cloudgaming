@@ -18,15 +18,27 @@
  * work, and sends back the result. Keeping business logic in "services"
  * and HTTP handling in "routes" makes each easier to read and test.
  *
- * NOTE: these routes don't check that the machine belongs to the logged-in
- * user, so any logged-in user could read any machine's metrics by id.
+ * Every route first checks the machine belongs to the signed-in user
+ * (router.param below); anyone else gets 404.
  * ============================================================================
  */
 
+import { query } from '../../config/database';
 import { Router, Request, Response } from 'express';
 import { PerformanceService } from '../../services/PerformanceService';
 
 const router = Router();
+
+// Runs before any route with :machineId — only the owner may read metrics.
+router.param('machineId', async (req: Request, res: Response, next, machineId: string) => {
+  try {
+    const owned = await query('SELECT 1 FROM machines WHERE id = $1 AND user_id = $2', [machineId, req.userId]);
+    if (!owned.rows.length) return res.status(404).json({ error: 'Machine not found.' });
+    next();
+  } catch {
+    res.status(404).json({ error: 'Machine not found.' });
+  }
+});
 
 /**
  * GET /api/performance/:machineId?hours=N

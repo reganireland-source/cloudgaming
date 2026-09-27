@@ -8,6 +8,7 @@
  *
  *   GET /api/status          which services are reachable (the six lights)
  *   GET /api/status/version  details about the running backend build
+ *   GET /api/status/preflight  setup checklist before your first launch
  *
  * Consumed by frontend/components/SystemStatusBar.tsx and BuildInfoPanel.tsx.
  * ============================================================================
@@ -22,6 +23,7 @@ import { getSystemStatus, getHistory, summarise, PROVIDER_PROBES } from '../../s
 import { getMetrics } from '../../services/Metrics';
 import { CATALOGS } from '../../providers/registry';
 import { env } from '../../config/env';
+import { runPreflight } from '../../services/PreflightService';
 
 const router = Router();
 
@@ -71,6 +73,21 @@ router.get('/', async (req: Request, res: Response) => {
     res.json(status);
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to compute system status' });
+  }
+});
+
+/**
+ * GET /api/status/preflight — the pre-flight checklist (setup mistakes that
+ * would otherwise surface mid-launch). See src/services/PreflightService.ts.
+ * Public so it works before sign-in is set up; returns no secret values.
+ * Sending a login token adds "do YOUR saved keys still decrypt?".
+ */
+router.get('/preflight', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await runPreflight({ origin: req.headers.origin, authorization: req.headers.authorization }));
+  } catch (error) {
+    res.status(500).json({ error: 'Pre-flight check crashed', details: String(error) });
   }
 });
 

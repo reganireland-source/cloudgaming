@@ -1,203 +1,179 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import BillOfMaterials from '@/components/BillOfMaterials';
+/**
+ * ============================================================================
+ * app/page.tsx — DASHBOARD: EVERYTHING AT A GLANCE (REAL DATA)
+ * ============================================================================
+ *
+ *   Running now     machines running and what they cost per hour
+ *   Standing cost   disks / snapshots / IPs billed even while stopped ($/mo)
+ *   This month      estimated spend so far (hourly estimates, /api/costs)
+ *   Leftovers       orphaned resources still costing money (from the map)
+ * then your machines, recent cloud actions, and shortcuts.
+ *
+ * Sources: /api/machines, /api/inventory (live from each cloud, 60 s cache),
+ * /api/costs/monthly and /api/operations. Signed out, it shows how to start.
+ * ============================================================================
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { apiFetch } from '@/lib/auth';
+import { useAuth } from '@/components/AuthProvider';
 
 interface Machine {
-  id: string;
-  instance_type: string;
-  region: string;
-  provider: string;
-  status: string;
-  cost_per_hour: number;
+  id: string; provider: string; region: string; instance_type: string; status: string;
+  cost_per_hour: number; game_title: string | null; spot: boolean;
 }
+interface Inventory {
+  clouds: string[];
+  totals: { runningMachines: number; hourly: number; monthlyStanding: number; orphans: number; orphanMonthly: number; orphanHourly: number };
+  errors: Array<{ provider: string; error: { title: string } }>;
+}
+interface Operation { id: string; provider: string; title: string; status: 'running' | 'succeeded' | 'failed'; created_at: string; last_message: string | null }
 
-interface BoM {
-  machine: Machine;
-  billOfMaterials: {
-    compute: {
-      component: string;
-      quantity: number;
-      unit: string;
-      costPerUnit: number;
-      total: number;
-    };
-    streaming: {
-      resolution: string;
-      fps: number;
-      bitrate: string;
-      gbPerHour: number;
-      egressRate: number;
-      costPerHour: number;
-    };
-    total: {
-      costPerHour: number;
-      costPerDay: number;
-      costPerMonth: number;
-    };
-  };
+const CLOUD: Record<string, { color: string; letter: string; label: string }> = {
+  gcp: { color: '#3987e5', letter: 'G', label: 'Google Cloud' }, aws: { color: '#c98500', letter: 'A', label: 'AWS' },
+  azure: { color: '#199e70', letter: 'Z', label: 'Azure' }, oracle: { color: '#d55181', letter: 'O', label: 'Oracle' },
+};
+const STATUS_CLASS: Record<string, string> = {
+  running: 'text-neon-lime', stopped: 'text-slate-400', error: 'text-neon-pink', missing: 'text-neon-pink',
+};
+const money = (n: number) => `$${(Number(n) || 0).toFixed(2)}`;
+function ago(iso: string) {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
 
 export default function Dashboard() {
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [selectedMachine, setSelectedMachine] = useState<string | null>(null);
-  const [boM, setBoM] = useState<BoM | null>(null);
-  const [loading, setLoading] = useState(true);
-  // No real fetch here yet (mock data below) - no setter to keep unused.
-  const [error] = useState<string | null>(null);
+  const { user, loading: authLoading } = useAuth();
+  const [machines, setMachines] = useState<Machine[] | null>(null);
+  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [month, setMonth] = useState<number | null>(null);
+  const [ops, setOps] = useState<Operation[]>([]);
 
-  useEffect(() => {
-    // In production, fetch from API
-    // For now, show mock data
-    const mockMachines: Machine[] = [
-      {
-        id: '1',
-        instance_type: 'g4dn.xlarge',
-        region: 'us-east-1',
-        provider: 'aws',
-        status: 'running',
-        cost_per_hour: 0.526,
-      },
-    ];
-
-    const mockBoM: BoM = {
-      machine: mockMachines[0],
-      billOfMaterials: {
-        compute: {
-          component: 'g4dn.xlarge',
-          quantity: 1,
-          unit: 'instance',
-          costPerUnit: 0.526,
-          total: 0.526,
-        },
-        streaming: {
-          resolution: '1440p',
-          fps: 60,
-          bitrate: '35 Mbps',
-          gbPerHour: 3.6,
-          egressRate: 0.12,
-          costPerHour: 0.432,
-        },
-        total: {
-          costPerHour: 0.958,
-          costPerDay: 22.99,
-          costPerMonth: 689.76,
-        },
-      },
-    };
-
-    setMachines(mockMachines);
-    setSelectedMachine(mockMachines[0].id);
-    setBoM(mockBoM);
-    setLoading(false);
+  const load = useCallback(() => {
+    apiFetch<Machine[]>('/machines').then(setMachines).catch(() => setMachines([]));
+    apiFetch<Inventory>('/inventory').then(setInventory).catch(() => setInventory(null));
+    apiFetch<{ total: number }>('/costs/monthly').then((c) => setMonth(Number(c.total) || 0)).catch(() => setMonth(null));
+    apiFetch<Operation[]>('/operations?limit=6').then(setOps).catch(() => setOps([]));
   }, []);
 
-  if (loading) {
+  useEffect(() => {
+    if (!user) return;
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [user, load]);
+
+  if (authLoading) return <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; LOADING…</p>;
+
+  if (!user) {
     return (
-      <div className="text-center py-12">
-        <div className="inline-block">
-          <p className="font-mono text-neon-cyan text-lg mb-4">
-            {'> INITIALIZING NEON_CORE...'}
-          </p>
-          <div className="flex gap-2 justify-center">
-            <div className="w-2 h-2 bg-neon-cyan rounded-full animate-pulse"></div>
-            <div className="w-2 h-2 bg-neon-magenta rounded-full animate-pulse" style={{animationDelay: '0.1s'}}></div>
-            <div className="w-2 h-2 bg-neon-lime rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
-          </div>
-        </div>
+      <div className="space-y-4 max-w-2xl">
+        <h1 className="text-xl font-bold neon-text font-mono">[ DASHBOARD ]</h1>
+        <p className="text-sm text-slate-300">Run games on a cloud GPU in your own AWS, Google Cloud, Azure or Oracle account, and stream them to any screen with Moonlight.</p>
+        <ol className="space-y-2 text-sm text-slate-400 list-decimal list-inside">
+          <li><Link href="/login?next=/" className="text-neon-cyan hover:underline">Create an account or sign in</Link>.</li>
+          <li>Add your cloud keys on <Link href="/settings" className="text-neon-cyan hover:underline">Config</Link> (they’re encrypted).</li>
+          <li>Run the <Link href="/preflight" className="text-neon-cyan hover:underline">pre-flight check</Link>.</li>
+          <li>Pick where and what on <Link href="/recommendations" className="text-neon-cyan hover:underline">Recon</Link>, then launch.</li>
+        </ol>
       </div>
     );
   }
 
+  const t = inventory?.totals;
+  const running = machines?.filter((m) => m.status === 'running') || [];
+  const hourly = t ? t.hourly : running.reduce((s, m) => s + (Number(m.cost_per_hour) || 0), 0);
+
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-xl font-bold neon-text mb-2">
-          ▲ GAMING_INFRASTRUCTURE_DASH
-        </h1>
-        <p className="font-mono text-sm text-neon-lime">
-          {'> monitor_and_manage_cloud_resources'.toUpperCase()}
-        </p>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold neon-text mb-1 font-mono">[ DASHBOARD ]</h1>
+          <p className="text-sm text-slate-400 short:hidden">Your machines and what they’re costing, straight from your clouds.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/recommendations" className="btn-neon-magenta text-xs">Find & launch</Link>
+          <Link href="/map" className="btn-neon text-xs">Map</Link>
+        </div>
       </div>
 
-      {error && (
-        <div className="mb-4 p-4 border-l-4 border-neon-pink/30 bg-red-950/30 rounded text-neon-pink font-mono text-sm">
-          <span className="font-bold">⚠ ERROR:</span> {error}
-        </div>
-      )}
+      {/* ---- Headline numbers ---- */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+        <Tile label="Running now" value={`${money(hourly)}/h`} sub={`${t?.runningMachines ?? running.length} machine${(t?.runningMachines ?? running.length) === 1 ? '' : 's'} running`} />
+        <Tile label="Standing cost" value={t ? `${money(t.monthlyStanding)}/mo` : '—'} sub="disks, snapshots, IPs — billed even when stopped" />
+        <Tile label="This month" value={month != null ? money(month) : '—'} sub="estimated so far" />
+        <Tile label="Leftovers" value={t ? String(t.orphans) : '—'} sub={t && t.orphans ? `≈${money(t.orphanMonthly)}/mo wasted — see Map` : 'nothing orphaned'} warn={!!t?.orphans} href={t?.orphans ? '/map' : undefined} />
+      </div>
+      {inventory?.errors?.length ? (
+        <p className="text-xs text-neon-amber">⚠ Couldn’t read {inventory.errors.map((e) => CLOUD[e.provider]?.label || e.provider).join(', ')} just now — numbers from it may be missing. Details on the <Link href="/map" className="underline">Map</Link>.</p>
+      ) : null}
 
-      {machines.length > 0 ? (
-        <div className="space-y-8">
-          <div className="neon-card rounded-lg p-6">
-            <h2 className="text-sm tracking-label font-bold neon-text mb-6 font-mono">
-              [ ACTIVE_INSTANCES ]
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {machines.map((machine) => (
-                <button
-                  key={machine.id}
-                  onClick={() => {
-                    setSelectedMachine(machine.id);
-                  }}
-                  className={`p-4 rounded-lg border transition font-mono text-sm ${
-                    selectedMachine === machine.id
-                      ? 'neon-card-magenta border-neon-magenta'
-                      : 'neon-card border-neon-cyan hover:border-neon-magenta'
-                  }`}
-                >
-                  <div className="text-left">
-                    <h3 className="font-bold text-neon-cyan">{machine.instance_type}</h3>
-                    <p className="text-neon-lime text-xs mt-1">{machine.provider.toUpperCase()} / {machine.region}</p>
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className={`text-xs px-2 py-1 rounded font-mono ${
-                        machine.status === 'running'
-                          ? 'border border-neon-lime text-neon-lime bg-green-950/20'
-                          : 'border border-neon-cyan/50 text-neon-cyan/50'
-                      }`}>
-                        [{machine.status.toUpperCase()}]
+      <div className="grid gap-4 lg:grid-cols-[1.4fr,1fr]">
+        {/* ---- Machines ---- */}
+        <section className="space-y-2">
+          <div className="flex items-baseline justify-between"><h2 className="label">Your machines</h2><Link href="/machines" className="text-xs text-neon-cyan hover:underline">Manage →</Link></div>
+          {!machines ? <p className="text-xs text-slate-500">Loading…</p> : machines.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-slate-400">
+              No machines yet. Start with <Link href="/preflight" className="text-neon-cyan hover:underline">pre-flight</Link>, then <Link href="/recommendations" className="text-neon-cyan hover:underline">Recon</Link> to pick a region.
+            </div>
+          ) : (
+            <ul className="space-y-1.5">
+              {machines.slice(0, 8).map((m) => {
+                const c = CLOUD[m.provider] || { color: '#94a3b8', letter: '?', label: m.provider };
+                return (
+                  <li key={m.id}>
+                    <Link href="/machines" className="flex items-center gap-2.5 rounded border border-white/10 bg-white/[0.02] px-2.5 py-2 hover:border-white/25">
+                      <span aria-hidden className="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full text-[0.62rem] font-bold text-white" style={{ background: c.color }}>{c.letter}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm text-slate-100 truncate">{m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</span>
+                        <span className="block text-[0.7rem] text-slate-500 truncate">{c.label} · {m.region}{m.spot ? ' · spot' : ''}</span>
                       </span>
-                      <span className="text-neon-magenta font-bold text-sm">${machine.cost_per_hour.toFixed(2)}/hr</span>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {boM && (
-            <BillOfMaterials machine={boM.machine} billOfMaterials={boM.billOfMaterials} />
+                      <span className="shrink-0 text-right">
+                        <span className={`block text-[0.66rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'text-neon-cyan'}`}>{m.status}</span>
+                        <span className="block text-[0.7rem] text-slate-400 tabular-nums">{money(m.cost_per_hour)}/h</span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           )}
+        </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan/30 font-mono">
-              <p className="text-xs text-neon-lime mb-2 font-bold">COST_PROJECTION_MONTHLY</p>
-              <p className="text-2xl font-bold text-neon-cyan">
-                ${boM ? boM.billOfMaterials.total.costPerMonth.toFixed(2) : '0.00'}
-              </p>
-              <p className="text-xs text-neon-cyan/60 mt-2">1 active_machine</p>
-            </div>
-            <div className="neon-card-lime rounded-lg p-6 border border-neon-lime/30 font-mono">
-              <p className="text-xs text-neon-cyan mb-2 font-bold">CURRENT_SPEND_MONTH</p>
-              <p className="text-2xl font-bold text-neon-lime">$0.00</p>
-              <p className="text-xs text-neon-lime/60 mt-2">awaiting_api_integration</p>
-            </div>
-            <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta/30 font-mono">
-              <p className="text-xs text-neon-cyan mb-2 font-bold">ACTIVE_INSTANCES</p>
-              <p className="text-2xl font-bold text-neon-magenta">{machines.length}</p>
-              <p className="text-xs text-neon-magenta/60 mt-2">{machines.filter(m => m.status === 'running').length} running</p>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="neon-card rounded-lg p-12 text-center border border-neon-cyan/30">
-          <p className="font-mono text-neon-lime mb-6">
-            {'> NO_MACHINES_DETECTED'}
-          </p>
-          <a href="/machines" className="inline-block btn-neon-lime">
-            [ LAUNCH_FIRST_INSTANCE ]
-          </a>
-        </div>
-      )}
+        {/* ---- Recent cloud actions ---- */}
+        <section className="space-y-2">
+          <h2 className="label">Recent activity</h2>
+          {ops.length === 0 ? <p className="text-xs text-slate-500">Nothing yet — launches, starts and stops show up here with their live logs.</p> : (
+            <ul className="space-y-1.5">
+              {ops.map((o) => (
+                <li key={o.id} className="rounded border border-white/10 px-2.5 py-2">
+                  <p className="text-sm text-slate-200 flex items-center gap-2">
+                    <span className={o.status === 'failed' ? 'text-neon-pink' : o.status === 'running' ? 'text-neon-cyan animate-pulse' : 'text-neon-lime'} aria-label={o.status}>
+                      {o.status === 'failed' ? '✗' : o.status === 'running' ? '●' : '✓'}
+                    </span>
+                    <span className="truncate">{o.title}</span>
+                  </p>
+                  <p className="text-[0.7rem] text-slate-500 truncate">{ago(o.created_at)}{o.last_message ? ` · ${o.last_message}` : ''}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
+}
+
+function Tile({ label, value, sub, warn, href }: { label: string; value: string; sub: string; warn?: boolean; href?: string }) {
+  const body = (
+    <div className={`h-full rounded border px-3 py-2.5 ${warn ? 'border-neon-pink/40 bg-neon-pink/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
+      <p className="label">{label}</p>
+      <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
+      <p className="text-[0.68rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
+    </div>
+  );
+  return href ? <Link href={href} className="block">{body}</Link> : body;
 }

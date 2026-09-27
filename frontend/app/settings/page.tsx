@@ -165,6 +165,9 @@ export default function SettingsPage() {
           Connect Gints Global Gaming Hubjob to <strong>your own</strong> cloud accounts. Machines are created in your account and billed to you by the
           cloud; this app only stores a limited-access key, encrypted, so it can start and stop them for you.
         </p>
+        <p className="text-sm text-slate-400 mt-2">
+          First time? Run the <Link href="/preflight" className="text-neon-cyan hover:underline">pre-flight check</Link> — it spots setup mistakes before you launch.
+        </p>
       </div>
 
       {/* Your encrypted cloud keys (sign-in required for this part only). */}

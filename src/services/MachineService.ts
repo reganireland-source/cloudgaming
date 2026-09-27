@@ -40,6 +40,7 @@
  * ============================================================================
  */
 
+import { getSpotInfo } from './SpotPriceService';
 import crypto from 'crypto';
 import https from 'https';
 import { query } from '../config/database';
@@ -154,7 +155,10 @@ export class MachineService {
     await providerFor(userId, req.provider);
 
     // ---- 2. Record the machine first (see "SAFETY FIRST" above) ------------
-    const costPerHour = catalog.estimateHourly(shape.id, region.id, spot);
+    // Spot: use the live price where the cloud publishes one (AWS/Azure), so
+    // the Costs page reflects what's actually charged; otherwise the estimate.
+    const spotOffer = spot ? await getSpotInfo(req.provider, region.id, shape.id).catch(() => null) : null;
+    const costPerHour = spotOffer?.spotPerHour || catalog.estimateHourly(shape.id, region.id, spot);
     // The streaming server's admin login for this machine: random, and stored
     // encrypted. base64url only uses letters, digits, '-' and '_'.
     const sunshine = { username: 'gamer', password: crypto.randomBytes(12).toString('base64url') };
@@ -177,6 +181,10 @@ export class MachineService {
         await op.info(autoStopMinutes
           ? `Auto-stop is on: the machine shuts itself down after ${autoStopMinutes} minutes without streaming, so a forgotten machine stops billing.`
           : 'Auto-stop is OFF: remember to stop the machine yourself when you finish playing.');
+        if (spotOffer) {
+          await op.info(`${catalog.spotLabel}: about ${spotOffer.discountPct}% off on-demand (${spotOffer.source === 'live' ? 'live price' : spotOffer.source === 'fixed' ? 'fixed discount' : 'estimate'})` +
+            `${spotOffer.interruption ? `; reclaimed ${spotOffer.interruption.label} of the time in this region` : ''}. If reclaimed: ${spotOffer.onReclaim}`);
+        }
         await op.info(`Estimated cost while running: about $${costPerHour.toFixed(2)}/hour` +
           ` (+ about $${(diskSizeGb * catalog.diskPerGbMonth).toFixed(2)}/month for the ${diskSizeGb} GB disk, even when stopped).`);
         await op.info('Loading your encrypted cloud credentials…');
@@ -198,7 +206,7 @@ export class MachineService {
         await setStatus(machineId, 'running', {
           instance_id: result.instanceId,
           ip_address: result.ipAddress || null,
-          cost_per_hour: result.costPerHour || costPerHour,
+          cost_per_hour: costPerHour || result.costPerHour, // ours includes the live spot price
           last_started: new Date(),
           last_error: null,
           last_synced_at: new Date(),
