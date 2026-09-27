@@ -13,7 +13,7 @@
  *                   (also catches "Compute Engine API disabled", billing...)
  *   5. gpu-global — "GPUs (all regions)" quota ≥ 1?
  *   6. gpu-region — T4/L4 quota ≥ 1 in the chosen region?
- *   7. network    — does the "default" network exist?
+ *   7. network    — the app creates its own "cloudgaming-net"; reports if it exists yet
  *
  * Checks 1–4 are FAILS (nothing is saved). 5–7 are WARNINGS: the key is
  * fine and is saved, but launching won't work until they're fixed — common
@@ -156,17 +156,16 @@ export const GCP_SETUP: ProviderSetupModule = {
       checks.push({ id: 'gpu-region', label: `GPU quota in ${region}`, status: 'warn', message: 'Couldn\'t read regional quotas.', tip: toFriendlyError(error, 'gcp', creds.projectId).title });
     }
 
-    // 7. Default network
+    // 7. Network: the app creates its own "cloudgaming-net" (like CloudyPad),
+    //    so this only reports whether it exists yet and that we can read networks.
     try {
-      const hasNetwork = await provider.hasDefaultNetwork();
-      checks.push(hasNetwork
-        ? { id: 'network', label: 'Network', status: 'pass', message: 'The "default" network exists.' }
-        : {
-            id: 'network', label: 'Network', status: 'warn',
-            message: 'This project has no "default" network, which machines are created on.',
-            tip: 'In Cloud Shell run: gcloud compute networks create default --subnet-mode=auto',
-            consoleUrl: consoleUrl('networking/networks/list', creds.projectId), consoleLabel: 'Open VPC networks',
-          });
+      const exists = await provider.hasOurNetwork();
+      checks.push({
+        id: 'network', label: 'Network', status: 'pass',
+        message: exists
+          ? 'The app\'s private network "cloudgaming-net" is set up.'
+          : 'The app will create its own private network "cloudgaming-net" on the first launch.',
+      });
     } catch (error) {
       checks.push({ id: 'network', label: 'Network', status: 'warn', message: 'Couldn\'t check the network.', tip: toFriendlyError(error, 'gcp', creds.projectId).title });
     }

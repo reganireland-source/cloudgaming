@@ -20,38 +20,60 @@
  * HOW WE WATCH IT
  * ---------------
  * Every stage prints a line like
- *     CLOUDGAMING_STAGE 40 drivers Installing NVIDIA driver…
+ *     CLOUDGAMING_STAGE 20 drivers Installing the NVIDIA driver…
  * to the machine's SERIAL CONSOLE (/dev/ttyS0). Every cloud lets you read
  * that through its API (Google getSerialPortOutput, AWS GetConsoleOutput,
  * Azure boot diagnostics, Oracle console history), so each provider's
  * getSetupProgress() can show a progress bar without logging in.
  * A full log is also kept on the machine at /var/log/cloudgaming-setup.log.
  *
- * WHAT IT INSTALLS (Ubuntu 22.04)
- * -------------------------------
- *   1. NVIDIA driver (then reboots once so it loads)
- *   2. A virtual screen: Xorg configured for the GPU with no monitor attached
- *   3. A light desktop (XFCE) + audio (PulseAudio), running as user "gamer"
- *   4. Sunshine — the streaming server Moonlight connects to
- *   5. Steam
- *   6. Sets Sunshine's web-admin login (every boot)
+ * WHAT IT DOES — MODELLED ON CLOUDYPAD
+ * ------------------------------------
+ * This follows the approach CloudyPad (github.com/PierreBeucher/cloudypad)
+ * has proven on AWS, Azure and Google Cloud, instead of hand-building a
+ * desktop on the machine:
  *
- * ⚠️  FIRST VERSION: written carefully but not yet run end to end on every
- * GPU/cloud combination. If a stage fails, the progress panel shows which
- * one, and the log file above says why.
+ *   1. PREPARE the kernel side: the extra kernel modules cloud kernels leave
+ *      out (drm), block the open-source "nouveau" driver, enable NVIDIA
+ *      kernel modesetting, and install the exact gcc version the kernel was
+ *      built with (the driver compiles a kernel module and fails otherwise).
+ *   2. NVIDIA DATACENTER DRIVER from NVIDIA's own installer (a pinned .run
+ *      version, registered with DKMS so kernel updates rebuild it), then one
+ *      reboot. Datacenter GPUs (T4, L4, A10G, A10) need this driver family.
+ *   3. DOCKER + the NVIDIA CONTAINER TOOLKIT, so containers can use the GPU.
+ *   4. CloudyPad's SUNSHINE CONTAINER (ghcr.io/pierrebeucher/cloudypad/sunshine):
+ *      Xorg with a virtual screen, a desktop, audio, Steam/Heroic/Lutris and
+ *      Sunshine, already wired together and tested. It installs NVIDIA
+ *      libraries matching the host driver itself. Games and settings live on
+ *      the machine's disk under /var/lib/cloudgaming/sunshine.
+ *   5. AUTO-STOP (like CloudyPad's): if nobody streams (no Moonlight traffic)
+ *      and nothing big downloads for N minutes, the machine shuts itself down
+ *      so a forgotten machine stops billing. (Azure keeps billing a VM shut
+ *      down from inside; the backend's 5-minute reconcile job deallocates it.)
+ *
+ * One deliberate difference from CloudyPad: Sunshine's web page (port 47990)
+ * accepts connections from the internet (password-protected), because
+ * CloudGaming Hub pairs Moonlight through that page instead of over SSH.
  * ============================================================================
  */
+
+/** Versions pinned for reproducibility (same as CloudyPad at the time of writing). */
+export const NVIDIA_DRIVER_VERSION = '590.48.01';          // datacenter (Tesla) driver branch
+export const CLOUDYPAD_SUNSHINE_IMAGE = 'ghcr.io/pierrebeucher/cloudypad/sunshine:0.45.2';
 
 export interface SetupScriptOptions {
   sunshineUsername: string;   // letters/digits only
   sunshinePassword: string;   // base64url characters only
-  /** Ubuntu package for the NVIDIA driver. Default: the 535 "-server" (datacenter) branch, as CloudyPad uses — suits T4 / L4 / A10G / A10. */
-  driverPackage?: string;
+  /**
+   * Shut the machine down after this many minutes without streaming or
+   * downloads. 0 = never. Default 15 (CloudyPad's default).
+   */
+  autoStopMinutes?: number;
 }
 
 /** Only allow characters that are safe inside single quotes in bash. */
-function bashSafe(value: string, what: string): string {
-  if (!/^[A-Za-z0-9_.@+=-]+$/.test(value)) throw new Error(`Unsafe characters in ${what}`);
+function bashSafe(value: string, what: string, pattern = /^[A-Za-z0-9_.@+=-]+$/): string {
+  if (!pattern.test(value)) throw new Error(`Unsafe characters in ${what}`);
   return value;
 }
 
@@ -62,27 +84,44 @@ function bashSafe(value: string, what: string): string {
 export function buildSetupScript(opts: SetupScriptOptions): string {
   const user = bashSafe(opts.sunshineUsername, 'Sunshine username');
   const pass = bashSafe(opts.sunshinePassword, 'Sunshine password');
-  const driver = bashSafe(opts.driverPackage || 'nvidia-driver-535-server', 'driver package');
+  const passB64 = bashSafe(Buffer.from(pass).toString('base64'), 'Sunshine password', /^[A-Za-z0-9+/=]+$/);
+  const minutes = Math.max(0, Math.min(24 * 60, Math.round(Number(opts.autoStopMinutes ?? 15)) || 0));
   return SCRIPT_TEMPLATE
-    .replace('__SUN_USER__', user)
-    .replace('__SUN_PASS__', pass)
-    .replace('__DRIVER_PKG__', driver);
+    .split('__SUN_USER__').join(user)
+    .split('__SUN_PASS_B64__').join(passB64)
+    .split('__AUTOSTOP_MINUTES__').join(String(minutes))
+    .split('__DRIVER_VERSION__').join(NVIDIA_DRIVER_VERSION)
+    .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE);
 }
 
+// NOTE for editors: this is a String.raw template, so "${" must never appear
+// in the bash below (JavaScript would treat it as an insertion). Use $VAR
+// instead of ${VAR}, and awk/sed/cut for string manipulation.
 const SCRIPT_TEMPLATE = String.raw`#!/bin/bash
-# CloudGaming Hub machine setup. Runs as root.
+# CloudGaming Hub machine setup (modelled on CloudyPad). Runs as root.
 set -uo pipefail
 export DEBIAN_FRONTEND=noninteractive
 STATE=/var/lib/cloudgaming
+SUN_DIR=/var/lib/cloudgaming/sunshine
 mkdir -p "$STATE"
 SUN_USER='__SUN_USER__'
-SUN_PASS='__SUN_PASS__'
-DRIVER_PKG='__DRIVER_PKG__'
+SUN_PASS_B64='__SUN_PASS_B64__'
+AUTOSTOP_MINUTES='__AUTOSTOP_MINUTES__'
+DRIVER_VERSION='__DRIVER_VERSION__'
+SUNSHINE_IMAGE='__SUNSHINE_IMAGE__'
 APT="apt-get -o DPkg::Lock::Timeout=900 -y"
 
-# First run (from the cloud's boot hook): install ourselves as a systemd
+# ---- First run (from the cloud's boot hook): install ourselves as a systemd
 # service that runs on every boot, start it, and hand over.
+# Google Cloud re-runs its boot hook on EVERY boot, so this block must never
+# interrupt a setup that's already running (e.g. mid package install):
+#   - same script already installed  -> just make sure the service is started
+#   - different script (new login, or a machine restored from a snapshot with
+#     an older copy) -> install it and restart the service, unless a run is
+#     in progress (then the new copy is used from the next boot).
 if [ "$(printenv CG_FROM_UNIT)" != "1" ]; then
+  CHANGED=1
+  cmp -s "$0" /usr/local/sbin/cloudgaming-setup.sh && CHANGED=0
   install -m 700 "$0" /usr/local/sbin/cloudgaming-setup.sh
   cat > /etc/systemd/system/cloudgaming-setup.service <<'UNIT'
 [Unit]
@@ -100,7 +139,12 @@ WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
   systemctl enable cloudgaming-setup.service
-  systemctl start --no-block cloudgaming-setup.service
+  STATE_NOW=$(systemctl show -p ActiveState --value cloudgaming-setup.service)
+  if [ "$CHANGED" = "1" ] && [ "$STATE_NOW" != "activating" ]; then
+    systemctl restart --no-block cloudgaming-setup.service
+  else
+    systemctl start --no-block cloudgaming-setup.service
+  fi
   exit 0
 fi
 
@@ -113,13 +157,55 @@ is_done()   { [ -f "$STATE/$1.done" ]; }
 
 stage 5 boot "Machine booted, starting setup"
 
-# ---- 1. NVIDIA driver -------------------------------------------------------
-if ! is_done driver; then
-  stage 10 packages "Updating package lists"
+# ============================================================================
+# 1. Prepare the kernel side (once)
+# ============================================================================
+if ! is_done prepare; then
+  stage 10 packages "Updating package lists and installing build tools"
   $APT update || fail 10 "apt-get update failed"
-  stage 20 drivers "Installing NVIDIA driver (5-10 minutes)"
-  $APT install ubuntu-drivers-common linux-headers-$(uname -r) || fail 20 "could not install driver tools"
-  $APT install "$DRIVER_PKG" || fail 20 "NVIDIA driver install failed"
+  KVER=$(uname -r)
+  $APT install curl ca-certificates gnupg pciutils make dkms iptables "linux-headers-$KVER" \
+    || fail 10 "could not install build tools / kernel headers"
+  # Cloud kernels ship without some modules (e.g. drm) the NVIDIA driver needs.
+  $APT install "linux-modules-extra-$KVER" || say "linux-modules-extra not available for $KVER (usually fine)"
+  $APT install nvidia-modprobe || true
+
+  stage 14 kernel "Configuring kernel modules for the GPU"
+  printf 'blacklist nouveau\noptions nouveau modeset=0\n' > /etc/modprobe.d/blacklist-nouveau.conf
+  modprobe -r nouveau 2>/dev/null || true
+  # Kernel modesetting for the NVIDIA driver (needed by the virtual display).
+  echo 'options nvidia-drm modeset=1' > /etc/modprobe.d/nvidia.conf
+  # uinput lets Sunshine create virtual keyboards / mice / gamepads.
+  echo uinput > /etc/modules-load.d/uinput.conf
+  modprobe uinput || true
+
+  # The driver compiles a kernel module, which must use the SAME gcc version
+  # the kernel was built with. /boot/config-<kernel> records it as e.g.
+  # CONFIG_GCC_VERSION=120300 -> gcc 12.
+  GCC_RAW=$(grep -E '^CONFIG_GCC_VERSION=' "/boot/config-$KVER" | cut -d= -f2)
+  if [ -n "$GCC_RAW" ]; then
+    GCC_MAJOR=$(echo "$GCC_RAW" | sed -E 's/[0-9]{4}$//')
+    say "Kernel was built with gcc $GCC_MAJOR"
+    $APT install "gcc-$GCC_MAJOR" || fail 14 "could not install gcc-$GCC_MAJOR to match the kernel"
+    update-alternatives --install /usr/bin/gcc gcc "/usr/bin/gcc-$GCC_MAJOR" 100 || true
+    update-alternatives --set gcc "/usr/bin/gcc-$GCC_MAJOR" || true
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100 || true
+  fi
+  update-initramfs -u || true
+  done_step prepare
+fi
+
+# ============================================================================
+# 2. NVIDIA datacenter driver (once), then reboot
+# ============================================================================
+CURRENT_DRIVER=$(cat /sys/module/nvidia/version 2>/dev/null || echo none)
+if [ "$CURRENT_DRIVER" != "$DRIVER_VERSION" ] && ! is_done driver; then
+  stage 20 drivers "Installing NVIDIA driver $DRIVER_VERSION (5-10 minutes)"
+  RUN=/tmp/NVIDIA-Linux-x86_64-$DRIVER_VERSION.run
+  curl -fSL --retry 3 -o "$RUN" "https://us.download.nvidia.com/tesla/$DRIVER_VERSION/NVIDIA-Linux-x86_64-$DRIVER_VERSION.run" \
+    || fail 20 "could not download the NVIDIA driver"
+  chmod +x "$RUN"
+  "$RUN" --no-questions --ui=none --accept-license --dkms || fail 20 "NVIDIA driver install failed - see /var/log/nvidia-installer.log"
   done_step driver
   stage 30 reboot "Driver installed, rebooting once to load it"
   sleep 2
@@ -129,135 +215,206 @@ fi
 
 stage 35 gpu "Checking the GPU"
 if ! nvidia-smi >/dev/null 2>&1; then
-  fail 35 "nvidia-smi can't see the GPU - driver did not load"
+  fail 35 "nvidia-smi can't see the GPU - driver did not load (see /var/log/nvidia-installer.log)"
 fi
-say "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+GPU_NAME=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader | head -1)
+say "GPU: $GPU_NAME, driver $(cat /sys/module/nvidia/version)"
 
-# ---- 2+3. Desktop, virtual screen, audio ------------------------------------
-if ! is_done desktop; then
-  stage 45 desktop "Installing desktop, virtual screen and audio"
-  $APT install xserver-xorg-core xinit xfce4 xfce4-terminal dbus-x11 \
-    pulseaudio pulseaudio-utils mesa-utils x11-xserver-utils || fail 45 "desktop install failed"
-  id gamer >/dev/null 2>&1 || useradd -m -s /bin/bash gamer
-  usermod -aG video,audio,input,render gamer || true
+# Some /dev/nvidia* device files aren't created at boot on some clouds (e.g.
+# AWS G5); create them now and on every boot (CloudyPad does the same).
+cat > /usr/local/bin/nvidia-setup-devices.sh <<'DEV'
+#!/bin/bash
+nvidia-modprobe -f /proc/driver/nvidia/capabilities/mig/config -f /proc/driver/nvidia/capabilities/mig/monitor || true
+[ -e /dev/nvidia-modeset ] || mknod /dev/nvidia-modeset c 195 254 || true
+nvidia-smi > /dev/null || true
+DEV
+chmod 755 /usr/local/bin/nvidia-setup-devices.sh
+/usr/local/bin/nvidia-setup-devices.sh
 
-  # Headless GPU: tell Xorg to use the NVIDIA card with no monitor attached.
-  BUS=$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1)
-  # "00000000:00:04.0" (hex) -> "PCI:0:4:0" (decimal) for xorg.conf
-  B=$(echo "$BUS" | cut -d: -f2); D=$(echo "$BUS" | cut -d: -f3 | cut -d. -f1); F=$(echo "$BUS" | cut -d. -f2)
-  PCI="PCI:$((16#$B)):$((16#$D)):$((16#$F))"
-  mkdir -p /etc/X11
-  cat > /etc/X11/xorg.conf <<XORG
-Section "ServerLayout"
-    Identifier "layout"
-    Screen 0 "screen"
-EndSection
-Section "Device"
-    Identifier "gpu"
-    Driver "nvidia"
-    BusID "$PCI"
-    Option "AllowEmptyInitialConfiguration" "True"
-    Option "UseDisplayDevice" "None"
-EndSection
-Section "Screen"
-    Identifier "screen"
-    Device "gpu"
-    DefaultDepth 24
-    SubSection "Display"
-        Depth 24
-        Virtual 1920 1080
-    EndSubSection
-EndSection
-XORG
-
-  cat > /etc/systemd/system/cloudgaming-desktop.service <<'UNIT'
-[Unit]
-Description=CloudGaming virtual desktop
-After=network-online.target
-[Service]
-User=gamer
-PAMName=login
-Environment=XDG_RUNTIME_DIR=/run/user/1001
-ExecStartPre=+/bin/bash -c 'mkdir -p /run/user/1001 && chown gamer:gamer /run/user/1001'
-ExecStart=/usr/bin/xinit /usr/bin/startxfce4 -- :0 vt7 -nolisten tcp
-Restart=always
-[Install]
-WantedBy=multi-user.target
-UNIT
-  # Make the unit use gamer's real uid (useradd may not give 1001).
-  GUID=$(id -u gamer)
-  sed -i "s#/run/user/1001#/run/user/$GUID#g" /etc/systemd/system/cloudgaming-desktop.service
-  # Allow a non-console user to start X.
-  echo -e "allowed_users=anybody\nneeds_root_rights=yes" > /etc/X11/Xwrapper.config
-  $APT install xserver-xorg-legacy || true
-  systemctl daemon-reload
-  systemctl enable cloudgaming-desktop
-  done_step desktop
+# ============================================================================
+# 3. Docker + NVIDIA container toolkit (once)
+# ============================================================================
+if ! is_done docker; then
+  stage 45 docker "Installing Docker"
+  if ! command -v docker >/dev/null 2>&1; then
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh || fail 45 "could not download the Docker installer"
+    sh /tmp/get-docker.sh || fail 45 "Docker install failed"
+  fi
+  stage 52 toolkit "Installing the NVIDIA container toolkit"
+  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+    | gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+    || fail 52 "could not fetch the NVIDIA container toolkit key"
+  curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+    > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  $APT update || true
+  $APT install nvidia-container-toolkit || fail 52 "NVIDIA container toolkit install failed"
+  nvidia-ctk runtime configure --runtime=docker || fail 52 "could not enable the NVIDIA runtime in Docker"
+  systemctl restart docker
+  done_step docker
 fi
-systemctl start cloudgaming-desktop || true
 
-# ---- 4. Sunshine ------------------------------------------------------------
-if ! is_done sunshine; then
-  stage 65 sunshine "Installing Sunshine streaming server"
-  curl -fsSL -o /tmp/sunshine.deb \
-    https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-ubuntu-22.04-amd64.deb \
-    || fail 65 "could not download Sunshine"
-  $APT install /tmp/sunshine.deb || fail 65 "Sunshine install failed"
-  GUID=$(id -u gamer)
-  mkdir -p /home/gamer/.config/sunshine
-  cat > /home/gamer/.config/sunshine/sunshine.conf <<'CONF'
-# Allow the web admin page from the internet (it is password protected).
+# ============================================================================
+# 4. The Sunshine container (config rewritten every boot, so the current
+#    login always applies)
+# ============================================================================
+stage 60 sunshine "Configuring the Sunshine streaming container"
+mkdir -p "$SUN_DIR/data" "$SUN_DIR/conf/xfce4" "$SUN_DIR/conf/heroic" "$SUN_DIR/home" "$SUN_DIR/project"
+
+# GPU PCI address in the form Xorg wants: "bus@domain:device:function" in
+# decimal, from nvidia-smi's hexadecimal "0000:00:04.0" (CloudyPad does the same).
+RAW_BUS=$(nvidia-smi --query-gpu=gpu_bus_id --format=csv,noheader | head -1 | sed -E 's/^0*([0-9A-Fa-f]{4}:)/\1/')
+P_DOMAIN=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $(NF-3)}')
+P_BUS=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $(NF-2)}')
+P_DEV=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $(NF-1)}')
+P_FN=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $NF}')
+PCI_ID="$((16#$P_BUS))@$((16#$P_DOMAIN)):$((16#$P_DEV)):$((16#$P_FN))"
+HOST_DRIVER=$(cat /sys/module/nvidia/version)
+MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+# Shared memory for the container: half the RAM, as CloudyPad uses (Steam needs a lot).
+SHM_SIZE="$((MEM_MB / 2))m"
+say "PCI $PCI_ID, driver $HOST_DRIVER, shm $SHM_SIZE"
+
+# Sunshine settings: CloudyPad's template, except the web page is allowed
+# from the internet ("wan") so Moonlight can be paired in the browser.
+cat > "$SUN_DIR/project/sunshine.conf.template" <<'CONF'
+sunshine_name = $SUNSHINE_SERVER_NAME
 origin_web_ui_allowed = wan
-encoder = nvenc
-capture = x11
+min_log_level = info
+lan_encryption_mode = 2
+wan_encryption_mode = 2
+credentials_file = /cloudy/data/sunshine/sunshine_credentials.json
+file_state = /cloudy/data/sunshine/sunshine_state.json
+pkey = /cloudy/data/sunshine/pkey.pem
+cert = /cloudy/data/sunshine/cert.pem
+max_bitrate = $CLOUDYPAD_SUNSHINE_MAX_BITRATE
+$CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG
 CONF
-  chown -R gamer:gamer /home/gamer/.config
-  cat > /etc/systemd/system/cloudgaming-sunshine.service <<UNIT
+
+cat > "$SUN_DIR/project/docker-compose.yml" <<COMPOSE
+services:
+  cloudy:
+    image: $SUNSHINE_IMAGE
+    container_name: cloudy
+    shm_size: "$SHM_SIZE"
+    privileged: true
+    restart: unless-stopped
+    runtime: nvidia
+    devices:
+      - /dev/uinput
+    device_cgroup_rules:
+      - 'c 13:* rmw'
+    volumes:
+      - /dev/input:/dev/input
+      - $SUN_DIR/data:/cloudy/data
+      - $SUN_DIR/conf/xfce4:/cloudy/conf/xfce4
+      - $SUN_DIR/conf/heroic:/cloudy/conf/heroic
+      - $SUN_DIR/home:/home/cloudy
+      - $SUN_DIR/project/sunshine.conf.template:/cloudy/conf/sunshine/sunshine.conf.template:ro
+    ports:
+      - "47984:47984/tcp"
+      - "47989:47989/tcp"
+      - "47990:47990/tcp"
+      - "48010:48010/tcp"
+      - "47998:47998/udp"
+      - "47999:47999/udp"
+      - "48000:48000/udp"
+      - "48002:48002/udp"
+    environment:
+      NVIDIA_ENABLE: "true"
+      NVIDIA_DRIVER_VERSION: "$HOST_DRIVER"
+      NVIDIA_DRIVER_TYPE: "datacenter"
+      NVIDIA_PCI_BUS_ID: "$PCI_ID"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
+      CLOUDYPAD_SCREEN_MAX_WIDTH: "2560"
+      CLOUDYPAD_SCREEN_MAX_HEIGHT: "1600"
+      CLOUDYPAD_KEYBOARD_LAYOUT: "us"
+      CLOUDYPAD_KEYBOARD_MODEL: "pc105"
+      CLOUDYPAD_KEYBOARD_VARIANT: ""
+      CLOUDYPAD_KEYBOARD_OPTIONS: ""
+      CLOUDYPAD_LOCALE: "en_US.UTF-8"
+      SUNSHINE_SERVER_NAME: "CloudGaming Hub"
+      SUNSHINE_WEB_USERNAME: "$SUN_USER"
+      SUNSHINE_WEB_PASSWORD_BASE64: "$SUN_PASS_B64"
+      CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG: ""
+      CLOUDYPAD_SUNSHINE_MAX_BITRATE: ""
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+COMPOSE
+
+cd "$SUN_DIR/project" || fail 60 "project directory missing"
+if ! docker image inspect "$SUNSHINE_IMAGE" >/dev/null 2>&1; then
+  stage 65 download "Downloading the streaming container (several GB, 3-10 minutes)"
+  docker compose pull || fail 65 "could not download $SUNSHINE_IMAGE"
+fi
+stage 75 starting "Starting Sunshine, desktop and Steam"
+docker compose up -d --remove-orphans || fail 75 "could not start the Sunshine container"
+
+# First start installs NVIDIA libraries inside the container (a few minutes).
+stage 85 warming "Waiting for Sunshine to report healthy (first start takes a few minutes)"
+HEALTH=unknown
+for i in $(seq 1 120); do
+  HEALTH=$(docker inspect -f '{{.State.Health.Status}}' cloudy 2>/dev/null || echo missing)
+  [ "$HEALTH" = "healthy" ] && break
+  sleep 10
+done
+if [ "$HEALTH" != "healthy" ]; then
+  docker logs --tail 40 cloudy 2>&1 | while read -r line; do say "  container: $line"; done
+  fail 85 "Sunshine container is '$HEALTH' after 20 minutes - check: docker logs cloudy"
+fi
+
+# ============================================================================
+# 5. Auto-stop when idle (CloudyPad-style, dependency-free)
+# ============================================================================
+if [ "$AUTOSTOP_MINUTES" != "0" ]; then
+  # Count Moonlight control packets (UDP 47999) before Docker forwards them.
+  iptables -t mangle -C PREROUTING -p udp --dport 47999 -m comment --comment cg-activity -j RETURN 2>/dev/null \
+    || iptables -t mangle -I PREROUTING -p udp --dport 47999 -m comment --comment cg-activity -j RETURN
+  cat > /usr/local/sbin/cloudgaming-autostop.sh <<AUTOSTOP
+#!/bin/bash
+# Shut down after $AUTOSTOP_MINUTES minutes with no Moonlight traffic and no
+# download above ~10 Mbit/s. Checked every 30 seconds.
+LIMIT=\$(( $AUTOSTOP_MINUTES * 60 ))
+IDLE=0
+IFACE=\$(ip route show default | awk '{print \$5; exit}')
+last_pkts=0; last_rx=\$(cat /sys/class/net/\$IFACE/statistics/rx_bytes)
+while true; do
+  sleep 30
+  pkts=\$(iptables -t mangle -L PREROUTING -v -x -n 2>/dev/null | awk '/cg-activity/ {print \$1; exit}')
+  pkts=\$(( pkts + 0 ))
+  rx=\$(cat /sys/class/net/\$IFACE/statistics/rx_bytes)
+  mbps=\$(( (rx - last_rx) * 8 / 30 / 1000000 ))
+  if [ "\$pkts" -gt "\$last_pkts" ] || [ "\$mbps" -ge 10 ]; then IDLE=0; else IDLE=\$(( IDLE + 30 )); fi
+  last_pkts=\$pkts; last_rx=\$rx
+  if [ "\$IDLE" -ge "\$LIMIT" ]; then
+    echo "CLOUDGAMING_AUTOSTOP idle for $AUTOSTOP_MINUTES minutes - shutting down" > /dev/ttyS0 2>/dev/null
+    shutdown -h now
+  fi
+done
+AUTOSTOP
+  chmod 700 /usr/local/sbin/cloudgaming-autostop.sh
+  cat > /etc/systemd/system/cloudgaming-autostop.service <<'UNIT'
 [Unit]
-Description=Sunshine game streaming server
-After=cloudgaming-desktop.service
-Requires=cloudgaming-desktop.service
+Description=CloudGaming Hub auto-stop when idle
+After=docker.service
 [Service]
-User=gamer
-Environment=DISPLAY=:0
-Environment=XDG_RUNTIME_DIR=/run/user/$GUID
-ExecStartPre=/bin/sleep 5
-ExecStart=/usr/bin/sunshine
+ExecStart=/usr/local/sbin/cloudgaming-autostop.sh
 Restart=always
-RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
-  systemctl enable cloudgaming-sunshine
-  done_step sunshine
-fi
-
-# ---- 5. Steam ---------------------------------------------------------------
-if ! is_done steam; then
-  stage 80 steam "Installing Steam"
-  dpkg --add-architecture i386
-  add-apt-repository -y multiverse >/dev/null 2>&1 || true
-  $APT update
-  echo steam steam/question select "I AGREE" | debconf-set-selections
-  echo steam steam/license note '' | debconf-set-selections
-  $APT install steam-installer || echo "Steam install failed - continuing without it"
-  done_step steam
-fi
-
-# ---- 6. Sunshine login (every boot, from metadata) ---------------------------
-stage 90 credentials "Setting the Sunshine admin login"
-if [ -n "$SUN_USER" ] && [ -n "$SUN_PASS" ]; then
-  sudo -u gamer HOME=/home/gamer /usr/bin/sunshine --creds "$SUN_USER" "$SUN_PASS" >/dev/null 2>&1 || true
-fi
-systemctl restart cloudgaming-sunshine || fail 90 "Sunshine did not start"
-
-sleep 8
-if systemctl is-active --quiet cloudgaming-sunshine; then
-  stage 100 ready "Ready to stream - open Moonlight and add this machine's IP"
+  systemctl enable cloudgaming-autostop.service
+  systemctl restart cloudgaming-autostop.service
+  say "Auto-stop enabled: $AUTOSTOP_MINUTES minutes without streaming"
 else
-  fail 95 "Sunshine is not running - check: journalctl -u cloudgaming-sunshine"
+  systemctl disable --now cloudgaming-autostop.service 2>/dev/null || true
 fi
+
+stage 100 ready "Ready to stream - open Moonlight and add this machine's IP"
 `;
 
 import type { SetupStage } from './types';

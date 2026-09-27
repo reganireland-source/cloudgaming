@@ -411,6 +411,10 @@ export class OracleProvider extends CloudProvider {
       'if command -v iptables >/dev/null 2>&1; then',
       `  iptables -C ${rule('tcp')} 2>/dev/null || iptables -I ${rule('tcp')}`,
       `  iptables -C ${rule('udp')} 2>/dev/null || iptables -I ${rule('udp')}`,
+      '  # Oracle\'s images also REJECT all forwarded traffic, which blocks the ports',
+      '  # Docker publishes for the Sunshine container (a well-known Docker-on-OCI',
+      '  # pitfall). Remove that one rule; Docker manages forwarding itself.',
+      '  while iptables -D FORWARD -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; do :; done',
       '  if command -v netfilter-persistent >/dev/null 2>&1; then netfilter-persistent save >/dev/null 2>&1 || true; fi',
       'fi',
       '',
@@ -422,8 +426,8 @@ export class OracleProvider extends CloudProvider {
    * after the "#!/bin/bash" line (which must stay the very first line, or
    * cloud-init won't know how to run it).
    */
-  private buildOracleScript(sunshineUsername: string, sunshinePassword: string): string {
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword });
+  private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number): string {
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes });
     const newline = script.indexOf('\n');
     return script.slice(0, newline + 1) + this.hostFirewallSnippet() + script.slice(newline + 1);
   }
@@ -823,7 +827,7 @@ export class OracleProvider extends CloudProvider {
       {
         spot: !!options.spotInstance,
         diskSizeGb: Math.max(50, options.diskSizeGb || 150), // Oracle's minimum boot volume is 50 GB
-        script: this.buildOracleScript(sunshineUsername, sunshinePassword),
+        script: this.buildOracleScript(sunshineUsername, sunshinePassword, options.autoStopMinutes),
       }
     );
   }

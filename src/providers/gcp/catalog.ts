@@ -119,8 +119,18 @@ export const SPOT_FACTOR = 0.4;
 export const BOOT_IMAGE = 'projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts';
 
 /** Firewall rule + network tag that open the streaming ports. */
-export const FIREWALL_RULE_NAME = 'cloudgaming-sunshine';
+// Our own VPC network (like CloudyPad) instead of the project's "default"
+// one, which some organisations remove by policy. Custom mode: we create one
+// subnet per region we use, named cloudgaming-<region>.
+export const NETWORK_NAME = 'cloudgaming-net';
+export const FIREWALL_RULE_NAME = 'cloudgaming-net-sunshine';
 export const NETWORK_TAG = 'cloudgaming-sunshine';
+
+/** A unique private address range per region: 10.<64+index>.0.0/20. */
+export function subnetCidrFor(regionId: string): string {
+  const index = Math.max(0, GCP_REGIONS.findIndex((r) => r.id === regionId));
+  return `10.${64 + index}.0.0/20`;
+}
 
 /**
  * Ports used by Sunshine (the streaming server on the machine) and

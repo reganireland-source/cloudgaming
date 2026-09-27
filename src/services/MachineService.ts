@@ -61,6 +61,8 @@ export interface LaunchRequest {
   quality?: string;
   spot?: boolean;
   diskSizeGb?: number;
+  /** Shut down after this many idle minutes (no streaming); 0 = never. Default 15. */
+  autoStopMinutes?: number;
 }
 
 /** A plain-English "you can't do that" (turned into HTTP 400/404/409 by the route). */
@@ -137,6 +139,10 @@ export class MachineService {
       throw new MachineRequestError(400, `Unknown streaming quality "${req.quality}".`, `Use one of: ${VALID_QUALITIES.join(', ')}.`);
     }
     const spot = !!req.spot && catalog.supportsSpot;
+    const autoStopMinutes = req.autoStopMinutes === undefined ? 15 : Math.round(Number(req.autoStopMinutes));
+    if (!Number.isFinite(autoStopMinutes) || autoStopMinutes < 0 || autoStopMinutes > 1440) {
+      throw new MachineRequestError(400, 'Auto-stop must be between 0 (off) and 1440 minutes.', 'The default, 15 minutes, suits most people.');
+    }
     const diskSizeGb = Math.round(Number(req.diskSizeGb) || catalog.defaultDiskGb);
     if (diskSizeGb < catalog.minDiskGb || diskSizeGb > 2000) {
       throw new MachineRequestError(400, `Disk size must be between ${catalog.minDiskGb} and 2000 GB.`,
@@ -167,6 +173,9 @@ export class MachineService {
     });
     op.runInBackground(async () => {
       try {
+        await op.info(autoStopMinutes
+          ? `Auto-stop is on: the machine shuts itself down after ${autoStopMinutes} minutes without streaming, so a forgotten machine stops billing.`
+          : 'Auto-stop is OFF: remember to stop the machine yourself when you finish playing.');
         await op.info(`Estimated cost while running: about $${costPerHour.toFixed(2)}/hour` +
           ` (+ about $${(diskSizeGb * catalog.diskPerGbMonth).toFixed(2)}/month for the ${diskSizeGb} GB disk, even when stopped).`);
         await op.info('Loading your encrypted cloud credentials…');
@@ -181,6 +190,7 @@ export class MachineService {
             diskSizeGb,
             sunshineUsername: sunshine.username,
             sunshinePassword: sunshine.password,
+            autoStopMinutes,
           }
         );
 

@@ -166,7 +166,7 @@ function explain(key: string, t: CloudTerms, m?: MachineLike): NodeInfo {
     vm: {
       title: `Your virtual machine${m ? ` (${m.instance_type})` : ''}`,
       what: 'A GPU computer rented by the hour. It runs Ubuntu 22.04.',
-      how: 'On first boot, our setup script installs the NVIDIA driver (then reboots once), a virtual screen (Xorg with no monitor attached), a light desktop, Sunshine and Steam. It prints progress to the serial console, which the app reads to show the setup bar.',
+      how: 'On first boot, our setup script (modelled on the open-source CloudyPad project) installs NVIDIA\'s datacenter driver (then reboots once), Docker and the NVIDIA container toolkit, then starts CloudyPad\'s ready-made streaming container. It prints progress to the serial console, which the app reads to show the setup bar. An auto-stop service shuts the machine down after a period with no streaming.',
       control: 'You (it\'s in your account). The app starts/stops/deletes it with your key.', cost: `The hourly price while running${m?.spot ? ' (spot — cheaper but can be reclaimed)' : ''}. Stopped = no compute charge.`,
     },
     gpu: {
@@ -176,8 +176,8 @@ function explain(key: string, t: CloudTerms, m?: MachineLike): NodeInfo {
       control: t.name + ' hardware, used exclusively by your VM.', cost: 'Most of the hourly price.',
     },
     sunshine: {
-      title: 'Sunshine (streaming server) + desktop + Steam',
-      what: 'Sunshine streams the machine\'s screen to Moonlight and passes your input back. Steam installs and runs your games.',
+      title: 'Streaming container: Sunshine + desktop + Steam',
+      what: 'One Docker container (CloudyPad\'s image) holding a virtual screen, a desktop, audio, Steam/Heroic/Lutris and Sunshine. Sunshine streams the screen to Moonlight and passes your input back. Games and settings are stored on the machine\'s disk, outside the container.',
       how: 'Sunshine\'s web page (https://<ip>:47990, login shown on the machine card) is used once to pair Moonlight with a PIN. After that, Moonlight connects directly.',
       control: 'You.', cost: 'Free software.',
     },
@@ -345,7 +345,7 @@ export default function ArchitectureDiagram({
                   health={vmHealth} active={selected === 'vm'} onSelect={setSelected} />
                 <div className="pl-3 border-l border-white/10 grid sm:grid-cols-2 gap-2">
                   <Node id="gpu" label="NVIDIA GPU" sub={t.gpuAttach} health={!created ? 'unknown' : softwareHealth === 'ok' ? 'ok' : vmHealth === 'ok' ? 'busy' : vmHealth} active={selected === 'gpu'} onSelect={setSelected} />
-                  <Node id="sunshine" label="Ubuntu · desktop · Sunshine · Steam"
+                  <Node id="sunshine" label="Container: Sunshine · desktop · Steam"
                     sub={setupStage ? `${setupStage.percent}% · ${setupStage.message}` : ms === 'running' ? 'setup status unknown yet' : created ? 'installed by the setup script' : 'not created (the launch failed)'}
                     health={softwareHealth} active={selected === 'sunshine'} onSelect={setSelected} />
                 </div>

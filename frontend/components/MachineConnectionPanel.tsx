@@ -123,7 +123,8 @@ export default function MachineConnectionPanel({
           {info.setup.failed && (
             <p className="text-xs text-slate-400 mt-1">
               The setup stopped at the step above. The full log is on the machine at /var/log/cloudgaming-setup.log (open the machine
-              in your cloud console and use its SSH / serial console button). Deleting and relaunching retries from scratch.
+              in your cloud console and use its SSH / serial console button; for the streaming container, run: docker logs cloudy).
+              Deleting and relaunching retries from scratch.
             </p>
           )}
           {info.setup.stages.length > 1 && (
@@ -185,7 +186,7 @@ export default function MachineConnectionPanel({
           </li>
           <li>Go to <strong>PIN</strong>, type Moonlight's PIN, and submit. Moonlight is now paired (only needed once per device).</li>
           <li>In Moonlight, open the machine and pick <strong>Desktop</strong> or <strong>Steam Big Picture</strong>. Sign in to Steam and install your games.</li>
-          <li>When you're done, <strong>stop</strong> the machine here so it stops billing. Your games stay on its disk.</li>
+          <li>When you're done, <strong>stop</strong> the machine here so it stops billing. Your games stay on its disk. (If you set auto-stop at launch, it also shuts itself down after that long without streaming.)</li>
         </ol>
         <p className="mt-2 text-[0.7rem] text-slate-500">
           Note: after a stop/start the IP may change — if Moonlight can't find the machine, add the new IP. Games with kernel anti-cheat

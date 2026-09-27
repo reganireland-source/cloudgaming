@@ -39,6 +39,8 @@ import {
   BOOT_IMAGE,
   DEFAULT_REGION,
   FIREWALL_RULE_NAME,
+  NETWORK_NAME,
+  subnetCidrFor,
   GCP_REGIONS,
   GCP_SHAPES,
   NETWORK_TAG,
@@ -84,6 +86,8 @@ export class GCPProvider extends CloudProvider {
   private projects: any;
   private regions: any;
   private networks: any;
+  private subnetworks: any;
+  private regionOps: any;
 
   /**
    * Turn whatever was stored into checked credentials, or throw a friendly
@@ -151,6 +155,8 @@ export class GCPProvider extends CloudProvider {
     this.projects = new compute.ProjectsClient(opts);
     this.regions = new compute.RegionsClient(opts);
     this.networks = new compute.NetworksClient(opts);
+    this.subnetworks = new compute.SubnetworksClient(opts);
+    this.regionOps = new compute.RegionOperationsClient(opts);
   }
 
   // ==========================================================================
@@ -210,6 +216,60 @@ export class GCPProvider extends CloudProvider {
     return instance?.networkInterfaces?.[0]?.accessConfigs?.[0]?.natIP || '';
   }
 
+  /** Same as waitZoneOp, for REGION operations (subnets). */
+  private async waitRegionOp(lro: any, region: string): Promise<void> {
+    let operation = lro?.latestResponse ?? lro;
+    const started = Date.now();
+    while (!DONE.has(operation?.status)) {
+      if (Date.now() - started > OPERATION_TIMEOUT_MS) {
+        throw new Error(`Timed out after 10 minutes waiting for Google operation ${operation?.name}`);
+      }
+      [operation] = await this.regionOps.wait({ operation: operation.name, project: this.projectId, region });
+    }
+    this.throwIfOperationFailed(operation);
+  }
+
+  /**
+   * Make sure our own network and this region's subnet exist (CloudyPad does
+   * the same). Relying on the project's "default" network fails in
+   * organisations whose policy skips creating it.
+   */
+  private async ensureNetwork(region: string): Promise<void> {
+    try {
+      await this.networks.get({ project: this.projectId, network: NETWORK_NAME });
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      await this.report('info', `Creating a private network "${NETWORK_NAME}" for your gaming machines (one-time)…`);
+      const [lro] = await this.networks.insert({
+        project: this.projectId,
+        networkResource: {
+          name: NETWORK_NAME,
+          autoCreateSubnetworks: false,
+          description: 'CloudGaming Hub: network for gaming machines',
+        },
+      });
+      await this.waitGlobalOp(lro);
+    }
+    const subnet = `cloudgaming-${region}`;
+    try {
+      await this.subnetworks.get({ project: this.projectId, region, subnetwork: subnet });
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      await this.report('info', `Creating subnet "${subnet}" (${subnetCidrFor(region)}) in ${region} (one-time)…`);
+      const [lro] = await this.subnetworks.insert({
+        project: this.projectId,
+        region,
+        subnetworkResource: {
+          name: subnet,
+          network: `global/networks/${NETWORK_NAME}`,
+          ipCidrRange: subnetCidrFor(region),
+          region,
+        },
+      });
+      await this.waitRegionOp(lro, region);
+    }
+  }
+
   /**
    * Make sure the firewall rule that opens the streaming ports exists.
    * Created once per project; machines opt in via their network tag.
@@ -228,7 +288,7 @@ export class GCPProvider extends CloudProvider {
       project: this.projectId,
       firewallResource: {
         name: FIREWALL_RULE_NAME,
-        network: 'global/networks/default',
+        network: `global/networks/${NETWORK_NAME}`,
         direction: 'INGRESS',
         description: 'CloudGaming Hub: Sunshine/Moonlight streaming ports',
         sourceRanges: ['0.0.0.0/0'],
@@ -251,7 +311,7 @@ export class GCPProvider extends CloudProvider {
   private async createMachine(
     config: ProviderConfig,
     options: { spot: boolean; diskSizeGb: number; sourceSnapshot?: string;
-               sunshineUsername: string; sunshinePassword: string }
+               sunshineUsername: string; sunshinePassword: string; autoStopMinutes?: number }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
     const shape = findShape(config.instanceType);
     if (!shape) {
@@ -282,6 +342,7 @@ export class GCPProvider extends CloudProvider {
 
     await this.report('info', `Project ${this.projectId} · ${shape.label} · ${region.name} (${region.id})` +
       `${options.spot ? ' · SPOT (cheaper, can be interrupted)' : ''}`);
+    await this.ensureNetwork(region.id);
     await this.ensureFirewall();
 
     // A unique, Google-legal name: lowercase letters, digits, hyphens.
@@ -314,7 +375,8 @@ export class GCPProvider extends CloudProvider {
         ],
         networkInterfaces: [
           {
-            network: 'global/networks/default',
+            network: `global/networks/${NETWORK_NAME}`,
+            subnetwork: `regions/${region.id}/subnetworks/cloudgaming-${region.id}`,
             accessConfigs: [{ name: 'External NAT', type: 'ONE_TO_ONE_NAT', networkTier: 'PREMIUM' }],
           },
         ],
@@ -325,7 +387,7 @@ export class GCPProvider extends CloudProvider {
           : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD' },
         metadata: {
           items: [
-            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword }) },
+            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes }) },
             { key: 'sunshine-username', value: options.sunshineUsername },
             { key: 'sunshine-password', value: options.sunshinePassword },
           ],
@@ -379,6 +441,7 @@ export class GCPProvider extends CloudProvider {
       diskSizeGb: options.diskSizeGb || 150,
       sunshineUsername: options.sunshineUsername || 'gamer',
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
+      autoStopMinutes: options.autoStopMinutes,
     });
   }
 
@@ -566,10 +629,10 @@ export class GCPProvider extends CloudProvider {
     return (info.quotas || []).map((q: any) => ({ metric: String(q.metric), limit: Number(q.limit) || 0, usage: Number(q.usage) || 0 }));
   }
 
-  /** Does the project have the "default" network machines are created on? */
-  async hasDefaultNetwork(): Promise<boolean> {
+  /** Does our own network ("cloudgaming-net") exist yet? (Created on first launch.) */
+  async hasOurNetwork(): Promise<boolean> {
     try {
-      await this.networks.get({ project: this.projectId, network: 'default' });
+      await this.networks.get({ project: this.projectId, network: NETWORK_NAME });
       return true;
     } catch (error) {
       if (isNotFound(error)) return false;

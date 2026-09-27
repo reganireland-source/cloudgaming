@@ -40,7 +40,7 @@ import type { ProviderCatalog } from '../shared/types';
 export interface OracleShape {
   id: string;               // Oracle's shape name, also stored in machines.instance_type
   label: string;            // shown in the launch form
-  gpuModel: 'A10' | 'P100';
+  gpuModel: 'A10';
   gpuMemoryGb: number;
   ocpus: number;            // Oracle CPUs (1 OCPU = 2 vCPUs)
   vcpus: number;
@@ -61,17 +61,10 @@ export const ORACLE_SHAPES: OracleShape[] = [
     onDemand: 2.0,
     bestFor: 'Modern AAA games at 1440p–4K60. Roughly RTX 3070-class, with a modern NVENC encoder. Oracle\'s smallest current GPU VM.',
   },
-  {
-    id: 'VM.GPU2.1',
-    label: 'P100 (16 GB) · 24 vCPU · 72 GB RAM — legacy',
-    gpuModel: 'P100',
-    gpuMemoryGb: 16,
-    ocpus: 12,
-    vcpus: 24,
-    memoryGb: 72,
-    onDemand: 1.275,
-    bestFor: 'Older/lighter games at 1080p. 2016-era datacenter GPU with an old, weaker video encoder; only in a few regions and being phased out. Prefer A10.',
-  },
+  // VM.GPU2.1 (P100, Pascal) was removed: the NVIDIA datacenter driver we
+  // install (590 branch, the one CloudyPad pins) no longer supports Pascal
+  // GPUs, so the machine would boot with no usable GPU. The P100's video
+  // encoder is also too old for good streaming.
 ];
 
 export interface OracleRegion {
@@ -79,7 +72,7 @@ export interface OracleRegion {
   name: string;
   lat: number;
   lng: number;
-  gpus: Array<'A10' | 'P100'>;  // GPU models offered here (best knowledge — may change)
+  gpus: Array<'A10'>;  // GPU models offered here (best knowledge — may change)
   egressPerGb: number;           // $/GB to the internet; 0 because the first 10 TB/month are free
   egressOverPerGb: number;       // $/GB after the free 10 TB (informational)
 }
@@ -91,10 +84,10 @@ export const ORACLE_REGIONS: OracleRegion[] = [
   { id: 'ap-singapore-1', name: 'Singapore', lat: 1.35, lng: 103.82, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
   { id: 'ap-sydney-1', name: 'Sydney', lat: -33.87, lng: 151.21, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
   { id: 'ap-tokyo-1', name: 'Tokyo', lat: 35.68, lng: 139.69, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
-  { id: 'us-ashburn-1', name: 'Ashburn (N. Virginia)', lat: 39.04, lng: -77.49, gpus: ['A10', 'P100'], egressPerGb: 0, egressOverPerGb: 0.0085 },
-  { id: 'us-phoenix-1', name: 'Phoenix', lat: 33.45, lng: -112.07, gpus: ['A10', 'P100'], egressPerGb: 0, egressOverPerGb: 0.0085 },
-  { id: 'eu-frankfurt-1', name: 'Frankfurt', lat: 50.11, lng: 8.68, gpus: ['A10', 'P100'], egressPerGb: 0, egressOverPerGb: 0.0085 },
-  { id: 'uk-london-1', name: 'London', lat: 51.51, lng: -0.13, gpus: ['A10', 'P100'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'us-ashburn-1', name: 'Ashburn (N. Virginia)', lat: 39.04, lng: -77.49, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'us-phoenix-1', name: 'Phoenix', lat: 33.45, lng: -112.07, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-frankfurt-1', name: 'Frankfurt', lat: 50.11, lng: 8.68, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'uk-london-1', name: 'London', lat: 51.51, lng: -0.13, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
 ];
 
 export const DEFAULT_REGION = 'ap-singapore-1';

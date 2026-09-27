@@ -60,6 +60,7 @@
  */
 
 import crypto from 'crypto';
+import zlib from 'zlib';
 import AWS from 'aws-sdk';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
 import { RegionData } from '../types';
@@ -68,7 +69,7 @@ import {
   AWS_REGIONS,
   AWS_SHAPES,
   DEFAULT_REGION,
-  UBUNTU_NAME_PATTERN,
+  UBUNTU_NAME_PATTERNS,
   UBUNTU_OWNER,
   estimateHourly,
   findRegion,
@@ -300,7 +301,7 @@ export class AWSProvider extends CloudProvider {
     const result = await this.ec2For(region).describeImages({
       Owners: [UBUNTU_OWNER],
       Filters: [
-        { Name: 'name', Values: [UBUNTU_NAME_PATTERN] },
+        { Name: 'name', Values: UBUNTU_NAME_PATTERNS },
         { Name: 'architecture', Values: ['x86_64'] },
         { Name: 'state', Values: ['available'] },
       ],
@@ -382,6 +383,7 @@ export class AWSProvider extends CloudProvider {
       diskSizeGb: number;
       sunshineUsername: string;
       sunshinePassword: string;
+      autoStopMinutes?: number;
       /** Boot from this image instead of the newest Ubuntu (used by restore). */
       image?: { imageId: string; rootDeviceName: string; label: string };
     }
@@ -423,9 +425,13 @@ export class AWSProvider extends CloudProvider {
     }
 
     // 4. The setup script, handed over as "user data". EC2 wants it base64-encoded.
-    const userData = Buffer.from(buildSetupScript({
+    // EC2 limits user data to 16 KB (before base64) and our script is ~14 KB,
+    // so it's gzip-compressed (~5 KB). cloud-init on Ubuntu detects gzip and
+    // unpacks it automatically.
+    const userData = zlib.gzipSync(buildSetupScript({
       sunshineUsername: options.sunshineUsername,
       sunshinePassword: options.sunshinePassword,
+      autoStopMinutes: options.autoStopMinutes,
     })).toString('base64');
 
     // A short unique name, shown in the AWS console's Name column.
@@ -547,6 +553,7 @@ export class AWSProvider extends CloudProvider {
       diskSizeGb: options.diskSizeGb || 150,
       sunshineUsername: options.sunshineUsername || 'gamer',
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
+      autoStopMinutes: options.autoStopMinutes,
     });
   }
 
@@ -958,11 +965,17 @@ export class AWSProvider extends CloudProvider {
     const ec2 = this.ec2For(region);
     const instance = await this.describeInstance(region, id);
     const attr = await ec2.describeInstanceAttribute({ InstanceId: id, Attribute: 'userData' }).promise();
-    const script = Buffer.from(attr.UserData?.Value || '', 'base64').toString('utf8');
+    // User data may be gzip-compressed (see createMachine); unpack if so.
+    const raw = Buffer.from(attr.UserData?.Value || '', 'base64');
+    const script = (raw[0] === 0x1f && raw[1] === 0x8b ? zlib.gunzipSync(raw) : raw).toString('utf8');
     return {
       ipAddress: instance?.PublicIpAddress || '',
       username: script.match(/^SUN_USER='([^']*)'/m)?.[1],
-      password: script.match(/^SUN_PASS='([^']*)'/m)?.[1],
+      // The setup script stores the password base64-encoded (SUN_PASS_B64).
+      password: (() => {
+        const b64 = script.match(/^SUN_PASS_B64='([^']*)'/m)?.[1];
+        return b64 ? Buffer.from(b64, 'base64').toString('utf8') : undefined;
+      })(),
       status: String(instance?.State?.Name || 'terminated'),
     };
   }

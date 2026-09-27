@@ -115,7 +115,14 @@ export const SPOT_FACTOR = 0.35;
  * 099720109477 is Canonical's AWS account id.
  */
 export const UBUNTU_OWNER = '099720109477';
-export const UBUNTU_NAME_PATTERN = 'ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*';
+// Canonical renamed its images in 2024 (gp3 root disks live under
+// "hvm-ssd-gp3/"); older images kept the "hvm-ssd/" path. Search both and the
+// newest wins, so we never get stuck on a stale image (CloudyPad also uses
+// the hvm-ssd-gp3 path).
+export const UBUNTU_NAME_PATTERNS = [
+  'ubuntu/images/hvm-ssd-gp3/ubuntu-jammy-22.04-amd64-server-*',
+  'ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*',
+];
 
 export function findShape(id: string): AwsShape | undefined {
   return AWS_SHAPES.find((s) => s.id === id);

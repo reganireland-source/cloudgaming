@@ -52,6 +52,7 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
   const [spot, setSpot] = useState(false);
   const [game, setGame] = useState('');
   const [quality, setQuality] = useState('high');
+  const [autoStop, setAutoStop] = useState(15); // minutes without streaming before the machine shuts down; 0 = off
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [operationId, setOperationId] = useState<string | null>(null);
@@ -106,7 +107,7 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
     try {
       const res = await apiFetch<{ machineId: string; operationId: string }>('/machines', {
         method: 'POST',
-        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality },
+        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop },
       });
       setOperationId(res.operationId);
       onLaunched(); // show the new "creating" machine in the list straight away
@@ -254,6 +255,21 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
                       </select>
                       <p className="text-xs text-slate-500 mt-1">Streamed data is billed by the cloud (≈${regionInfo?.egressPerGb.toFixed(2)}/GB here).</p>
                     </div>
+                  </div>
+
+                  {/* Auto-stop */}
+                  <div>
+                    <label htmlFor="launch-autostop" className="label block mb-2">7 · Auto-stop when idle</label>
+                    <select id="launch-autostop" value={autoStop} onChange={(e) => setAutoStop(Number(e.target.value))} className="input-neon w-full sm:w-1/2 px-3 py-2">
+                      <option value={15}>After 15 minutes without streaming (recommended)</option>
+                      <option value={30}>After 30 minutes</option>
+                      <option value={60}>After 1 hour</option>
+                      <option value={0}>Never — I&apos;ll stop it myself</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">
+                      The machine watches for Moonlight traffic and big downloads, and shuts itself down when there&apos;s none — so a forgotten
+                      machine stops billing. (Idle time during the first setup doesn&apos;t count.)
+                    </p>
                   </div>
 
                   {/* Summary + launch */}

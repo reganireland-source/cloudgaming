@@ -52,6 +52,8 @@ export interface LaunchOptions {
   diskSizeGb?: number;     // size of the machine's disk
   sunshineUsername?: string; // login for the streaming server's admin page
   sunshinePassword?: string;
+  /** Minutes without streaming before the machine shuts itself down (0 = never). */
+  autoStopMinutes?: number;
 }
 
 /** Basic facts about an existing snapshot. */

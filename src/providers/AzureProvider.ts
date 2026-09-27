@@ -189,8 +189,8 @@ fi
 # --- end Azure extra ---
 `;
 
-function azureSetupScript(sunshineUsername: string, sunshinePassword: string): string {
-  const script = buildSetupScript({ sunshineUsername, sunshinePassword });
+function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number): string {
+  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes });
   // Keep the "#!/bin/bash" line first (cloud-init needs it to run the file as a script).
   const firstNewline = script.indexOf('\n');
   return script.slice(0, firstNewline + 1) + AZURE_SCRIPT_PRELUDE + script.slice(firstNewline + 1);
@@ -456,6 +456,7 @@ export class AzureProvider extends CloudProvider {
       diskSizeGb: number;
       sunshineUsername: string;
       sunshinePassword: string;
+      autoStopMinutes?: number;
       fromSnapshot?: Snapshot;
     }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
@@ -576,7 +577,7 @@ export class AzureProvider extends CloudProvider {
               computerName: vmName,
               adminUsername: ADMIN_USER,
               // The setup script, base64-encoded. cloud-init runs it on first boot.
-              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword)).toString('base64'),
+              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes)).toString('base64'),
               linuxConfiguration: {
                 disablePasswordAuthentication: true,
                 ssh: { publicKeys: [{ path: `/home/${ADMIN_USER}/.ssh/authorized_keys`, keyData: throwawaySshPublicKey() }] },
@@ -650,6 +651,7 @@ export class AzureProvider extends CloudProvider {
       diskSizeGb: options.diskSizeGb || 150,
       sunshineUsername: options.sunshineUsername || 'gamer',
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
+      autoStopMinutes: options.autoStopMinutes,
     });
   }
 
@@ -728,13 +730,26 @@ export class AzureProvider extends CloudProvider {
       running: 'running',
       stopping: 'stopping',
       deallocating: 'stopping',
-      stopped: 'stopped',      // powered off but NOT deallocated (still billed) — only if done outside this app
+      stopped: 'stopped',      // powered off but NOT deallocated (still billed) — deallocated automatically below
       deallocated: 'stopped',  // also what a spot eviction leaves behind
     };
     let status: 'starting' | 'running' | 'stopping' | 'stopped' | 'unknown' = (power && map[power]) || 'unknown';
     if (!power) {
       if (provisioning === 'creating' || provisioning === 'updating') status = 'starting';
       else if (provisioning === 'deleting') status = 'stopping';
+    }
+
+    // A VM shut down from INSIDE (our auto-stop, or "shutdown" in the OS)
+    // ends up "stopped" but still ALLOCATED — and Azure keeps billing it.
+    // Whenever we see that state, ask Azure to deallocate it (no waiting:
+    // it takes a minute or two). The reconcile job checks every 5 minutes,
+    // so an auto-stopped machine stops billing shortly after.
+    if (power === 'stopped') {
+      await this.report('warn', `${name} was shut down from inside the machine but is still allocated (and billed) — deallocating it now.`);
+      this.compute.virtualMachines.beginDeallocate(rg, name)
+        .then(() => console.log(`[Azure] Deallocating ${rg}/${name} after an in-guest shutdown`))
+        .catch((error: unknown) => console.error(`[Azure] Couldn't deallocate ${rg}/${name}:`, (error as Error).message));
+      status = 'stopping';
     }
 
     const ipAddress = await this.publicIpOf(vm).catch(() => '');
