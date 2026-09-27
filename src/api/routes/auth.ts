@@ -1,207 +1,179 @@
 /**
  * ============================================================================
- * src/api/routes/auth.ts — ACCOUNTS: REGISTER, LOG IN, SAVE CLOUD LOGINS
+ * src/api/routes/auth.ts — ACCOUNTS: SIGN UP, SIGN IN, GOOGLE / APPLE
  * ============================================================================
  *
- * Mounted in src/index.ts at /api/auth, so the routes below answer:
- *   POST /api/auth/register           create an account, get a login token
- *   POST /api/auth/login              log in, get a login token
- *   POST /api/auth/cloud-credentials  save your AWS/Azure/GCP/Oracle keys
- *   GET  /api/auth/me                 who am I?
+ * Mounted in src/index.ts at /api/auth (WITHOUT the login check, because
+ * you can't require being signed in to sign in). Routes:
+ *
+ *   GET  /api/auth/providers                 which sign-in options are switched on
+ *   POST /api/auth/register                  create an account (email + password)
+ *   POST /api/auth/login                     sign in (email + password)
+ *   GET  /api/auth/me                        who am I?            (needs a token)
+ *   GET  /api/auth/oauth/:provider/start     go to Google / Apple sign-in
+ *   GET  /api/auth/oauth/:provider/callback  Google comes back here
+ *   POST /api/auth/oauth/:provider/callback  Apple comes back here (a form POST)
  *
  * HOW A ROUTE HANDLER WORKS (applies to every routes file)
  * --------------------------------------------------------
  *   router.post('/login', async (req, res) => { ... })
- *     - `router.post` = answer HTTP POST requests (GET reads, POST creates/acts,
- *       PUT/PATCH update, DELETE removes).
- *     - `req` (request)  = what the browser sent: req.body (JSON data),
- *       req.params (parts of the URL like :id), req.query (?key=value),
- *       req.headers.
- *     - `res` (response) = how we reply: res.json(data) sends JSON;
- *       res.status(404) sets the HTTP status code first.
- *     - `async` lets us `await` slow things like database queries.
+ *     - `req` = what the browser sent (req.body JSON, req.params URL parts,
+ *       req.query ?key=value, req.headers); `res` = how we reply.
+ *     - res.status(401).json({...}) sets the HTTP status and sends JSON.
  *
- * Common HTTP status codes used below:
- *   200 OK (default)   400 Bad Request (the client sent bad/missing data)
- *   401 Unauthorized   404 Not Found   409 Conflict (e.g. already exists)
- *   500 Internal Server Error (something broke on our side)
+ * ERRORS
+ * ------
+ * Every failure replies with { error, code, tip } — `error` says what went
+ * wrong and `tip` what to do. The login page shows both.
  *
- * ⚠️  KNOWN LIMITATIONS — read before going to production
- * -----------------------------------------------------
- * 1. NO PASSWORDS. /login hands out a token to anyone who supplies an email
- *    that exists. Anyone who knows (or guesses) your email can log in as
- *    you. A real password check or an OAuth provider (e.g. "Sign in with
- *    Google") is needed before real users or real cloud keys are involved.
- * 2. /cloud-credentials and /me read `req.userId`, which is only set by
- *    authMiddleware. But in src/index.ts this whole router is mounted
- *    WITHOUT authMiddleware (so that /register and /login work while logged
- *    out). As a result, req.userId is always empty here and those two
- *    endpoints always answer 400/401. Fix: add authMiddleware to just those
- *    two routes.
- * 3. Credentials are stored exactly as sent — NOT encrypted, despite the
- *    column name `encrypted_data`.
+ * SESSION TOKENS
+ * --------------
+ * A successful sign-in returns a JWT (see middleware/auth.ts) valid for 7
+ * days. The frontend sends it as "Authorization: Bearer <token>".
+ * Cloud credentials are NOT handled here any more — see routes/credentials.ts.
  * ============================================================================
  */
 
-import { Router, Request, Response } from 'express';
-import { query } from '../../config/database';
-import { generateJWT } from '../middleware/auth';
+import express, { Router, Request, Response } from 'express';
+import { authMiddleware, generateJWT } from '../middleware/auth';
+import { env } from '../../config/env';
+import {
+  AuthError,
+  MIN_PASSWORD_LENGTH,
+  checkLoginAllowed,
+  clearLoginFailures,
+  findOrCreateOAuthUser,
+  getPublicUser,
+  loginWithPassword,
+  recordLoginFailure,
+  registerWithPassword,
+} from '../../services/AuthService';
+import { OAuthProvider, buildAuthorizeUrl, enabledProviders, handleCallback, missingConfig } from '../../services/OAuthService';
 
-// A Router is a mini-app that holds a group of routes. It's exported at the
-// bottom and plugged into the main app in src/index.ts.
 const router = Router();
 
-/**
- * POST /api/auth/register
- * Create a new user account.
- * Request body: { "email": "you@example.com" }
- * Response:     { userId, email, token }  — the token is used for later requests.
- */
+/** Send an AuthError (or an unexpected error) in the standard shape. */
+function sendError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof AuthError) {
+    return res.status(error.status).json({ error: error.message, code: error.code, tip: error.tip });
+  }
+  console.error(`${fallback}:`, error);
+  return res.status(500).json({
+    error: fallback,
+    code: 'SERVER_ERROR',
+    tip: 'Something broke on our side. Try again in a moment; if it persists, the database may be down (check the DATABASE light).',
+  });
+}
+
+function isProvider(value: string): value is OAuthProvider {
+  return value === 'google' || value === 'apple';
+}
+
+/** GET /api/auth/providers — lets the login page decide which buttons to show. */
+router.get('/providers', (_req: Request, res: Response) => {
+  const enabled = enabledProviders();
+  res.json({
+    password: true,
+    google: enabled.google,
+    apple: enabled.apple,
+    minPasswordLength: MIN_PASSWORD_LENGTH,
+    // Only names of missing settings — never values — to help whoever sets up the app.
+    setupHints: {
+      google: enabled.google ? [] : missingConfig('google'),
+      apple: enabled.apple ? [] : missingConfig('apple'),
+    },
+  });
+});
+
+/** POST /api/auth/register — body: { email, password, displayName? } */
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    // "Destructuring": pull the `email` field out of the request body into
-    // a variable of the same name.
-    const { email } = req.body;
-
-    // Validate input early and stop with a helpful message if it's missing.
-    if (!email) {
-      return res.status(400).json({ error: 'Email required' });
-    }
-
-    // Refuse to create a duplicate account for the same email.
-    const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'User already exists' });
-    }
-
-    // Insert the new user. `RETURNING id, email` makes Postgres send back
-    // the row it just created — including the id the database generated —
-    // so we don't need a second query to find it.
-    const result = await query(
-      'INSERT INTO users (email) VALUES ($1) RETURNING id, email',
-      [email]
-    );
-
-    const user = result.rows[0];
-
-    // Log the new user straight in by issuing a token.
-    const token = generateJWT(user.id, user.email);
-
-    res.json({ userId: user.id, email: user.email, token });
+    const { email, password, displayName } = req.body || {};
+    const user = await registerWithPassword(email, password, displayName);
+    res.status(201).json({ token: generateJWT(user.id, user.email), user });
   } catch (error) {
-    // Anything unexpected (e.g. the database is down): log the real details
-    // for us, return a generic message to the browser.
-    console.error('Register error:', error);
-    res.status(500).json({ error: 'Registration failed' });
+    sendError(res, error, 'Could not create the account');
   }
 });
 
-/**
- * POST /api/auth/login
- * Log in with an email address and receive a token.
- * ⚠️ No password check — see KNOWN LIMITATIONS at the top of this file.
- */
+/** POST /api/auth/login — body: { email, password } */
 router.post('/login', async (req: Request, res: Response) => {
+  const { email, password } = req.body || {};
+  // Limit failed attempts per email + IP address (brute-force protection).
+  const limiterKey = `${String(email || '').toLowerCase()}|${req.ip}`;
   try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ error: 'Email required' });
-    }
-
-    // Look the user up by email.
-    const result = await query(
-      'SELECT id, email FROM users WHERE email = $1',
-      [email]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const user = result.rows[0];
-    const token = generateJWT(user.id, user.email);
-
-    res.json({ userId: user.id, email: user.email, token });
+    checkLoginAllowed(limiterKey);
+    const user = await loginWithPassword(email, password);
+    clearLoginFailures(limiterKey);
+    res.json({ token: generateJWT(user.id, user.email), user });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+    if (error instanceof AuthError && error.status === 401) recordLoginFailure(limiterKey);
+    sendError(res, error, 'Could not sign in');
   }
 });
 
-/**
- * POST /api/auth/cloud-credentials
- * Save (or replace) the logged-in user's login details for one cloud provider.
- * Request body: { "provider": "aws", "encryptedData": "<text>" }
- * ⚠️ Currently always fails with 400 (req.userId is never set here), and
- *    the data isn't really encrypted — see KNOWN LIMITATIONS above.
- */
-router.post('/cloud-credentials', async (req: Request, res: Response) => {
+/** GET /api/auth/me — the signed-in user (needs a valid token). */
+router.get('/me', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { provider, encryptedData } = req.body;
-    const userId = req.userId;
-
-    if (!userId || !provider || !encryptedData) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    const user = await getPublicUser(req.userId!);
+    if (!user) {
+      return res.status(401).json({ error: 'Your account no longer exists.', code: 'NO_USER', tip: 'Sign in again or create a new account.' });
     }
-
-    // This is an "UPSERT" (update-or-insert):
-    //   - INSERT a new row for this user+provider...
-    //   - ...but if one already exists (the table has a UNIQUE rule on
-    //     user_id + provider, so each user has at most one AWS login etc.),
-    //     `ON CONFLICT ... DO UPDATE` overwrites the saved data instead of
-    //     failing with a duplicate error.
-    const result = await query(
-      `INSERT INTO cloud_credentials (user_id, provider, encrypted_data)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, provider) DO UPDATE SET encrypted_data = $3
-       RETURNING id`,
-      [userId, provider, encryptedData]
-    );
-
-    res.json({ credentialsId: result.rows[0].id });
+    res.json({ user });
   } catch (error) {
-    console.error('Cloud credentials error:', error);
-    res.status(500).json({ error: 'Failed to store credentials' });
+    sendError(res, error, 'Could not load your account');
   }
 });
 
-/**
- * GET /api/auth/me
- * Return the logged-in user's profile and budget settings.
- * ⚠️ Currently always answers 401 — see KNOWN LIMITATIONS above.
- */
-router.get('/me', async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId;
+// ---------------------------------------------------------------------------
+// Google / Apple
+// ---------------------------------------------------------------------------
 
-    if (!userId) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
+/** Where the frontend's callback page lives. */
+function frontendCallback(fragment: Record<string, string>): string {
+  const base = env.FRONTEND_URL || '';
+  return `${base}/auth/callback#${new URLSearchParams(fragment).toString()}`;
+}
 
-    const result = await query(
-      'SELECT id, email, budget_cap, budget_alert_threshold FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const user = result.rows[0];
-
-    // The database uses snake_case column names (budget_cap); the frontend
-    // expects camelCase (budgetCap), so we rename fields on the way out.
-    res.json({
-      id: user.id,
-      email: user.email,
-      budgetCap: user.budget_cap,
-      budgetAlertThreshold: user.budget_alert_threshold,
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ error: 'Failed to fetch user' });
+/** GET /api/auth/oauth/:provider/start?next=/machines */
+router.get('/oauth/:provider/start', (req: Request, res: Response) => {
+  const provider = req.params.provider;
+  if (!isProvider(provider)) {
+    return res.status(404).json({ error: 'Unknown sign-in provider.', code: 'UNKNOWN_PROVIDER' });
   }
+  if (!enabledProviders()[provider]) {
+    const missing = missingConfig(provider);
+    const message = `${provider === 'google' ? 'Google' : 'Apple'} sign-in isn't set up on this server yet.`;
+    const tip = `Whoever runs this app needs to set: ${missing.join(', ')}.`;
+    // This is a page navigation, so send the browser back to the login page with the message.
+    return env.FRONTEND_URL
+      ? res.redirect(frontendCallback({ error: message, tip }))
+      : res.status(503).json({ error: message, code: 'OAUTH_NOT_CONFIGURED', tip });
+  }
+  res.redirect(buildAuthorizeUrl(provider, req.query.next));
 });
+
+/** Shared by the GET (Google) and POST (Apple) callbacks. */
+async function oauthCallback(req: Request, res: Response) {
+  const provider = req.params.provider;
+  if (!isProvider(provider)) return res.status(404).json({ error: 'Unknown sign-in provider.' });
+  // Google puts the answer in the URL (?code=); Apple posts a form (body).
+  const params = { ...req.query, ...(req.body || {}) };
+  try {
+    const profile = await handleCallback(provider, params);
+    const user = await findOrCreateOAuthUser(profile);
+    res.redirect(frontendCallback({ token: generateJWT(user.id, user.email), next: profile.next }));
+  } catch (error) {
+    if (!(error instanceof AuthError)) console.error(`[OAuth] ${provider} callback failed:`, error);
+    const e = error instanceof AuthError
+      ? error
+      : new AuthError(500, 'OAUTH_FAILED', 'Sign-in failed on our side.', 'Try again in a moment.');
+    res.redirect(frontendCallback({ error: e.message, tip: e.tip || '', code: e.code }));
+  }
+}
+
+router.get('/oauth/:provider/callback', oauthCallback);
+// Apple sends application/x-www-form-urlencoded, so parse that for this route.
+router.post('/oauth/:provider/callback', express.urlencoded({ extended: false }), oauthCallback);
 
 export default router;

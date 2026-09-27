@@ -65,7 +65,47 @@ export const env = {
   // Default AWS region: Singapore, the primary region for this project.
   AWS_REGION: process.env.AWS_REGION || 'ap-southeast-1',
   AZURE_SUBSCRIPTION_ID: process.env.AZURE_SUBSCRIPTION_ID || '',
+  // Legacy/unused for launching: each user now adds their own Google Cloud
+  // project + key on the Config page (stored encrypted in the database).
   GCP_PROJECT_ID: process.env.GCP_PROJECT_ID || '',
+
+  // ---- Encrypting users' cloud keys --------------------------------------
+  // Master key used to encrypt every user's cloud credentials before they
+  // are stored (see src/services/CredentialService.ts). Any long random
+  // string works (32+ characters), e.g. the output of: openssl rand -hex 32
+  // ⚠️ If you change or lose it, stored credentials can no longer be
+  // decrypted and every user must add their keys again. Without it, adding
+  // credentials is refused with a clear message.
+  CREDENTIALS_ENCRYPTION_KEY: process.env.CREDENTIALS_ENCRYPTION_KEY || '',
+
+  // ---- Public addresses (needed for Google / Apple sign-in) --------------
+  // FRONTEND_URL: where the website lives, e.g. https://cloudgaming.vercel.app
+  //   Used to send people back after signing in with Google/Apple, and (if
+  //   set) to restrict which website may call this API (CORS).
+  // API_PUBLIC_URL: this backend's public address INCLUDING /api, e.g.
+  //   https://cloudgaming-production.up.railway.app/api — Google and Apple
+  //   redirect back to <API_PUBLIC_URL>/auth/oauth/<provider>/callback.
+  FRONTEND_URL: (process.env.FRONTEND_URL || '').replace(/\/+$/, ''),
+  API_PUBLIC_URL: (process.env.API_PUBLIC_URL || '').replace(/\/+$/, ''),
+
+  // ---- "Continue with Google" (optional) ----------------------------------
+  // From Google Cloud console → APIs & Services → Credentials → OAuth client
+  // ID (type "Web application"). The button only appears when both are set.
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
+
+  // ---- "Continue with Apple" (optional) -----------------------------------
+  // From developer.apple.com → Certificates, Identifiers & Profiles:
+  //   APPLE_CLIENT_ID   the Services ID (e.g. com.example.cloudgaming.web)
+  //   APPLE_TEAM_ID     your 10-character Team ID
+  //   APPLE_KEY_ID      the Key ID of a "Sign in with Apple" key
+  //   APPLE_PRIVATE_KEY the contents of that key's .p8 file (newlines may be
+  //                     written as \n)
+  // The button only appears when all four are set.
+  APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID || '',
+  APPLE_TEAM_ID: process.env.APPLE_TEAM_ID || '',
+  APPLE_KEY_ID: process.env.APPLE_KEY_ID || '',
+  APPLE_PRIVATE_KEY: (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
 
   // ---- Gaming machine image ---------------------------------------------
   // An AMI ("Amazon Machine Image") is a saved disk template that new AWS
