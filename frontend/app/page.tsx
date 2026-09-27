@@ -92,52 +92,70 @@ export default function Dashboard() {
   }, []);
 
   if (loading) {
-    return <div className="text-center py-12">Loading...</div>;
+    return (
+      <div className="text-center py-12">
+        <div className="inline-block">
+          <p className="font-mono text-neon-cyan text-lg mb-4">
+            > INITIALIZING NEON_CORE...
+          </p>
+          <div className="flex gap-2 justify-center">
+            <div className="w-2 h-2 bg-neon-cyan rounded-full animate-pulse"></div>
+            <div className="w-2 h-2 bg-neon-magenta rounded-full animate-pulse" style={{animationDelay: '0.1s'}}></div>
+            <div className="w-2 h-2 bg-neon-lime rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Gaming Infrastructure Dashboard</h1>
-        <p className="text-gray-600">Monitor and manage your cloud gaming machines</p>
+        <h1 className="text-4xl font-bold neon-text mb-2">
+          ▲ GAMING_INFRASTRUCTURE_DASH
+        </h1>
+        <p className="font-mono text-sm text-neon-lime">
+          {'> monitor_and_manage_cloud_resources'.toUpperCase()}
+        </p>
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
-          {error}
+        <div className="mb-4 p-4 border-l-4 border-neon-pink bg-red-950/30 rounded text-neon-pink font-mono text-sm">
+          <span className="font-bold">⚠ ERROR:</span> {error}
         </div>
       )}
 
       {machines.length > 0 ? (
         <div className="space-y-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Active Machines</h2>
+          <div className="neon-card rounded-lg p-6">
+            <h2 className="text-2xl font-bold neon-text mb-6 font-mono">
+              [ ACTIVE_INSTANCES ]
+            </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {machines.map((machine) => (
                 <button
                   key={machine.id}
                   onClick={() => {
                     setSelectedMachine(machine.id);
-                    // In production, fetch the specific machine's BoM
                   }}
-                  className={`p-4 rounded-lg border-2 transition ${
+                  className={`p-4 rounded-lg border-2 transition font-mono text-sm ${
                     selectedMachine === machine.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-300 hover:border-gray-400'
+                      ? 'neon-card-magenta border-neon-magenta'
+                      : 'neon-card border-neon-cyan hover:border-neon-magenta'
                   }`}
                 >
                   <div className="text-left">
-                    <h3 className="font-semibold text-gray-900">{machine.instance_type}</h3>
-                    <p className="text-sm text-gray-600">{machine.provider.toUpperCase()} - {machine.region}</p>
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className={`text-xs px-2 py-1 rounded ${
+                    <h3 className="font-bold text-neon-cyan">{machine.instance_type}</h3>
+                    <p className="text-neon-lime text-xs mt-1">{machine.provider.toUpperCase()} / {machine.region}</p>
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className={`text-xs px-2 py-1 rounded font-mono ${
                         machine.status === 'running'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
+                          ? 'border border-neon-lime text-neon-lime bg-green-950/20'
+                          : 'border border-neon-cyan/50 text-neon-cyan/50'
                       }`}>
-                        {machine.status}
+                        [{machine.status.toUpperCase()}]
                       </span>
-                      <span className="text-sm font-bold text-gray-900">${machine.cost_per_hour.toFixed(2)}/hr</span>
+                      <span className="text-neon-magenta font-bold text-sm">${machine.cost_per_hour.toFixed(2)}/hr</span>
                     </div>
                   </div>
                 </button>
@@ -150,30 +168,32 @@ export default function Dashboard() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-1">Monthly Projected Cost</p>
-              <p className="text-3xl font-bold text-blue-600">
+            <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan font-mono">
+              <p className="text-xs text-neon-lime mb-2 font-bold">COST_PROJECTION_MONTHLY</p>
+              <p className="text-4xl font-bold text-neon-cyan">
                 ${boM ? boM.billOfMaterials.total.costPerMonth.toFixed(2) : '0.00'}
               </p>
-              <p className="text-xs text-gray-600 mt-2">For 1 running machine</p>
+              <p className="text-xs text-neon-cyan/60 mt-2">1 active_machine</p>
             </div>
-            <div className="bg-green-50 rounded-lg p-6 border border-green-200">
-              <p className="text-sm text-gray-600 mb-1">Current Spend (This Month)</p>
-              <p className="text-3xl font-bold text-green-600">$0.00</p>
-              <p className="text-xs text-gray-600 mt-2">Load real data from API</p>
+            <div className="neon-card-lime rounded-lg p-6 border border-neon-lime font-mono">
+              <p className="text-xs text-neon-cyan mb-2 font-bold">CURRENT_SPEND_MONTH</p>
+              <p className="text-4xl font-bold text-neon-lime">$0.00</p>
+              <p className="text-xs text-neon-lime/60 mt-2">awaiting_api_integration</p>
             </div>
-            <div className="bg-purple-50 rounded-lg p-6 border border-purple-200">
-              <p className="text-sm text-gray-600 mb-1">Active Machines</p>
-              <p className="text-3xl font-bold text-purple-600">{machines.length}</p>
-              <p className="text-xs text-gray-600 mt-2">{machines.filter(m => m.status === 'running').length} running</p>
+            <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta font-mono">
+              <p className="text-xs text-neon-cyan mb-2 font-bold">ACTIVE_INSTANCES</p>
+              <p className="text-4xl font-bold text-neon-magenta">{machines.length}</p>
+              <p className="text-xs text-neon-magenta/60 mt-2">{machines.filter(m => m.status === 'running').length} running</p>
             </div>
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <p className="text-gray-600 mb-4">No machines running yet</p>
-          <a href="/machines" className="text-blue-600 hover:text-blue-800 font-medium">
-            Launch your first machine →
+        <div className="neon-card rounded-lg p-12 text-center border border-neon-cyan">
+          <p className="font-mono text-neon-lime mb-6">
+            > NO_MACHINES_DETECTED
+          </p>
+          <a href="/machines" className="inline-block btn-neon-lime">
+            [ LAUNCH_FIRST_INSTANCE ]
           </a>
         </div>
       )}

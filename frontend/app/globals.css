@@ -1,17 +1,184 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+* {
+  @apply transition-colors duration-200;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
+  font-family: 'IBM Plex Mono', -apple-system, BlinkMacSystemFont, "Segoe UI", monospace;
+  background-color: #0a0e27;
+  background-image:
+    linear-gradient(0deg, transparent 24%, rgba(0, 255, 255, 0.05) 25%, rgba(0, 255, 255, 0.05) 26%, transparent 27%, transparent 74%, rgba(0, 255, 255, 0.05) 75%, rgba(0, 255, 255, 0.05) 76%, transparent 77%, transparent),
+    linear-gradient(90deg, transparent 24%, rgba(0, 255, 255, 0.05) 25%, rgba(0, 255, 255, 0.05) 26%, transparent 27%, transparent 74%, rgba(0, 255, 255, 0.05) 75%, rgba(0, 255, 255, 0.05) 76%, transparent 77%, transparent);
+  background-size: 50px 50px;
+  background-position: 0 0, 0 0;
+  color: #00ffff;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
-    monospace;
+  font-family: 'Space Mono', source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+  color: #00ff41;
+  background-color: rgba(10, 14, 39, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+}
+
+/* Neon glow effects */
+@keyframes neon-glow {
+  0%, 100% {
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.5),
+                 0 0 20px rgba(0, 255, 255, 0.3);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(0, 255, 255, 0.8),
+                 0 0 30px rgba(0, 255, 255, 0.5),
+                 0 0 40px rgba(0, 255, 255, 0.3);
+  }
+}
+
+@keyframes flicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+    opacity: 1;
+  }
+  20%, 24%, 55% {
+    opacity: 0.8;
+  }
+}
+
+@keyframes scan {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+.neon-text {
+  @apply text-neon-cyan font-bold;
+  animation: neon-glow 3s ease-in-out infinite;
+}
+
+.neon-accent {
+  @apply text-neon-magenta;
+  text-shadow: 0 0 10px rgba(255, 0, 255, 0.5);
+}
+
+.neon-success {
+  @apply text-neon-lime;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+}
+
+.neon-pink {
+  @apply text-neon-pink;
+  text-shadow: 0 0 10px rgba(255, 0, 128, 0.5);
+}
+
+.scan-line {
+  animation: scan 3s linear infinite;
+}
+
+/* Card styling with neon borders */
+.neon-card {
+  @apply border border-neon-cyan bg-gradient-to-br from-cyan-950/20 to-blue-950/20 backdrop-blur-sm;
+  box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.1), 0 0 20px rgba(0, 255, 255, 0.2);
+  border-image: linear-gradient(135deg, #00ffff, #00ff41) 1;
+}
+
+.neon-card-magenta {
+  @apply border border-neon-magenta bg-gradient-to-br from-pink-950/20 to-purple-950/20 backdrop-blur-sm;
+  box-shadow: inset 0 0 20px rgba(255, 0, 255, 0.1), 0 0 20px rgba(255, 0, 255, 0.2);
+}
+
+.neon-card-lime {
+  @apply border border-neon-lime bg-gradient-to-br from-green-950/20 to-emerald-950/20 backdrop-blur-sm;
+  box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.1), 0 0 20px rgba(0, 255, 65, 0.2);
+}
+
+/* Button styling */
+.btn-neon {
+  @apply px-6 py-2 font-mono font-bold border border-neon-cyan rounded text-neon-cyan hover:text-white cursor-pointer;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-neon:hover {
+  box-shadow: 0 0 25px rgba(0, 255, 255, 0.8), inset 0 0 10px rgba(0, 255, 255, 0.2);
+  background-color: rgba(0, 255, 255, 0.1);
+}
+
+.btn-neon-magenta {
+  @apply px-6 py-2 font-mono font-bold border border-neon-magenta rounded text-neon-magenta hover:text-white cursor-pointer;
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.3);
+}
+
+.btn-neon-magenta:hover {
+  box-shadow: 0 0 25px rgba(255, 0, 255, 0.8), inset 0 0 10px rgba(255, 0, 255, 0.2);
+  background-color: rgba(255, 0, 255, 0.1);
+}
+
+.btn-neon-lime {
+  @apply px-6 py-2 font-mono font-bold border border-neon-lime rounded text-neon-lime hover:text-white cursor-pointer;
+  box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+}
+
+.btn-neon-lime:hover {
+  box-shadow: 0 0 25px rgba(0, 255, 65, 0.8), inset 0 0 10px rgba(0, 255, 65, 0.2);
+  background-color: rgba(0, 255, 65, 0.1);
+}
+
+/* Input styling */
+.input-neon {
+  @apply bg-cyber-dark border border-neon-cyan text-neon-cyan placeholder-cyan-700 focus:outline-none focus:ring-2 focus:ring-neon-cyan focus:border-transparent;
+  box-shadow: inset 0 0 10px rgba(0, 255, 255, 0.1);
+}
+
+.input-neon::placeholder {
+  opacity: 0.5;
+}
+
+/* Terminal-like effect */
+.terminal {
+  @apply font-mono bg-cyber-darker border border-neon-lime text-neon-lime p-4 rounded;
+  box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.1), 0 0 20px rgba(0, 255, 65, 0.2);
+}
+
+.terminal::before {
+  content: '> ';
+  color: #00ff41;
+  animation: flicker 0.15s infinite;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 255, 255, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #00ffff, #00ff41);
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
 }
