@@ -1,9 +1,39 @@
 'use client';
+// ↑ Client component: it runs a timer and updates live in the browser.
+
+/**
+ * ============================================================================
+ * frontend/components/SystemStatusBar.tsx — THE SIX STATUS LIGHTS
+ * ============================================================================
+ *
+ * The thin strip under the header on every page:
+ *   ● BACKEND  ● DATABASE  |  ● AWS  ● AZURE  ● GCP  ● ORACLE     Build info ›
+ * Green = reachable (with the check time in ms), red = not, grey pulsing = still checking.
+ *
+ * HOW IT WORKS
+ * ------------
+ * Every 20 seconds it calls the backend's GET /api/status (answered by
+ * src/api/routes/status.ts + src/services/StatusService.ts), which reports
+ * the database and each cloud. The BACKEND light is decided HERE: if that
+ * request fails entirely, the backend is unreachable, and every light goes red.
+ *
+ * REACT CONCEPTS USED
+ * -------------------
+ * - useState: a component's memory. `const [status, setStatus] = useState(x)`
+ *   gives the current value and a function to change it; changing it makes
+ *   React re-draw the component with the new value.
+ * - useEffect: run code AFTER the component appears on screen — here, start
+ *   polling. The function it returns runs when the component is removed
+ *   ("cleanup"), which stops the timer.
+ * ============================================================================
+ */
 
 import { useState, useEffect } from 'react';
 import { apiUrl } from '@/lib/api';
 import BuildInfoPanel from './BuildInfoPanel';
 
+// These interfaces describe the JSON the backend sends. They mirror the ones
+// in src/services/StatusService.ts — if you change one, change the other.
 interface ServiceStatus {
   name: string;
   connected: boolean;
@@ -23,8 +53,16 @@ interface SystemStatus {
   };
 }
 
+// How often to re-check, in milliseconds (20000 ms = 20 seconds).
 const POLL_INTERVAL_MS = 20000;
 
+/**
+ * One light: a coloured dot, a label, and the check time when connected.
+ * A small component used only in this file.
+ *
+ * `connected` is `boolean | null`: true = green, false = red, null = no
+ * answer yet. `loading` true = still waiting for the first check (grey, pulsing).
+ */
 function Light({
   label,
   connected,
@@ -36,6 +74,7 @@ function Light({
   loading: boolean;
   latencyMs?: number;
 }) {
+  // Chained ternaries: loading ? grey : (connected ? green : red).
   const color = loading
     ? 'bg-slate-600'
     : connected
@@ -48,6 +87,7 @@ function Light({
     ? 'shadow-[0_0_6px_1px_rgba(143,214,148,0.55)]'
     : 'shadow-[0_0_6px_1px_rgba(229,72,77,0.55)]';
 
+  // `title` = the tooltip shown when you hover over the light.
   return (
     <div className="flex items-center gap-1.5" title={latencyMs !== undefined ? `${latencyMs}ms` : undefined}>
       <span
@@ -66,17 +106,27 @@ function Light({
 }
 
 export default function SystemStatusBar() {
-  const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // The component's memory (see "REACT CONCEPTS" above):
+  const [status, setStatus] = useState<SystemStatus | null>(null);                  // last answer from /api/status
+  const [backendReachable, setBackendReachable] = useState<boolean | null>(null);   // did that request work at all?
+  const [loading, setLoading] = useState(true);                                     // still waiting for the first answer?
+  const [panelOpen, setPanelOpen] = useState(false);                                // is the Build info pop-up showing?
 
+  // Runs once after the bar first appears (the empty [] at the end means
+  // "no dependencies — don't re-run on re-renders").
   useEffect(() => {
+    // Guard flag: if the component is removed while a request is still in
+    // flight, don't try to update state afterwards (React warns about that).
     let cancelled = false;
 
+    // Ask the backend for the current status and store the result.
     const fetchStatus = async () => {
       try {
+        // `fetch` = the browser's built-in way to make a web request.
+        // cache: 'no-store' = always ask the server, never reuse a stored copy.
         const response = await fetch(apiUrl('/status'), { cache: 'no-store' });
+        // fetch only throws on NETWORK failure; an HTTP error like 500 still
+        // "succeeds", so check response.ok (true for 200–299) ourselves.
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data: SystemStatus = await response.json();
         if (!cancelled) {
@@ -84,6 +134,9 @@ export default function SystemStatusBar() {
           setBackendReachable(true);
         }
       } catch (error) {
+        // Couldn't reach the backend: backend light red, and forget the old
+        // status so the other lights don't show stale green. Common causes:
+        // backend down, NEXT_PUBLIC_API_URL wrong/missing, or a CORS problem.
         if (!cancelled) {
           setBackendReachable(false);
           setStatus(null);
@@ -93,8 +146,12 @@ export default function SystemStatusBar() {
       }
     };
 
+    // Check immediately, then every 20 s. setInterval returns an id we need
+    // later to stop it.
     fetchStatus();
     const interval = setInterval(fetchStatus, POLL_INTERVAL_MS);
+
+    // Cleanup, run when the bar is removed: stop the timer, ignore late answers.
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -105,6 +162,9 @@ export default function SystemStatusBar() {
     <div className="sticky top-12 z-40 border-b border-white/[0.05] bg-cyber-darker/95 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-4 overflow-x-auto">
         <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
+          {/* `status?.database.connected ?? null` below: `?.` = "if status
+              exists" (it's null until the first answer), and `?? null` =
+              "if that gave undefined, use null (= unknown)". */}
           <Light label="Backend" connected={backendReachable} loading={loading} />
           <Light
             label="Database"
@@ -147,6 +207,8 @@ export default function SystemStatusBar() {
         </button>
       </div>
 
+      {/* The pop-up only exists while panelOpen is true. We pass it a
+          function to call when it wants to close. */}
       {panelOpen && <BuildInfoPanel onClose={() => setPanelOpen(false)} />}
     </div>
   );
