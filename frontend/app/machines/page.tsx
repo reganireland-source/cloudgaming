@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import StreamingClientModal from '@/components/StreamingClientModal';
 
 interface Machine {
   id: string;
@@ -16,6 +17,8 @@ interface Machine {
 export default function MachinesPage() {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
+  const [streamingModalOpen, setStreamingModalOpen] = useState(false);
+  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
 
   useEffect(() => {
     // Mock data for demonstration
@@ -55,6 +58,24 @@ export default function MachinesPage() {
 
   const handleDelete = (id: string) => {
     setMachines(machines.filter(m => m.id !== id));
+    if (selectedMachineId === id) {
+      setStreamingModalOpen(false);
+      setSelectedMachineId(null);
+    }
+  };
+
+  const handleConnect = (machineId: string, machineIp?: string) => {
+    if (!machineIp) {
+      console.error('Machine IP address not available');
+      return;
+    }
+    setSelectedMachineId(machineId);
+    setStreamingModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setStreamingModalOpen(false);
+    setSelectedMachineId(null);
   };
 
   if (loading) {
@@ -116,12 +137,21 @@ export default function MachinesPage() {
                   <td className="px-6 py-4 text-neon-lime text-xs">{machine.ip_address || '—'}</td>
                   <td className="px-6 py-4 text-right space-x-2 flex justify-end">
                     {machine.status === 'running' ? (
-                      <button
-                        onClick={() => handleStop(machine.id)}
-                        className="btn-neon-pink text-xs py-1 px-3"
-                      >
-                        STOP
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleConnect(machine.id, machine.ip_address)}
+                          className="bg-neon-cyan text-slate-900 hover:bg-cyan-300 rounded px-3 py-1 text-xs font-bold transition-all"
+                          title="Connect to this machine for streaming"
+                        >
+                          CONNECT
+                        </button>
+                        <button
+                          onClick={() => handleStop(machine.id)}
+                          className="btn-neon-pink text-xs py-1 px-3"
+                        >
+                          STOP
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => handleStart(machine.id)}
@@ -151,6 +181,15 @@ export default function MachinesPage() {
             [ DEPLOY_FIRST_MACHINE ]
           </button>
         </div>
+      )}
+
+      {selectedMachineId && (
+        <StreamingClientModal
+          machineId={selectedMachineId}
+          machineIp={machines.find(m => m.id === selectedMachineId)?.ip_address || ''}
+          isOpen={streamingModalOpen}
+          onClose={handleCloseModal}
+        />
       )}
     </div>
   );
