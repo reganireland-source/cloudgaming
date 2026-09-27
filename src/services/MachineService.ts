@@ -20,8 +20,16 @@ export class MachineService {
     region: string,
     instanceType: string,
     gameTitle: string,
-    streamingQuality: string
+    streamingQuality: string = 'high'
   ): Promise<Machine> {
+    // Validate quality
+    const validQualities = ['budget', 'good', 'high', 'ultra'];
+    const normalizedQuality = streamingQuality.toLowerCase();
+    if (!validQualities.includes(normalizedQuality)) {
+      throw new Error(
+        `Invalid streaming quality: ${streamingQuality}. Must be one of: ${validQualities.join(', ')}`
+      );
+    }
     try {
       // 1. Get cloud credentials for this provider
       const credsResult = await query(
@@ -65,8 +73,8 @@ export class MachineService {
       const insertResult = await query(
         `INSERT INTO machines (
           id, user_id, provider, region, instance_type, instance_id,
-          status, cost_per_hour, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+          status, cost_per_hour, streaming_quality, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
         RETURNING *`,
         [
           machineId,
@@ -77,6 +85,7 @@ export class MachineService {
           launchResult.instanceId,
           'running',
           launchResult.costPerHour,
+          normalizedQuality,
         ]
       );
 
@@ -278,6 +287,96 @@ export class MachineService {
       return insertResult.rows[0];
     } catch (error) {
       console.error('Migrate machine error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update streaming quality for a machine
+   */
+  static async updateStreamingQuality(
+    machineId: string,
+    userId: string,
+    newQuality: string
+  ): Promise<Machine> {
+    try {
+      // Validate quality
+      const validQualities = ['budget', 'good', 'high', 'ultra'];
+      const normalizedQuality = newQuality.toLowerCase();
+      if (!validQualities.includes(normalizedQuality)) {
+        throw new Error(
+          `Invalid streaming quality: ${newQuality}. Must be one of: ${validQualities.join(', ')}`
+        );
+      }
+
+      // Get current machine to verify ownership and get old quality
+      const machineResult = await query(
+        'SELECT * FROM machines WHERE id = $1 AND user_id = $2',
+        [machineId, userId]
+      );
+
+      if (machineResult.rows.length === 0) {
+        throw new Error('Machine not found');
+      }
+
+      const machine = machineResult.rows[0];
+      const oldQuality = machine.streaming_quality || 'high';
+
+      // If machine is running, apply quality changes via SSH
+      if (machine.status === 'running') {
+        try {
+          const credsResult = await query(
+            'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
+            [userId, machine.provider]
+          );
+
+          const credentials = JSON.parse(credsResult.rows[0].encrypted_data);
+          const cloudProvider = getProvider(machine.provider, credentials);
+
+          // Update quality configuration on the instance
+          const setup = new CloudyPadSetup(
+            machine.ip_address,
+            normalizedQuality,
+            machine.region
+          );
+
+          // Call configureSunshine to apply new quality settings
+          await (setup as any).configureSunshine();
+          console.log(
+            `[MachineService] Updated streaming quality to ${normalizedQuality} on ${machineId}`
+          );
+        } catch (error) {
+          console.error('Failed to apply quality settings to running instance:', error);
+          // Continue with database update even if SSH fails - user can retry
+        }
+      }
+
+      // Update machine record
+      const updateResult = await query(
+        'UPDATE machines SET streaming_quality = $1 WHERE id = $2 RETURNING *',
+        [normalizedQuality, machineId]
+      );
+
+      // Track quality change
+      await query(
+        `INSERT INTO quality_updates (machine_id, user_id, old_quality, new_quality, reason)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          machineId,
+          userId,
+          oldQuality,
+          normalizedQuality,
+          'User-initiated quality update',
+        ]
+      );
+
+      console.log(
+        `[MachineService] Quality updated for ${machineId}: ${oldQuality} -> ${normalizedQuality}`
+      );
+
+      return updateResult.rows[0];
+    } catch (error) {
+      console.error('Update streaming quality error:', error);
       throw error;
     }
   }

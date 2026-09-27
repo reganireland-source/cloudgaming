@@ -200,6 +200,49 @@ router.post('/:id/migrate', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/machines/:id/quality
+ * Update streaming quality for a machine
+ */
+router.post('/:id/quality', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+    const { quality } = req.body;
+
+    if (!quality) {
+      return res.status(400).json({ error: 'Quality parameter is required' });
+    }
+
+    // Verify ownership
+    const machineResult = await query(
+      'SELECT user_id FROM machines WHERE id = $1',
+      [id]
+    );
+
+    if (machineResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+
+    if (machineResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const updatedMachine = await MachineService.updateStreamingQuality(id, userId, quality);
+
+    res.json({
+      status: 'quality_updated',
+      machine: updatedMachine,
+      message: `Streaming quality updated to ${quality}`,
+    });
+  } catch (error: any) {
+    console.error('Update quality error:', error);
+    res
+      .status(500)
+      .json({ error: 'Failed to update streaming quality', details: String(error) });
+  }
+});
+
+/**
  * DELETE /api/machines/:id
  * Delete/terminate a machine
  */
