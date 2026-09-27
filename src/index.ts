@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { env } from './config/env';
 import { query as dbQuery } from './config/database';
+import { initializeJobs } from './jobs';
 
 // Import routes
 import authRoutes from './api/routes/auth';
@@ -65,6 +66,10 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 // Start server
 const PORT = env.PORT;
+
+// Initialize background jobs
+initializeJobs();
+
 app.listen(PORT, () => {
   console.log(`CloudGaming Hub backend running on port ${PORT}`);
   console.log(`Environment: ${env.NODE_ENV}`);
