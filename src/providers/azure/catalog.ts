@@ -93,6 +93,11 @@ export const AZURE_REGIONS: AzureRegion[] = [
   { id: 'southeastasia', name: 'Singapore', lat: 1.35, lng: 103.82, gpus: ['T4'], priceFactor: 1.25, egressPerGb: 0.12 },
   { id: 'australiaeast', name: 'Sydney', lat: -33.87, lng: 151.21, gpus: ['T4'], priceFactor: 1.4, egressPerGb: 0.12 },
   { id: 'japaneast', name: 'Tokyo', lat: 35.68, lng: 139.69, gpus: ['T4'], priceFactor: 1.4, egressPerGb: 0.12 },
+  // Added after real quota approvals (NCASv3_T4 auto-approved = Azure has capacity there).
+  // Price factors are rough; Recon/launch use Azure's live prices when reachable.
+  { id: 'eastasia', name: 'Hong Kong (East Asia)', lat: 22.28, lng: 114.16, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'japanwest', name: 'Osaka (Japan West)', lat: 34.69, lng: 135.5, gpus: ['T4'], priceFactor: 1.4, egressPerGb: 0.12 },
+  { id: 'malaysiawest', name: 'Kuala Lumpur (Malaysia West)', lat: 3.14, lng: 101.69, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },
   { id: 'centralindia', name: 'Pune (Central India)', lat: 18.52, lng: 73.86, gpus: ['T4'], priceFactor: 1.05, egressPerGb: 0.12 },
   { id: 'eastus', name: 'Virginia (East US)', lat: 37.37, lng: -79.82, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
   { id: 'westus2', name: 'Washington (West US 2)', lat: 47.23, lng: -119.85, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },

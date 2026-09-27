@@ -192,11 +192,13 @@ aws service-quotas request-service-quota-increase --service-code ec2 --quota-cod
         'Portal → Quotas → Compute → pick your region.',
         'Find "Standard NCASv3_T4 Family vCPUs" → request 8.',
         'For spot machines, also request "Total Regional Spot vCPUs" → 8.',
+        'No NCASv3_T4 row for a region (e.g. Southeast Asia/Singapore)? Azure restricts that region for your subscription — open a support request (Quota type "Region access"), or use a nearby region such as Malaysia West (Kuala Lumpur).',
+        'Requests Azure can’t auto-approve show a red ✗ — that isn’t a refusal; follow up with a support request and they’re reviewed by hand in a few days.',
       ],
       cli: {
         shell: 'Cloud Shell (Bash)', href: 'https://portal.azure.com/#cloudshell/',
         note: '"lowPriorityCores" is Azure\'s internal name for "Total Regional Spot vCPUs".',
-        code: `SUB=$(az account show --query id -o tsv); LOC=southeastasia   # your region
+        code: `SUB=$(az account show --query id -o tsv); LOC=malaysiawest   # your region (Singapore = southeastasia is restricted for many new subscriptions)
 az vm list-usage --location $LOC -o table | grep -Ei "NCASv3_T4|Spot|Low-priority|Total Regional"
 az extension add --name quota
 az quota update --resource-name standardNCASv3_T4Family --resource-type dedicated \\
