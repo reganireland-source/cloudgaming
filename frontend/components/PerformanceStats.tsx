@@ -45,7 +45,7 @@ interface PerformanceStatsProps {
   healthStatus: 'healthy' | 'warning' | 'critical';
 }
 
-const StatCard = ({ label, value, unit, color, threshold }: any) => {
+const StatCard = ({ label, value, unit, threshold }: any) => {
   const isWarning = threshold && value > threshold.warning;
   const isCritical = threshold && value > threshold.critical;
 
@@ -67,7 +67,7 @@ const StatCard = ({ label, value, unit, color, threshold }: any) => {
 };
 
 export default function PerformanceStats({
-  machineId,
+  machineId: _machineId,
   current,
   average,
   peak,
@@ -267,7 +267,7 @@ export default function PerformanceStats({
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="time" />
             <YAxis domain={[0, 100]} label={{ value: '%', angle: -90, position: 'insideLeft' }} />
-            <Tooltip formatter={(value) => `${value.toFixed(1)}%`} />
+            <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
             <Legend />
             <Area type="monotone" dataKey="cpu" stroke="#3b82f6" fillOpacity={1} fill="url(#colorCpu)" name="CPU %" />
             <Area type="monotone" dataKey="gpu" stroke="#a855f7" fillOpacity={1} fill="url(#colorGpu)" name="GPU %" />
@@ -322,7 +322,7 @@ export default function PerformanceStats({
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="time" />
             <YAxis label={{ value: 'MB/s', angle: -90, position: 'insideLeft' }} />
-            <Tooltip formatter={(value) => `${value.toFixed(2)} MB/s`} />
+            <Tooltip formatter={(value) => `${Number(value).toFixed(2)} MB/s`} />
             <Legend />
             <Line type="monotone" dataKey="diskRead" stroke="#0ea5e9" name="Read Speed" strokeWidth={2} />
             <Line type="monotone" dataKey="diskWrite" stroke="#f59e0b" name="Write Speed" strokeWidth={2} />

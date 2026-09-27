@@ -73,7 +73,7 @@ export default function CostsPage() {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 255, 255, 0.1)" />
             <XAxis dataKey="date" stroke="rgba(0, 255, 255, 0.3)" />
             <YAxis stroke="rgba(0, 255, 255, 0.3)" />
-            <Tooltip formatter={(value) => `$${value.toFixed(2)}`} contentStyle={{ backgroundColor: '#0a0e27', border: '1px solid #00ffff' }} />
+            <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} contentStyle={{ backgroundColor: '#0a0e27', border: '1px solid #00ffff' }} />
             <Legend />
             <Line
               type="monotone"
@@ -95,7 +95,7 @@ export default function CostsPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 0, 255, 0.1)" />
               <XAxis dataKey="provider" stroke="rgba(255, 0, 255, 0.3)" />
               <YAxis stroke="rgba(255, 0, 255, 0.3)" />
-              <Tooltip formatter={(value) => `$${value.toFixed(2)}`} contentStyle={{ backgroundColor: '#0a0e27', border: '1px solid #ff00ff' }} />
+              <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} contentStyle={{ backgroundColor: '#0a0e27', border: '1px solid #ff00ff' }} />
               <Legend />
               <Bar dataKey="compute" stackId="a" fill="#00ffff" name="Compute" />
               <Bar dataKey="egress" stackId="a" fill="#00ff41" name="Egress" />

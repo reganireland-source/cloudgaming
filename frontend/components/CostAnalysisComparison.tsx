@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiUrl } from '@/lib/api';
 
 interface RegionOption {
   provider: string;
@@ -45,12 +46,11 @@ export default function CostAnalysisComparison({
 }: CostAnalysisComparisonProps) {
   const [analysis, setAnalysis] = useState<CostAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
-        const response = await fetch('/api/cost-analysis/compare', {
+        const response = await fetch(apiUrl('/cost-analysis/compare'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -62,7 +62,6 @@ export default function CostAnalysisComparison({
         });
         const data = await response.json();
         setAnalysis(data);
-        setSelectedProvider(data.recommendation.bestValue.provider);
       } catch (error) {
         console.error('Failed to fetch cost analysis:', error);
       } finally {
@@ -79,7 +78,7 @@ export default function CostAnalysisComparison({
         <div className="inline-block">
           <div className="animate-spin h-8 w-8 border-2 border-neon-cyan border-t-transparent rounded-full mb-4"></div>
           <p className="font-mono text-neon-cyan text-sm">
-            > ANALYZING_COSTS_AND_PERFORMANCE...
+            {'> ANALYZING_COSTS_AND_PERFORMANCE...'}
           </p>
         </div>
       </div>
@@ -90,7 +89,7 @@ export default function CostAnalysisComparison({
     return (
       <div className="p-8 text-center">
         <p className="font-mono text-neon-pink">
-          > ERROR_LOADING_ANALYSIS
+          {'> ERROR_LOADING_ANALYSIS'}
         </p>
       </div>
     );

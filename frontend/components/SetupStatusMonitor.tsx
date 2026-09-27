@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiUrl } from '@/lib/api';
 
 interface SetupStatus {
   machineId: string;
@@ -46,7 +47,7 @@ export default function SetupStatusMonitor({
 
     const fetchStatus = async () => {
       try {
-        const response = await fetch(`/api/setup-status/${machineId}`);
+        const response = await fetch(apiUrl(`/setup-status/${machineId}`));
         const data = await response.json();
         setStatus(data);
 
@@ -77,7 +78,7 @@ export default function SetupStatusMonitor({
         <div className="inline-block">
           <div className="animate-spin h-10 w-10 border-2 border-neon-cyan border-t-transparent rounded-full mb-4"></div>
           <p className="font-mono text-neon-cyan">
-            > INITIALIZING_SETUP_MONITOR...
+            {'> INITIALIZING_SETUP_MONITOR...'}
           </p>
         </div>
       </div>
@@ -88,7 +89,7 @@ export default function SetupStatusMonitor({
     return (
       <div className="p-8 text-center">
         <p className="font-mono text-neon-pink">
-          > ERROR_LOADING_SETUP_STATUS
+          {'> ERROR_LOADING_SETUP_STATUS'}
         </p>
       </div>
     );

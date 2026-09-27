@@ -15,6 +15,7 @@ import streamingRoutes from './api/routes/streaming';
 import setupStatusRoutes from './api/routes/setup-status';
 import snapshotRoutes from './api/routes/snapshots';
 import costAnalysisRoutes from './api/routes/cost-analysis';
+import statusRoutes from './api/routes/status';
 
 // Middleware
 import { authMiddleware } from './api/middleware/auth';
@@ -50,6 +51,7 @@ app.get('/health', async (req: Request, res: Response) => {
 });
 
 // Routes
+app.use('/api/status', statusRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/machines', authMiddleware, machineRoutes);
 app.use('/api/costs', authMiddleware, costRoutes);

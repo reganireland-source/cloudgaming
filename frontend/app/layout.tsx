@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import SystemStatusBar from "@/components/SystemStatusBar";
 
 export const metadata: Metadata = {
   title: "CloudGaming Hub | Neon Core",
@@ -51,6 +52,8 @@ export default function RootLayout({
               </div>
             </div>
           </nav>
+
+          <SystemStatusBar />
 
           {/* Main content area with grid background */}
           <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">

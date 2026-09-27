@@ -43,7 +43,8 @@ export default function Dashboard() {
   const [selectedMachine, setSelectedMachine] = useState<string | null>(null);
   const [boM, setBoM] = useState<BoM | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // No real fetch here yet (mock data below) - no setter to keep unused.
+  const [error] = useState<string | null>(null);
 
   useEffect(() => {
     // In production, fetch from API
@@ -96,7 +97,7 @@ export default function Dashboard() {
       <div className="text-center py-12">
         <div className="inline-block">
           <p className="font-mono text-neon-cyan text-lg mb-4">
-            > INITIALIZING NEON_CORE...
+            {'> INITIALIZING NEON_CORE...'}
           </p>
           <div className="flex gap-2 justify-center">
             <div className="w-2 h-2 bg-neon-cyan rounded-full animate-pulse"></div>
@@ -190,7 +191,7 @@ export default function Dashboard() {
       ) : (
         <div className="neon-card rounded-lg p-12 text-center border border-neon-cyan">
           <p className="font-mono text-neon-lime mb-6">
-            > NO_MACHINES_DETECTED
+            {'> NO_MACHINES_DETECTED'}
           </p>
           <a href="/machines" className="inline-block btn-neon-lime">
             [ LAUNCH_FIRST_INSTANCE ]

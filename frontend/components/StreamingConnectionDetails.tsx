@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiUrl } from '@/lib/api';
 
 interface StreamingConnectionDetailsProps {
   machineId: string;
@@ -31,7 +32,7 @@ export default function StreamingConnectionDetails({
   useEffect(() => {
     const fetchDetails = async () => {
       try {
-        const response = await fetch(`/api/streaming/${machineId}`);
+        const response = await fetch(apiUrl(`/streaming/${machineId}`));
         const data = await response.json();
         setDetails(data);
       } catch (error) {
@@ -57,7 +58,7 @@ export default function StreamingConnectionDetails({
         <div className="inline-block">
           <div className="animate-spin h-8 w-8 border-2 border-neon-cyan border-t-transparent rounded-full mb-4"></div>
           <p className="font-mono text-neon-cyan text-sm">
-            > FETCHING_CONNECTION_DETAILS...
+            {'> FETCHING_CONNECTION_DETAILS...'}
           </p>
         </div>
       </div>
@@ -68,7 +69,7 @@ export default function StreamingConnectionDetails({
     return (
       <div className="p-12 text-center">
         <p className="font-mono text-neon-pink mb-6">
-          > ERROR_LOADING_DETAILS
+          {'> ERROR_LOADING_DETAILS'}
         </p>
         <button
           onClick={onBack}
@@ -93,7 +94,7 @@ export default function StreamingConnectionDetails({
           {isSunshine ? '[ SUNSHINE_CONNECTION ]' : '[ MOONLIGHT_CONNECTION ]'}
         </h3>
         <p className={`${accentColor} text-sm font-mono`}>
-          {isSunshine ? '> browser_streaming_via_webrtc' : '> native_client_streaming'}.toUpperCase()
+          {(isSunshine ? '> browser_streaming_via_webrtc' : '> native_client_streaming').toUpperCase()}
         </p>
       </div>
 

@@ -82,7 +82,7 @@ export default function MachinesPage() {
     return (
       <div className="text-center py-12">
         <p className="font-mono text-neon-cyan text-lg">
-          > SCANNING_INSTANCES...
+          {'> SCANNING_INSTANCES...'}
         </p>
       </div>
     );
@@ -175,7 +175,7 @@ export default function MachinesPage() {
       ) : (
         <div className="neon-card rounded-lg p-12 text-center border-2 border-neon-cyan">
           <p className="font-mono text-neon-lime mb-6">
-            > NO_INSTANCES_DETECTED
+            {'> NO_INSTANCES_DETECTED'}
           </p>
           <button className="btn-neon-magenta">
             [ DEPLOY_FIRST_MACHINE ]

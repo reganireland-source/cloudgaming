@@ -164,7 +164,7 @@ export default function PerformancePage() {
     return (
       <div className="text-center py-12">
         <p className="font-mono text-neon-cyan">
-          > SCANNING_PERFORMANCE_METRICS...
+          {'> SCANNING_PERFORMANCE_METRICS...'}
         </p>
       </div>
     );
@@ -245,7 +245,7 @@ export default function PerformancePage() {
           </div>
           <div className="neon-card-pink rounded p-4 border border-neon-pink">
             <h4 className="font-bold text-neon-pink mb-2 font-mono text-sm">🌐 NETWORK</h4>
-            <p className="text-xs text-neon-cyan font-mono">Packet loss >1% or latency >100ms = quality issues. Use wired.</p>
+            <p className="text-xs text-neon-cyan font-mono">Packet loss above 1% or latency above 100ms = quality issues. Use wired.</p>
           </div>
           <div className="neon-card rounded p-4 border border-neon-cyan">
             <h4 className="font-bold text-neon-cyan mb-2 font-mono text-sm">🌡️ TEMPERATURE</h4>
@@ -253,7 +253,7 @@ export default function PerformancePage() {
           </div>
           <div className="neon-card-magenta rounded p-4 border border-neon-magenta">
             <h4 className="font-bold text-neon-magenta mb-2 font-mono text-sm">💾 STORAGE</h4>
-            <p className="text-xs text-neon-cyan font-mono">Disk I/O bottlenecks impact load times. SSD > HDD for gaming.</p>
+            <p className="text-xs text-neon-cyan font-mono">Disk I/O bottlenecks impact load times. SSD beats HDD for gaming.</p>
           </div>
         </div>
       </div>

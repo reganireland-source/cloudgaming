@@ -1,6 +1,6 @@
 'use client';
 
-import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface BillOfMaterialsProps {
   machine: {
@@ -141,16 +141,16 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
               cx="50%"
               cy="50%"
               labelLine={false}
-              label={({ name, value }) => `${name}: $${value.toFixed(2)}`}
+              label={({ name, value }) => `${name}: $${Number(value).toFixed(2)}`}
               outerRadius={100}
               fill="#8884d8"
               dataKey="value"
             >
-              {data.map((entry, index) => (
+              {data.map((_entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip formatter={(value) => `$${value.toFixed(2)}/hr`} />
+            <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}/hr`} />
           </PieChart>
         </ResponsiveContainer>
       </div>

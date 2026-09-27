@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { apiUrl } from '@/lib/api';
 
 interface QualityOption {
   value: string;
@@ -87,7 +88,7 @@ export default function QualitySelector({
     if (machineId && mode === 'modal') {
       setUpdating(true);
       try {
-        const response = await fetch(`/api/machines/${machineId}/quality`, {
+        const response = await fetch(apiUrl(`/machines/${machineId}/quality`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ quality: selected }),
