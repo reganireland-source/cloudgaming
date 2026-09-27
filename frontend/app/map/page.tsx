@@ -35,7 +35,7 @@
  * ============================================================================
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { apiUrl } from '@/lib/api';
 import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
@@ -127,6 +127,14 @@ export default function InfrastructureMapPage() {
   // Where you are, and how we know (see header).
   const [location, setLocation] = useState<(LatLng & { source: 'manual' | 'gps' | 'ip' | 'timezone'; label?: string; approximate?: boolean }) | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // On phones the detail panel sits below the map, out of sight: bring it
+  // into view when a marker is picked (lg = side-by-side, nothing to do).
+  const detailRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (selected && typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches) {
+      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [selected]);
   const [visible, setVisible] = useState<Set<string>>(new Set(['gcp', 'aws', 'azure', 'oracle']));
   const [layers, setLayers] = useState({ available: true, rings: true, paths: true });
   const [ops, setOps] = useState<Record<string, string>>({});        // machineId → running operation id
@@ -257,11 +265,14 @@ export default function InfrastructureMapPage() {
 
   // ---- Render ----
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    // Below lg (phones, square screens) the map moves up to sit right under
+    // the title — the tiles, filters and legend follow it — so it is on
+    // screen without scrolling. -order-N only applies below lg.
+    <div className="flex flex-col gap-4 sm:gap-5">
+      <div className="-order-2 lg:order-none flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4">
         <div>
           <h1 className="text-xl font-bold neon-text mb-1 font-mono">[ INFRASTRUCTURE_MAP ]</h1>
-          <p className="text-sm text-slate-400 max-w-2xl">Everything you&apos;ve deployed, by location and status, colour-coded by cloud. Updates every 10 seconds.</p>
+          <p className="text-sm text-slate-400 max-w-2xl short:hidden">Everything you&apos;ve deployed, by location and status, colour-coded by cloud. Updates every 10 seconds.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {user && (
@@ -318,7 +329,7 @@ export default function InfrastructureMapPage() {
         </details>
       ))}
 
-      <div className="grid lg:grid-cols-[1fr,340px] gap-4">
+      <div className="-order-1 lg:order-none grid lg:grid-cols-[1fr,340px] gap-4">
         {/* ---- Map + legend ---- */}
         <div className="space-y-2 self-start">
           <div className="neon-card rounded-lg border border-white/10 p-2">
@@ -356,7 +367,7 @@ export default function InfrastructureMapPage() {
         </div>
 
         {/* ---- Detail panel ---- */}
-        <aside className="rounded-lg border border-white/10 bg-cyber-panel/50 p-4 space-y-3 self-start">
+        <aside ref={detailRef} className="rounded-lg border border-white/10 bg-cyber-panel/50 p-3 sm:p-4 space-y-3 self-start scroll-mt-3">
           {!selectedGroup ? (
             <>
               <p className="label">Details</p>

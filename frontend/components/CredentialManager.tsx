@@ -339,7 +339,7 @@ export default function CredentialManager({
           const spec = forms[key];
           const buildingOut = !spec || spec.fields.length === 0;
           return (
-            <div key={key} className={`neon-card rounded-lg border p-5 ${editing === key ? 'border-neon-cyan/60' : 'border-white/10'} ${editing === key ? 'lg:col-span-2' : ''}`}>
+            <div key={key} className={`neon-card rounded-lg border p-3 sm:p-5 ${editing === key ? 'border-neon-cyan/60' : 'border-white/10'} ${editing === key ? 'lg:col-span-2' : ''}`}>
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-100">{entry?.label || key}</h3>

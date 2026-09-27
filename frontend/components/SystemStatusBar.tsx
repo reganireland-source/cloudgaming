@@ -54,6 +54,9 @@ interface SystemStatus {
   };
 }
 
+// Short names for small screens.
+const SHORT_LABEL: Record<string, string> = { Backend: 'API', Database: 'DB', Azure: 'AZ', Oracle: 'OCI' };
+
 // How often to re-check, in milliseconds (20000 ms = 20 seconds).
 const POLL_INTERVAL_MS = 20000;
 
@@ -104,11 +107,13 @@ function Light({
           loading ? 'animate-pulse' : ''
         }`}
       />
+      {/* Full name from 640px wide, a short one below (e.g. "DB", "AZ"). */}
       <span className="text-[0.66rem] tracking-label text-slate-400 uppercase">
-        {label}
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{SHORT_LABEL[label] || label}</span>
       </span>
       {!loading && connected && latencyMs !== undefined && (
-        <span className="text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
+        <span className="hidden sm:inline text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
       )}
     </button>
   );
@@ -172,9 +177,13 @@ export default function SystemStatusBar() {
     // No blur effect on this bar on purpose: CSS makes any "position: fixed"
     // child of a blurred (backdrop-filter) element position itself inside
     // that element, which squeezed the pop-ups into this 30px bar.
-    <div className="sticky top-12 z-40 border-b border-white/[0.05] bg-cyber-darker">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-4 overflow-x-auto">
-        <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
+    // short:static = scrolls away on short screens (see layout.tsx).
+    // z-40 keeps the bar under the nav's mobile menu. But its pop-ups live
+    // inside this bar, so they can't rise above that z-40 on their own:
+    // while one is open the bar is lifted over the nav (z-[70]).
+    <div className={`sticky top-12 short:static ${panelOpen || detailFor ? 'z-[70]' : 'z-40'} border-b border-white/[0.05] bg-cyber-darker`}>
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="flex items-center gap-2.5 sm:gap-5 min-w-0 flex-wrap">
           {/* `status?.database.connected ?? null` below: `?.` = "if status
               exists" (it's null until the first answer), and `?? null` =
               "if that gave undefined, use null (= unknown)". */}
@@ -187,7 +196,7 @@ export default function SystemStatusBar() {
             loading={loading}
             latencyMs={status?.database.latencyMs}
           />
-          <div className="hidden sm:block h-3 w-px bg-neon-cyan/20" />
+          <div className="h-3 w-px bg-neon-cyan/20" />
           <Light
             label="AWS"
             onClick={() => setDetailFor('aws')}
@@ -221,8 +230,9 @@ export default function SystemStatusBar() {
         <button
           onClick={() => setPanelOpen(true)}
           className="text-[0.66rem] tracking-label uppercase text-slate-500 hover:text-neon-cyan transition-colors flex-shrink-0"
+          aria-label="Build info"
         >
-          Build info ›
+          <span className="hidden sm:inline">Build info ›</span><span className="sm:hidden">ⓘ</span>
         </button>
       </div>
 

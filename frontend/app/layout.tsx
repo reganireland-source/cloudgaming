@@ -40,7 +40,7 @@
  * ============================================================================
  */
 
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css"; // global styles, loaded once for the whole site
 // "@/" is a shortcut for the frontend's root folder (set in tsconfig.json),
 // so "@/components/X" = frontend/components/X.
@@ -53,6 +53,15 @@ import UserMenu from "@/components/UserMenu";
 
 // Next.js reads this exported object to fill in the page's <title> and
 // description (what shows in the browser tab and in search results).
+// Mobile browsers: use the real device width, colour the browser bar to
+// match the header, and let the page extend under rounded-corner "safe areas".
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#080b11",
+  viewportFit: "cover",
+};
+
 export const metadata: Metadata = {
   title: "CloudGaming Hub",
   description: "Multi-cloud gaming infrastructure — cost, latency and performance across AWS, Azure, GCP and Oracle",
@@ -80,16 +89,20 @@ export default function RootLayout({
           {/* ---- Top header bar ----
               "sticky top-0" keeps it pinned to the top while scrolling;
               "z-50" makes it sit above page content. */}
-          <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-cyber-darker/95 backdrop-blur-md">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-between items-center h-12 gap-6">
+          {/* "short:static": on screens under 600px tall (square phones like
+              the Unihertz Titan 2 Elite, phones in landscape) the header
+              scrolls away instead of permanently using a slice of the screen. */}
+          <nav className="sticky top-0 short:static z-50 border-b border-white/[0.06] bg-cyber-darker/95 backdrop-blur-md">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+              <div className="flex justify-between items-center h-12 gap-3 sm:gap-6">
                 {/* Logo / wordmark — links back to the dashboard */}
-                <a href="/" className="flex items-center gap-3 flex-shrink-0">
+                <a href="/" className="flex items-center gap-2 sm:gap-3 flex-shrink-0 min-w-0">
                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-sm border border-neon-cyan/40 bg-neon-cyan/[0.06] text-neon-cyan text-[0.7rem] shadow-[0_0_10px_-2px_rgba(95,215,224,0.5)]">
                     ▲
                   </span>
-                  <span className="text-[0.85rem] font-semibold tracking-[0.14em] text-slate-100">
-                    CLOUDGAMING<span className="text-neon-cyan">/</span>HUB
+                  {/* Full name from 400px wide; just "CG/HUB" on the smallest screens. */}
+                  <span className="text-[0.8rem] sm:text-[0.85rem] font-semibold tracking-[0.12em] sm:tracking-[0.14em] text-slate-100 whitespace-nowrap">
+                    <span className="hidden xs:inline">CLOUDGAMING</span><span className="xs:hidden">CG</span><span className="text-neon-cyan">/</span>HUB
                   </span>
                   {/* Version chip — "hidden md:inline-block" = only shown on medium+ screens */}
                   <span className="hidden md:inline-block text-[0.62rem] tracking-label text-slate-500 border border-white/10 rounded-sm px-1.5 py-px">
@@ -98,7 +111,7 @@ export default function RootLayout({
                 </a>
                 {/* Page links with the active-page underline (components/NavLinks.tsx),
                     then the signed-in user / Sign in link (components/UserMenu.tsx) */}
-                <div className="flex items-center gap-4 min-w-0">
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                   <NavLinks />
                   <UserMenu />
                 </div>
@@ -111,12 +124,12 @@ export default function RootLayout({
 
           {/* ---- The current page goes here ----
               "flex-1" makes this area grow to fill spare height. */}
-          <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+          <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-8 short:py-3">
             {children}
           </main>
 
           {/* ---- Footer ---- */}
-          <footer className="border-t border-white/[0.06] mt-12">
+          <footer className="border-t border-white/[0.06] mt-12 short:mt-6">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row gap-2 justify-between items-center text-[0.68rem] tracking-label uppercase text-slate-500">
               <span>
                 <span className="text-slate-300">CloudGaming Hub</span> · multi-cloud gaming infrastructure

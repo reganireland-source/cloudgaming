@@ -22,8 +22,8 @@ export default function StreamingClientModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-neon-cyan/30 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 !m-0 bg-black/80 flex items-stretch sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-slate-900 border border-neon-cyan/30 rounded-none sm:rounded-lg max-w-2xl w-full h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto">
         {!showDetails ? (
           <>
             <div className="border-b border-neon-cyan/30 p-6">

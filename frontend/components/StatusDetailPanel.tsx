@@ -260,22 +260,22 @@ export default function StatusDetailPanel({ initial, onClose }: { initial: Light
   const cloud = details && ['aws', 'azure', 'gcp', 'oracle'].includes(tab) ? details.providers[tab] : null;
 
   return (
-    <div className="fixed inset-0 bg-black/75 z-50 flex items-start justify-center p-4 pt-20 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 !m-0 bg-black/75 z-50 flex items-start justify-center p-0 sm:p-4 sm:pt-20 short:sm:pt-4 overflow-y-auto" onClick={onClose}>
       <div
         role="dialog"
         aria-label="Service status details"
-        className="bg-cyber-dark border border-neon-cyan/30 rounded-lg w-full max-w-3xl"
+        className="bg-cyber-dark border border-neon-cyan/30 rounded-none sm:rounded-lg w-full max-w-3xl min-h-[100dvh] sm:min-h-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
-          <h2 className="text-sm tracking-label font-bold font-mono neon-text">[ SYSTEM_STATUS ]</h2>
-          <div className="flex items-center gap-4">
-            {details && <span className="text-[0.66rem] text-slate-500">updated {time(details.generatedAt)} · every 10 s</span>}
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-100 text-sm font-mono">[ CLOSE ]</button>
+        <div className="flex items-center justify-between border-b border-white/10 px-3 sm:px-5 py-3 sticky top-0 bg-cyber-dark z-10">
+          <h2 className="text-sm tracking-label font-bold font-mono neon-text whitespace-nowrap">[ SYSTEM_STATUS ]</h2>
+          <div className="flex items-center gap-3 sm:gap-4">
+            {details && <span className="text-[0.66rem] text-slate-500 hidden xs:inline">updated {time(details.generatedAt)} · every 10 s</span>}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-100 text-sm font-mono whitespace-nowrap">[ CLOSE ]</button>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1 px-5 pt-3 border-b border-white/5">
+        <div className="flex flex-wrap gap-1 px-3 sm:px-5 pt-3 border-b border-white/5">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -290,7 +290,7 @@ export default function StatusDetailPanel({ initial, onClose }: { initial: Light
           ))}
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-3 sm:p-5 space-y-4 sm:space-y-5">
           {error && <p className="text-sm text-neon-pink">✗ {error}</p>}
           {!details && !error && <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; LOADING_STATS…</p>}
 

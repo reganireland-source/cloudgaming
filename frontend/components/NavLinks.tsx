@@ -15,6 +15,7 @@
 
 // Next.js's <Link> works like an <a> tag but switches pages WITHOUT a full
 // page reload (faster, keeps state like the status bar alive).
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 // usePathname() gives the current URL path, e.g. "/machines".
 import { usePathname } from 'next/navigation';
@@ -35,37 +36,74 @@ export default function NavLinks() {
   // changes, React re-runs this component with the new pathname, so the
   // highlight moves automatically.
   const pathname = usePathname();
+  // Small screens: the links live in a drop-down menu behind a ☰ button.
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Close the menu whenever you navigate to another page.
+  useEffect(() => setMenuOpen(false), [pathname]);
+
+  const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname.startsWith(href));
+  const current = LINKS.find((l) => isActive(l.href));
 
   return (
-    <div className="flex items-center gap-0.5 overflow-x-auto">
-      {/* .map turns each item in LINKS into a <Link> element. */}
-      {LINKS.map(({ href, label }) => {
-        // Is this the current page? The home link '/' must match exactly
-        // (otherwise EVERY path, since they all start with '/', would count).
-        // Others use startsWith so sub-pages (e.g. /machines/123) still
-        // highlight their section.
-        const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
-        return (
-          // `key` is required when rendering a list: React uses it to tell
-          // the items apart efficiently between re-renders.
-          <Link
-            key={href}
-            href={href}
-            // Template string: fixed classes, plus cyan if active or grey
-            // (lighter on hover) if not.
-            className={`relative px-3 h-12 inline-flex items-center text-[0.72rem] uppercase tracking-label whitespace-nowrap transition-colors ${
-              active ? 'text-neon-cyan' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            {label}
-            {/* `condition && <X />` = show X only when condition is true. The
-                1px glowing line along the bottom edge of the active link. */}
-            {active && (
-              <span className="absolute left-3 right-3 bottom-0 h-px bg-neon-cyan shadow-[0_0_8px_rgba(95,215,224,0.8)]" />
-            )}
-          </Link>
-        );
-      })}
-    </div>
+    <>
+      {/* ---- Wide screens (md = 768px+): the usual row of links ---- */}
+      <div className="hidden md:flex items-center gap-0.5">
+        {/* .map turns each item in LINKS into a <Link> element. */}
+        {LINKS.map(({ href, label }) => {
+          const active = isActive(href);
+          return (
+            // `key` is required when rendering a list: React uses it to tell
+            // the items apart efficiently between re-renders.
+            <Link
+              key={href}
+              href={href}
+              // Template string: fixed classes, plus cyan if active or grey
+              // (lighter on hover) if not.
+              className={`relative px-3 h-12 inline-flex items-center text-[0.72rem] uppercase tracking-label whitespace-nowrap transition-colors ${
+                active ? 'text-neon-cyan' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {label}
+              {/* The 1px glowing line along the bottom edge of the active link. */}
+              {active && (
+                <span className="absolute left-3 right-3 bottom-0 h-px bg-neon-cyan shadow-[0_0_8px_rgba(95,215,224,0.8)]" />
+              )}
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* ---- Small screens: current page name + ☰ menu button ---- */}
+      <div className="md:hidden flex items-center">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-menu"
+          className="h-10 inline-flex items-center gap-2 px-2.5 rounded border border-white/10 text-[0.72rem] uppercase tracking-label text-slate-200"
+        >
+          <span className="text-neon-cyan">{current?.label || 'Menu'}</span>
+          <span aria-hidden className="text-base leading-none">{menuOpen ? '✕' : '☰'}</span>
+        </button>
+      </div>
+
+      {/* The drop-down: full width under the header, big finger-sized rows.
+          It scrolls itself if the screen is very short. */}
+      {menuOpen && (
+        <div id="mobile-menu" className="md:hidden fixed left-0 right-0 top-12 z-[60] border-b border-white/10 bg-cyber-darker max-h-[calc(100dvh-3rem)] overflow-y-auto shadow-2xl">
+          <nav className="grid grid-cols-2 gap-px bg-white/5 p-px" aria-label="Pages">
+            {LINKS.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                className={`px-4 py-3.5 text-sm uppercase tracking-label bg-cyber-darker ${isActive(href) ? 'text-neon-cyan' : 'text-slate-300'}`}
+              >
+                {isActive(href) ? '▸ ' : ''}{label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      )}
+    </>
   );
 }

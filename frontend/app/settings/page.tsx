@@ -168,7 +168,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Your encrypted cloud keys (sign-in required for this part only). */}
-      <section className="neon-card rounded-lg p-6 mb-8 border border-neon-cyan/30">
+      <section className="neon-card rounded-lg p-3 sm:p-6 mb-6 sm:mb-8 border border-neon-cyan/30">
         <h2 className="text-sm tracking-label font-bold neon-text mb-4 font-mono">[ YOUR_CLOUD_KEYS ]</h2>
         {loading ? (
           <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; CHECKING_SESSION…</p>
@@ -192,7 +192,7 @@ export default function SettingsPage() {
       {/* Troubleshooting: native <details> elements open and close on click
           with no JavaScript. `group` + `group-open:` (Tailwind) flips the
           arrow when its <details> is open. */}
-      <div className="neon-card rounded-lg border border-neon-cyan/30 p-6">
+      <div className="neon-card rounded-lg border border-neon-cyan/30 p-3 sm:p-6">
         <h3 className="text-sm tracking-label font-bold neon-text mb-2 font-mono">[ TROUBLESHOOTING ]</h3>
         <p className="text-xs text-slate-400 mb-6 max-w-3xl">
           The error text shown is what the cloud usually says. Click one to see what it means and how to fix it.

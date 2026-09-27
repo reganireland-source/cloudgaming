@@ -107,17 +107,17 @@ export default function BuildInfoPanel({ onClose }: { onClose: () => void }) {
   return (
     // The overlay: "fixed inset-0" covers the whole window; clicking it closes.
     <div
-      className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 !m-0 bg-black/80 flex items-stretch sm:items-center justify-center z-50 p-0 sm:p-4"
       onClick={onClose}
     >
       {/* The box. Clicks "bubble up" from an element to its parents, so a
           click in here would also reach the overlay and close the panel.
           e.stopPropagation() stops that. */}
       <div
-        className="bg-cyber-dark border border-neon-cyan/30 rounded-lg max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+        className="bg-cyber-dark border border-neon-cyan/30 rounded-none sm:rounded-lg max-w-2xl w-full h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="border-b border-neon-cyan/30 p-5 flex items-center justify-between">
+        <div className="border-b border-neon-cyan/30 p-3 sm:p-5 flex items-center justify-between">
           <h2 className="text-sm tracking-label font-bold font-mono neon-text">[ BUILD_&_VERSION_INFO ]</h2>
           <button
             onClick={onClose}
@@ -132,7 +132,7 @@ export default function BuildInfoPanel({ onClose }: { onClose: () => void }) {
             &gt; LOADING_BUILD_INFO...
           </div>
         ) : (
-          <div className="p-5 space-y-6">
+          <div className="p-3 sm:p-5 space-y-4 sm:space-y-6">
             <div>
               <h3 className="text-sm font-bold font-mono text-neon-cyan mb-2">
                 [ FRONTEND ]

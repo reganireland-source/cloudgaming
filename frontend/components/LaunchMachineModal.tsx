@@ -118,20 +118,22 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
     }
   };
 
+    // !m-0: this overlay is often rendered inside a "space-y-*" list, whose
+    // top margin would otherwise shift even a fixed element down the screen.
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 !m-0 bg-black/80 z-50 flex items-start sm:items-center justify-center p-0 sm:p-4 overflow-y-auto" onClick={onClose}>
       <div
         role="dialog"
         aria-label="Launch a gaming machine"
-        className="bg-cyber-dark border border-neon-cyan/30 rounded-lg w-full max-w-2xl my-8"
+        className="bg-cyber-dark border border-neon-cyan/30 rounded-none sm:rounded-lg w-full max-w-2xl min-h-[100dvh] sm:min-h-0 sm:my-8"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-white/10 px-3 sm:px-5 py-3 sm:py-4 sticky top-0 bg-cyber-dark z-10">
           <h2 className="text-sm tracking-label font-bold font-mono neon-text">[ LAUNCH_MACHINE ]</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-100 text-sm font-mono">[ CLOSE ]</button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-3 sm:p-5 space-y-4 sm:space-y-5">
           {loadError && <FriendlyErrorCard message={loadError.message} tip={loadError.tip} friendly={loadError.friendly} />}
           {!options && !loadError && <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; LOADING_OPTIONS…</p>}
 

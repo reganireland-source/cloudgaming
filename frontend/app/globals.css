@@ -144,6 +144,7 @@ code {
 
 /* Buttons */
 .btn-neon,
+.btn-neon-cyan,
 .btn-neon-magenta,
 .btn-neon-lime,
 .btn-neon-pink {
@@ -151,12 +152,14 @@ code {
   transition: background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
 }
 
-.btn-neon {
+.btn-neon,
+.btn-neon-cyan { /* btn-neon-cyan: alias used by older pages */
   @apply text-neon-cyan;
   border-color: rgba(95, 215, 224, 0.45);
   background: rgba(95, 215, 224, 0.04);
 }
-.btn-neon:hover {
+.btn-neon:hover,
+.btn-neon-cyan:hover {
   background: rgba(95, 215, 224, 0.12);
   box-shadow: 0 0 14px -4px rgba(95, 215, 224, 0.55);
 }
@@ -239,3 +242,25 @@ th {
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(95, 215, 224, 0.35); }
+
+
+/* ---------------------------------------------------------------------------
+   Touch screens & small / square phones (e.g. Unihertz Titan 2 Elite:
+   1080×1200 at ~2.7× → about 400×440 CSS px, ~360×340 usable in a browser)
+   ------------------------------------------------------------------------- */
+
+/* Fingers need bigger targets than mouse pointers (~36px minimum). */
+@media (pointer: coarse) {
+  .btn-neon, .btn-neon-cyan, .btn-neon-magenta, .btn-neon-lime, .btn-neon-pink {
+    min-height: 36px;
+  }
+  select, input[type="text"], input[type="email"], input[type="password"], input[type="number"] {
+    min-height: 38px;
+    font-size: 16px; /* 16px+ stops iPhones zooming in when a field is tapped */
+  }
+}
+
+/* Never let the page itself scroll sideways; wide things scroll in their own box.
+   "clip" (not "hidden"), because "hidden" would turn <body> into a scroll
+   container and quietly stop the sticky header from sticking. */
+html, body { overflow-x: clip; }
