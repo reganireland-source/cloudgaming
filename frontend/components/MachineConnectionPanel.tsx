@@ -196,7 +196,7 @@ export default function MachineConnectionPanel({
             machine; continue. Sign in with the username and password above.
           </li>
           <li>Go to <strong>PIN</strong>, type Moonlight's PIN, and submit. Moonlight is now paired (only needed once per device).</li>
-          <li>In Moonlight, open the machine and pick <strong>Desktop</strong> or <strong>Steam Big Picture</strong>. Sign in to Steam and install your games.</li>
+          <li>In Moonlight, open the machine and pick an app: <strong>Steam</strong> / <strong>Steam (Big Picture)</strong>, <strong>Battle.net</strong>, <strong>Discord</strong>, <strong>Google Chrome</strong>, <strong>Heroic</strong> (Epic &amp; GOG), <strong>Lutris</strong>, <strong>Firefox</strong> or the whole <strong>Desktop</strong>. The first time you open Battle.net it runs its installer (click through once, a few minutes).</li>
           <li>When you're done, <strong>stop</strong> the machine here so it stops billing. Your games stay on its disk. (If you set auto-stop at launch, it also shuts itself down after that long without streaming.)</li>
         </ol>
         <p className="mt-2 text-[0.7rem] text-slate-500">

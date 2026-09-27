@@ -291,10 +291,18 @@ max_bitrate = $CLOUDYPAD_SUNSHINE_MAX_BITRATE
 $CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG
 CONF
 
+# ---- Our base image: CloudyPad's container (Steam, Firefox, Heroic for
+# Epic/GOG, Lutris) plus Google Chrome, Discord and a Battle.net launcher.
+# Built ON the machine from CloudyPad's image, so there's no registry to
+# publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
+# below changes, and every machine rebuilds on its next boot.
+APPS_VERSION=1
+APPS_IMAGE="gggh/sunshine-apps:$APPS_VERSION-$(echo "$SUNSHINE_IMAGE" | awk -F: '{print $NF}')"
+
 cat > "$SUN_DIR/project/docker-compose.yml" <<COMPOSE
 services:
   cloudy:
-    image: $SUNSHINE_IMAGE
+    image: $APPS_IMAGE
     container_name: cloudy
     shm_size: "$SHM_SIZE"
     privileged: true
@@ -345,10 +353,91 @@ services:
             - capabilities: [gpu]
 COMPOSE
 
+# ---- The Dockerfile that adds Chrome, Discord and Battle.net (image name
+# APPS_IMAGE is set with the other container settings above).
+cat > "$SUN_DIR/project/Dockerfile" <<DOCKERFILE
+FROM $SUNSHINE_IMAGE
+# Each app is best-effort: if a download fails, the machine still streams,
+# just without that app (the build log says which one was skipped).
+# Google Chrome: official .deb (also adds Google's repo for updates).
+RUN apt-get update \
+ && ( curl -fL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+      && apt-get install -y /tmp/chrome.deb || echo "WARNING: Google Chrome skipped" ) \
+ && rm -f /tmp/chrome.deb && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Discord: official .tar.gz (its .deb depends on libraries Ubuntu 24.04
+# dropped), plus the libraries it needs at runtime.
+RUN apt-get update \
+ && ( apt-get install -y --no-install-recommends libnss3 libatomic1 libxss1 libnotify4 libgbm1 libasound2t64 libxkbfile1 libsecret-1-0 \
+      && curl -fL -o /tmp/discord.tar.gz "https://discord.com/api/download?platform=linux&format=tar.gz" \
+      && tar -xzf /tmp/discord.tar.gz -C /opt \
+      && ln -sf /opt/Discord/Discord /usr/local/bin/discord \
+      && chown root:root /opt/Discord/chrome-sandbox && chmod 4755 /opt/Discord/chrome-sandbox \
+      || echo "WARNING: Discord skipped" ) \
+ && rm -f /tmp/discord.tar.gz && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
+COPY add-apps.py /tmp/add-apps.py
+RUN chmod 755 /cloudy/bin/battlenet-start.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
+ && chown -R cloudy:cloudy /cloudy/bin /cloudy/conf/sunshine
+DOCKERFILE
+
+# Battle.net has no Linux version: it runs through Lutris (Wine). First
+# launch runs Lutris's Battle.net installer (click through once, a few
+# minutes); after that it opens Battle.net directly. Games and the Wine
+# prefix live in /home/cloudy/Games, which is kept on the machine's disk.
+cat > "$SUN_DIR/project/battlenet-start.sh" <<'BNET'
+#!/bin/bash
+if lutris --list-games --installed --json 2>/dev/null | grep -Eq '"slug": ?"battlenet"'; then
+  exec lutris lutris:rungame/battlenet
+else
+  exec lutris lutris:battlenet
+fi
+BNET
+
+# Add Chrome, Discord and Battle.net to the apps Moonlight shows.
+cat > "$SUN_DIR/project/add-apps.py" <<'PY'
+import json
+path = "/cloudy/conf/sunshine/apps.json"
+with open(path) as f:
+    cfg = json.load(f)
+start = {"do": "sh -c \"sunshine-app-startup.sh > /tmp/sunshine-session-start.log 2>&1\""}
+def app(name, image, cmd, undo=None):
+    prep = dict(start)
+    if undo:
+        prep["undo"] = undo
+    return {"name": name, "image-path": image, "prep-cmd": [prep], "detached": [cmd],
+            "exclude-global-prep-cmd": "false", "auto-detach": "true", "wait-all": "true", "exit-timeout": "5", "cmd": ""}
+extra = [
+    app("Google Chrome", "/opt/google/chrome/product_logo_256.png",
+        "sh -c \"google-chrome --start-maximized > /tmp/chrome-start.log 2>&1\""),
+    app("Discord", "/opt/Discord/discord.png",
+        "sh -c \"discord > /tmp/discord-start.log 2>&1\""),
+    app("Battle.net", "$(XDG_CONFIG_HOME)/sunshine/assets/lutris.png",
+        "sh -c \"battlenet-start.sh > /tmp/battlenet-start.log 2>&1\"",
+        undo="sh -c \"lutris-stop.sh > /tmp/lutris-stop.log 2>&1\""),
+]
+import os
+installed = {"Google Chrome": os.path.exists("/usr/bin/google-chrome"), "Discord": os.path.exists("/opt/Discord/Discord"), "Battle.net": True}
+extra = [a for a in extra if installed.get(a["name"], True)]
+names = {"Google Chrome", "Discord", "Battle.net"}
+cfg["apps"] = [a for a in cfg["apps"] if a.get("name") not in names] + extra
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+
 cd "$SUN_DIR/project" || fail 60 "project directory missing"
-if ! docker image inspect "$SUNSHINE_IMAGE" >/dev/null 2>&1; then
-  stage 65 download "Downloading the streaming container (several GB, 3-10 minutes)"
-  docker compose pull || fail 65 "could not download $SUNSHINE_IMAGE"
+if ! docker image inspect "$APPS_IMAGE" >/dev/null 2>&1; then
+  if ! docker image inspect "$SUNSHINE_IMAGE" >/dev/null 2>&1; then
+    stage 65 download "Downloading the streaming container (several GB, 3-10 minutes)"
+    docker pull "$SUNSHINE_IMAGE" || fail 65 "could not download $SUNSHINE_IMAGE"
+  fi
+  stage 70 apps "Adding Chrome, Discord and Battle.net (2-4 minutes)"
+  if ! docker build -t "$APPS_IMAGE" .; then
+    # Don't lose the machine over optional apps: stream with CloudyPad's
+    # image as-is (Steam, Firefox, Heroic, Lutris) and say so.
+    say "WARNING: couldn't add Chrome, Discord and Battle.net - using the standard container"
+    APPS_IMAGE="$SUNSHINE_IMAGE"
+    sed -i "s#^    image: .*#    image: $APPS_IMAGE#" docker-compose.yml
+  fi
 fi
 stage 75 starting "Starting Sunshine, desktop and Steam"
 docker compose up -d --remove-orphans || fail 75 "could not start the Sunshine container"

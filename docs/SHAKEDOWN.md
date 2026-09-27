@@ -79,7 +79,7 @@ ask, and on-demand can't be reclaimed mid-test.
 
 ---
 
-## 4. Watch it build  (≈15–30 min, first boot only)
+## 4. Watch it build  (≈20–35 min, first boot only)
 
 The live log (Machines → the machine → Activity) and the setup progress bar
 come from the machine's own serial console:
@@ -95,6 +95,7 @@ come from the machine's own serial console:
 | 35 | Checking the GPU | |
 | 45 / 52 | Docker, NVIDIA container toolkit | 2–3 min |
 | 60 / 65 | Sunshine container config, **download (several GB)** | 3–10 min |
+| 70 | Adding Chrome, Discord and Battle.net | 2–4 min |
 | 75 / 85 | Starting Sunshine, waiting for healthy | 1–3 min |
 | 100 | **Ready to stream** | |
 
@@ -120,8 +121,11 @@ Later starts skip all of this (about 1–2 minutes).
 Machine card → **Play with Moonlight**:
 
 1. **Pair Moonlight (one click)**: once per device.
-2. Moonlight → the machine → **Desktop** or **Steam Big Picture** → sign in
-   to Steam, install a small game first (e.g. a free one).
+2. Moonlight → the machine → pick an app. Every machine has **Steam** (and
+   Big Picture), **Battle.net**, **Discord**, **Google Chrome**, **Heroic**
+   (Epic & GOG), **Lutris**, **Firefox** and the full **Desktop**. Sign in to
+   Steam and install a small game first. The first **Battle.net** launch runs
+   its installer (click through once, a few minutes).
 3. Press **Ctrl + Alt + Shift + S** in Moonlight for its stats overlay.
 
 **Good numbers:** network latency ≈ the Recon estimate (±15 ms), decode time

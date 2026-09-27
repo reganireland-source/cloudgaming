@@ -49,7 +49,7 @@ const PRESETS: Record<string, { resolution: string; fps: number; bitrateKbps: nu
 };
 
 /** Apps defined in the Sunshine container on the machine. */
-const APPS = ['Desktop', 'Steam (Big Picture)', 'Steam', 'Heroic Games Launcher', 'Lutris', 'Firefox'];
+const APPS = ['Desktop', 'Steam (Big Picture)', 'Steam', 'Battle.net', 'Discord', 'Google Chrome', 'Heroic Games Launcher', 'Lutris', 'Firefox'];
 
 /** Where Moonlight's program lives on each OS (default install locations). */
 const MOONLIGHT_EXE: Record<OS, string> = {
