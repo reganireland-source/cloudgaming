@@ -17,7 +17,7 @@
  * ============================================================================
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
@@ -42,7 +42,10 @@ const QUALITY_HINT: Record<string, string> = {
   ultra: '4K60 · ~9 GB/hour',
 };
 
-export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: () => void; onLaunched: () => void }) {
+/** Pre-filled choices, e.g. from a Recon recommendation. Applied once, when the form opens. */
+export interface LaunchPreset { provider: string; region: string; shapeId: string; quality?: string; game?: string; spot?: boolean }
+
+export default function LaunchMachineModal({ onClose, onLaunched, preset }: { onClose: () => void; onLaunched: () => void; preset?: LaunchPreset }) {
   const [options, setOptions] = useState<Options | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [provider, setProvider] = useState('');
@@ -50,8 +53,12 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
   const [shapeId, setShapeId] = useState('');
   const [diskGb, setDiskGb] = useState(150);
   const [spot, setSpot] = useState(false);
-  const [game, setGame] = useState('');
-  const [quality, setQuality] = useState('high');
+  const [game, setGame] = useState(preset?.game || '');
+  const [quality, setQuality] = useState(preset?.quality || 'high');
+  // The preset's region/size/spot must survive the "cloud changed → reset
+  // to defaults" effect below, which runs once the cloud list arrives.
+  const presetPending = useRef(!!preset);
+  const presetShape = useRef<string | null>(preset?.shapeId || null);
   const [autoStop, setAutoStop] = useState(15); // minutes without streaming before the machine shuts down; 0 = off
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
@@ -62,7 +69,8 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
       .then((o) => {
         setOptions(o);
         // Pre-select the first cloud that's ready to use.
-        const ready = o.providers.find((p) => p.configured && p.available) || o.providers.find((p) => p.available);
+        const wanted = preset && o.providers.find((p) => p.provider === preset.provider);
+        const ready = wanted || o.providers.find((p) => p.configured && p.available) || o.providers.find((p) => p.available);
         if (ready) setProvider(ready.provider);
       })
       .catch((e) => setLoadError(e));
@@ -73,8 +81,14 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
   // When the cloud changes, reset region/size/disk to that cloud's defaults.
   useEffect(() => {
     if (!current) return;
-    setRegion(current.regions.some((r) => r.id === current.defaultRegion) ? current.defaultRegion : current.regions[0]?.id || '');
     setDiskGb(current.defaultDiskGb);
+    if (presetPending.current && preset && preset.provider === current.provider && current.regions.some((r) => r.id === preset.region)) {
+      presetPending.current = false;
+      setRegion(preset.region);
+      setSpot(!!preset.spot && current.supportsSpot);
+      return;
+    }
+    setRegion(current.regions.some((r) => r.id === current.defaultRegion) ? current.defaultRegion : current.regions[0]?.id || '');
     setSpot(false);
   }, [current?.provider]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -85,6 +99,11 @@ export default function LaunchMachineModal({ onClose, onLaunched }: { onClose: (
   );
   // Keep the chosen size valid for the region.
   useEffect(() => {
+    if (presetShape.current && shapesHere.some((s) => s.id === presetShape.current)) {
+      setShapeId(presetShape.current);   // the preset's size, once its region is in place
+      presetShape.current = null;
+      return;
+    }
     if (!shapesHere.some((s) => s.id === shapeId)) setShapeId(shapesHere[0]?.id || '');
   }, [shapesHere, shapeId]);
 

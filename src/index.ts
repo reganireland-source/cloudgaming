@@ -77,6 +77,7 @@ import authRoutes from './api/routes/auth';                 // sign-up / login /
 import machineRoutes from './api/routes/machines';          // launch / start / stop / delete gaming VMs
 import costRoutes from './api/routes/costs';                // spend history and forecasts
 import regionRoutes from './api/routes/regions';            // cloud regions and their prices
+import reconRoutes from './api/routes/recon';              // Recon page: best region per hardware tier
 import performanceRoutes from './api/routes/performance';   // CPU/GPU/network metrics for a machine
 import streamingRoutes from './api/routes/streaming';       // how to connect Sunshine/Moonlight to a machine
 import setupStatusRoutes from './api/routes/setup-status';  // progress of the automated machine setup
@@ -186,6 +187,7 @@ app.use('/api/operations', authMiddleware, operationRoutes);    // live progress
 app.use('/api/inventory', authMiddleware, inventoryRoutes);     // what's deployed where (map)
 app.use('/api/costs', authMiddleware, costRoutes);
 app.use('/api/regions', authMiddleware, regionRoutes);
+app.use('/api/recon', reconRoutes);            // PUBLIC: only reads the price catalogs
 app.use('/api/performance', authMiddleware, performanceRoutes);
 app.use('/api/streaming', streamingRoutes);    // login IS required: authMiddleware is attached to each route inside streaming.ts
 app.use('/api/setup-status', authMiddleware, setupStatusRoutes);
