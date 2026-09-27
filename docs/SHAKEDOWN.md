@@ -126,6 +126,10 @@ Machine card → **Play with Moonlight**:
    (Epic & GOG), **Lutris**, **Firefox** and the full **Desktop**. Sign in to
    Steam and install a small game first. The first **Battle.net** launch runs
    its installer (click through once, a few minutes).
+   Log in by scanning the **QR code** on the Steam / Discord / Battle.net
+   login screen with their phone app. Logins stay on the machine through
+   stop/start; check this by stopping and starting once and confirming
+   you're still logged in.
 3. Press **Ctrl + Alt + Shift + S** in Moonlight for its stats overlay.
 
 **Good numbers:** network latency ≈ the Recon estimate (±15 ms), decode time

@@ -260,6 +260,13 @@ fi
 # ============================================================================
 stage 60 sunshine "Configuring the Sunshine streaming container"
 mkdir -p "$SUN_DIR/data" "$SUN_DIR/conf/xfce4" "$SUN_DIR/conf/heroic" "$SUN_DIR/home" "$SUN_DIR/project"
+# Settings + logins of the apps we add live under XDG_CONFIG_HOME
+# (/cloudy/conf) inside the container, which is NOT kept when the container
+# is recreated. Keep them on the machine's disk like Steam and the home
+# folder, so you log in once per machine. (Owned by the container's user,
+# uid 1001.)
+KEEP_CONF="google-chrome discord lutris"
+for d in $KEEP_CONF; do mkdir -p "$SUN_DIR/conf/$d"; done
 
 # GPU PCI address in the form Xorg wants: "bus@domain:device:function" in
 # decimal, from nvidia-smi's hexadecimal "0000:00:04.0" (CloudyPad does the same).
@@ -317,6 +324,9 @@ services:
       - $SUN_DIR/data:/cloudy/data
       - $SUN_DIR/conf/xfce4:/cloudy/conf/xfce4
       - $SUN_DIR/conf/heroic:/cloudy/conf/heroic
+      - $SUN_DIR/conf/google-chrome:/cloudy/conf/google-chrome
+      - $SUN_DIR/conf/discord:/cloudy/conf/discord
+      - $SUN_DIR/conf/lutris:/cloudy/conf/lutris
       - $SUN_DIR/home:/home/cloudy
       - $SUN_DIR/project/sunshine.conf.template:/cloudy/conf/sunshine/sunshine.conf.template:ro
     ports:
@@ -439,6 +449,15 @@ if ! docker image inspect "$APPS_IMAGE" >/dev/null 2>&1; then
     sed -i "s#^    image: .*#    image: $APPS_IMAGE#" docker-compose.yml
   fi
 fi
+# Machines set up before these folders were kept: copy any existing
+# settings out of the old container once, so nobody gets logged out.
+for d in $KEEP_CONF; do
+  if [ -z "$(ls -A "$SUN_DIR/conf/$d" 2>/dev/null)" ] && docker container inspect cloudy >/dev/null 2>&1; then
+    docker cp "cloudy:/cloudy/conf/$d/." "$SUN_DIR/conf/$d/" >/dev/null 2>&1 && say "Kept existing $d settings"
+  fi
+done
+chown -R 1001:1001 $(for d in $KEEP_CONF; do echo "$SUN_DIR/conf/$d"; done)
+
 stage 75 starting "Starting Sunshine, desktop and Steam"
 docker compose up -d --remove-orphans || fail 75 "could not start the Sunshine container"
 
