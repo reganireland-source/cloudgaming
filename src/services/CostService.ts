@@ -1,5 +1,30 @@
+/**
+ * ============================================================================
+ * src/services/CostService.ts — ACTUAL SPEND: RECORD, SUMMARISE, FORECAST
+ * ============================================================================
+ *
+ * Where CostAnalysisService ESTIMATES what things would cost, this service
+ * works with what was actually SPENT, stored in the `costs` table (one row
+ * per machine per day, split into compute / egress / storage).
+ *
+ *   recordCosts          write one day's costs (called by the SyncCosts job)
+ *   getMonthlyBreakdown  this month's spend per cloud provider
+ *   getDailyHistory      spend per day for the last N days
+ *   forecast             projected spend for the rest of the month
+ *   getMachineBoM        a "bill of materials" — cost per hour/day/month for one machine
+ *
+ * NOTE: only recordCosts is currently used (by src/jobs/SyncCosts.ts). The
+ * /api/costs routes run their own similar queries directly instead of
+ * calling this service, so the other methods are unused for now.
+ *
+ * ⚠️  getMachineBoM would fail if called: it joins on m.game_profile_id,
+ * but the machines table has no such column (see database/schema.sql).
+ * ============================================================================
+ */
+
 import { query } from '../config/database';
 
+/** One day's costs for one machine (input to recordCosts). */
 interface CostRecord {
   machineId: string;
   provider: string;
@@ -8,6 +33,7 @@ interface CostRecord {
   storageCost: number;
 }
 
+/** One cloud provider's totals for the month. */
 interface ProviderBreakdown {
   provider: string;
   compute: number;
@@ -16,6 +42,11 @@ interface ProviderBreakdown {
   total: number;
 }
 
+/**
+ * A "bill of materials" (BoM) — borrowed from manufacturing, meaning an
+ * itemised list of what something is made of and what each part costs.
+ * Here: the machine itself + the streaming data, then totals.
+ */
 interface BillOfMaterials {
   compute: {
     component: string;
@@ -40,6 +71,11 @@ interface BillOfMaterials {
 }
 
 export class CostService {
+  /**
+   * This month's spend (from the 1st until now), grouped by cloud provider,
+   * plus a grand total. Postgres returns DECIMAL sums as text, hence
+   * parseFloat() on every figure.
+   */
   static async getMonthlyBreakdown(userId: string) {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -73,6 +109,10 @@ export class CostService {
     };
   }
 
+  /**
+   * Total spend per day for the last `days` days (default 30), oldest first.
+   * `days * 24 * 60 * 60 * 1000` converts days to milliseconds.
+   */
   static async getDailyHistory(userId: string, days: number = 30) {
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
@@ -93,6 +133,12 @@ export class CostService {
     }));
   }
 
+  /**
+   * Straight-line forecast: (spend so far) + (average daily spend × days left).
+   * Caveats: "spend so far" here is the last 30 DAYS of history, not strictly
+   * this calendar month, and every month is treated as 30 days long.
+   * (`monthStart` is calculated but not used.)
+   */
   static async forecast(userId: string) {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -117,6 +163,15 @@ export class CostService {
     };
   }
 
+  /**
+   * Itemised running cost for one machine:
+   *   compute  = the machine's hourly price
+   *   streaming = GB per hour for its quality × egress price per GB in its region
+   * then per hour / per day (× 24) / per month (× 24 × 30, i.e. running non-stop).
+   * Falls back to sensible defaults ($0.50/h, 'Good' quality, $0.12/GB)
+   * when data is missing.
+   * ⚠️ Fails today — see the note about game_profile_id in the file header.
+   */
   static async getMachineBoM(machineId: string): Promise<{
     machine: any;
     billOfMaterials: BillOfMaterials;
@@ -183,6 +238,13 @@ export class CostService {
     };
   }
 
+  /**
+   * Save one day's costs for one machine. Called by the SyncCosts
+   * background job. `toISOString().split('T')[0]` turns the current moment
+   * into just today's date, e.g. "2026-09-27" (in UTC).
+   * Note: running this twice on the same day adds a SECOND row for that
+   * day rather than replacing the first.
+   */
   static async recordCosts(userId: string, costs: CostRecord) {
     const today = new Date().toISOString().split('T')[0];
 

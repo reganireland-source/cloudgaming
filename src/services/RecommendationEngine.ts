@@ -2,8 +2,32 @@ import { query } from '../config/database';
 import { RecommendationResult } from '../types';
 
 /**
+ * ============================================================================
+ * src/services/RecommendationEngine.ts — "WHAT SHOULD I RUN THIS GAME ON?"
+ * ============================================================================
+ *
  * RecommendationEngine solves:
  * Best instance type + region + streaming quality for a game + location + budget
+ *
+ * HOW IT DECIDES (recommend)
+ * --------------------------
+ *   1. Look up the game in game_profiles — its `gpu_class` says how strong a
+ *      graphics card it needs (t4 < a10g < a100 < h100).
+ *   2. Translate that GPU class into each cloud's matching machine types
+ *      (the instanceTypesByGpuClass table).
+ *   3. For every region of every cloud offering one:
+ *        - estimate latency from the player's distance to the region
+ *        - pick a quality: High if close (< 30 ms), Budget if far (> 80 ms),
+ *          otherwise Good — further away = lower quality to keep it smooth
+ *        - cost per hour = machine price + (GB per hour × egress price)
+ *        - skip it if it's over the player's budget
+ *   4. Sort cheapest first (latency breaks ties) and return the top 5.
+ *
+ * Data comes from the game_profiles, region_data and streaming_qualities
+ * tables. NOTE: region_data is never filled in by anything yet, so until it
+ * is populated this returns an empty list.
+ * `userId` is accepted but not used.
+ * ============================================================================
  */
 export class RecommendationEngine {
   /**

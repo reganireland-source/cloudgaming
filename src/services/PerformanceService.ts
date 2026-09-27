@@ -1,5 +1,37 @@
+/**
+ * ============================================================================
+ * src/services/PerformanceService.ts — STORING AND SUMMARISING MACHINE METRICS
+ * ============================================================================
+ *
+ * Every so often a reading of how a gaming machine is doing (CPU/GPU load,
+ * temperatures, network latency, frames per second...) is saved to the
+ * `performance_metrics` table — one row per reading. This service:
+ *   recordMetrics      save one reading
+ *   getPerformanceStats   averages, peaks and history over the last N hours
+ *   getRealtimeMetric  the single newest reading
+ *   getHealthStatus    turn the newest reading into healthy/warning/critical
+ * It backs the /api/performance routes and the Performance page.
+ *
+ * NAMING: the database uses snake_case (cpu_usage); the API returns
+ * camelCase (cpuUsage). Much of this file is just renaming fields.
+ *
+ * ⚠️  KNOWN BUG — averages come out as NaN
+ * ---------------------------------------
+ * The `pg` driver returns DECIMAL/NUMERIC columns (cpu_usage, gpu_usage,
+ * streaming_fps, network_packet_loss, network_latency...) as TEXT, e.g.
+ * "45.20", to avoid losing precision. So `sum + m.cpu_usage` in
+ * getPerformanceStats JOINS text ("0" + "45.20" + "50.10" -> "045.2050.10")
+ * instead of adding numbers, and dividing that gives NaN ("not a number").
+ * Math.max() happens to convert text to numbers, so the PEAKS are fine.
+ * Fix: wrap each value in parseFloat(...) before adding (as costs.ts does).
+ * The same text values also make the comparisons in getHealthStatus work
+ * only by luck of JavaScript's automatic conversion.
+ * ============================================================================
+ */
+
 import { query } from '../config/database';
 
+/** One reading, in the camelCase shape the API returns. */
 interface PerformanceMetric {
   machineId: string;
   timestamp: Date;
@@ -23,6 +55,7 @@ interface PerformanceMetric {
   cpuTemperature: number;
 }
 
+/** A summary over a time window: latest reading, averages, peaks, full history. */
 interface PerformanceStats {
   current: PerformanceMetric;
   average: {
@@ -43,6 +76,15 @@ interface PerformanceStats {
 }
 
 export class PerformanceService {
+  /**
+   * Save one metrics reading for a machine.
+   *
+   * `Omit<PerformanceMetric, 'machineId' | 'timestamp'>` is a TypeScript
+   * helper meaning "the PerformanceMetric shape, minus those two fields" —
+   * the caller passes the measurements, and we add the id and time ourselves.
+   * The INSERT lists 20 columns and 20 matching $1..$20 placeholders; the
+   * values array must be in exactly the same order.
+   */
   static async recordMetrics(machineId: string, metrics: Omit<PerformanceMetric, 'machineId' | 'timestamp'>) {
     const timestamp = new Date().toISOString();
 
@@ -94,10 +136,17 @@ export class PerformanceService {
     );
   }
 
+  /**
+   * Summarise the last `hoursBack` hours (default 1) of readings.
+   * @throws if there are no readings in that window
+   * ⚠️ Averages are NaN — see KNOWN BUG in the file header.
+   */
   static async getPerformanceStats(machineId: string, hoursBack: number = 1): Promise<PerformanceStats> {
+    // "N hours ago": now in milliseconds minus N × 60 min × 60 s × 1000 ms.
     const cutoffTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
 
-    // Get all metrics for the time period
+    // Newest first, capped at 360 rows (e.g. 1 hour of 10-second readings)
+    // so a long window can't return an enormous result.
     const historyResult = await query(
       `SELECT * FROM performance_metrics
        WHERE machine_id = $1 AND timestamp >= $2
@@ -112,22 +161,29 @@ export class PerformanceService {
       throw new Error(`No performance data for machine ${machineId}`);
     }
 
+    // Sorted newest-first, so the first row is the latest reading.
     const current = history[0];
 
-    // Calculate averages
+    // Averages: add every reading (reduce, starting from 0) then divide by
+    // the count. ⚠️ Broken for DECIMAL columns — see file header.
     const avgCpuUsage = history.reduce((sum: number, m: any) => sum + m.cpu_usage, 0) / history.length;
     const avgGpuUsage = history.reduce((sum: number, m: any) => sum + m.gpu_usage, 0) / history.length;
     const avgStreamingFps = history.reduce((sum: number, m: any) => sum + m.streaming_fps, 0) / history.length;
     const avgPacketLoss = history.reduce((sum: number, m: any) => sum + m.network_packet_loss, 0) / history.length;
     const avgNetworkLatency = history.reduce((sum: number, m: any) => sum + m.network_latency, 0) / history.length;
 
-    // Calculate peaks
+    // Peaks: the highest value seen. `...` (the "spread" operator) passes
+    // every item of the array to Math.max as separate arguments:
+    // Math.max(...[3, 9, 4]) is Math.max(3, 9, 4) = 9.
     const peakCpuUsage = Math.max(...history.map((m: any) => m.cpu_usage));
     const peakGpuUsage = Math.max(...history.map((m: any) => m.gpu_usage));
     const peakBandwidthUp = Math.max(...history.map((m: any) => m.network_bandwidth_up));
     const peakBandwidthDown = Math.max(...history.map((m: any) => m.network_bandwidth_down));
     const peakFrameDrops = Math.max(...history.map((m: any) => m.streaming_frame_drops));
 
+    // Build the response: rename snake_case DB fields to camelCase, and
+    // round averages/peaks. `x.toFixed(1)` gives TEXT with 1 decimal place;
+    // parseFloat turns it back into a number.
     return {
       current: {
         machineId,
@@ -190,6 +246,9 @@ export class PerformanceService {
     };
   }
 
+  /**
+   * The newest single reading for a machine, or null if there are none.
+   */
   static async getRealtimeMetric(machineId: string) {
     const result = await query(
       `SELECT * FROM performance_metrics
@@ -228,6 +287,17 @@ export class PerformanceService {
     };
   }
 
+  /**
+   * Turn the latest reading into a simple verdict.
+   *
+   * Each threshold that's exceeded adds a human-readable issue. Then:
+   *   no issues                          -> 'healthy'
+   *   any issue containing "critical"    -> 'critical'
+   *   otherwise                          -> 'warning'
+   * (So only the CPU and GPU usage checks can produce 'critical' — the
+   * decision is based on the wording of the message.)
+   * No data at all counts as 'critical'.
+   */
   static async getHealthStatus(machineId: string): Promise<{
     status: 'healthy' | 'warning' | 'critical';
     issues: string[];

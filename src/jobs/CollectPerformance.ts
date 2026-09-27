@@ -2,6 +2,27 @@ import { query } from '../config/database';
 import { PerformanceService } from '../services/PerformanceService';
 
 /**
+ * ============================================================================
+ * src/jobs/CollectPerformance.ts — ONE METRICS READING PER MACHINE PER MINUTE
+ * ============================================================================
+ *
+ * Runs every minute (scheduled in src/jobs/index.ts). For each running
+ * machine it saves one row to `performance_metrics`, which the Performance
+ * page and /api/performance read.
+ *
+ * ⚠️  THE NUMBERS ARE FAKE. There's no connection to the real machines yet,
+ * so collectMetricsForMachine() INVENTS plausible-looking values with
+ * Math.random() (plus occasional random "spikes" so the charts look alive).
+ * Anything shown as performance data is simulated. The real version would
+ * read from each cloud's monitoring service (AWS CloudWatch, Azure Monitor,
+ * Google Cloud Monitoring, OCI Monitoring) or from an agent on the machine.
+ *
+ * Also note: this adds 1,440 rows per running machine per day and nothing
+ * ever deletes old rows, so the table grows indefinitely.
+ * ============================================================================
+ */
+
+/**
  * Background job: Collect performance metrics from running machines (every minute)
  * In production, would query CloudWatch/Azure Monitor/Stackdriver/OCI APIs
  * For MVP, generates realistic mock data
@@ -29,6 +50,16 @@ export async function collectPerformanceMetricsJob() {
   }
 }
 
+/**
+ * Generate and save one (simulated) reading for one machine.
+ *
+ * Pattern used for each value:  base + Math.random() × range
+ * Math.random() gives a number from 0 up to (not including) 1, so e.g.
+ * `45 + Math.random() * 30` is somewhere between 45 and 75.
+ * `if (Math.random() < 0.1)` is true about 10% of the time — used to add
+ * occasional spikes. Math.min(99, ...) caps a value at 99.
+ * `.toFixed(1)` + parseFloat rounds to 1 decimal place before saving.
+ */
 async function collectMetricsForMachine(machineId: string) {
   // In production, query cloud provider monitoring APIs:
   // AWS CloudWatch - CPUUtilization, GPUUtilization, NetworkIn/Out
