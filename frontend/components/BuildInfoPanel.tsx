@@ -60,7 +60,7 @@ export default function BuildInfoPanel({ onClose }: { onClose: () => void }) {
       }
 
       try {
-        const beRes = await fetch(apiUrl('/version'), { cache: 'no-store' });
+        const beRes = await fetch(apiUrl('/status/version'), { cache: 'no-store' });
         if (!beRes.ok) throw new Error(`HTTP ${beRes.status}`);
         setBackend(await beRes.json());
       } catch (error: any) {
