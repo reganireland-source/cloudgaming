@@ -20,6 +20,25 @@ CREATE TABLE IF NOT EXISTS cloud_credentials (
   UNIQUE(user_id, provider)
 );
 
+-- Snapshots (game library backups)
+-- Defined before `machines` because machines.snapshot_id references it.
+CREATE TABLE IF NOT EXISTS snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  machine_id UUID,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider VARCHAR(20) NOT NULL,
+  region VARCHAR(50) NOT NULL,
+  snapshot_provider_id VARCHAR(255) NOT NULL,
+  disk_size_gb INTEGER,
+  cost_per_month DECIMAL(8, 4),
+  tags TEXT[] DEFAULT '{}',
+  description TEXT,
+  snapshot_data JSONB DEFAULT '{}',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(provider, snapshot_provider_id)
+);
+
 -- Machines
 CREATE TABLE IF NOT EXISTS machines (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -30,26 +49,26 @@ CREATE TABLE IF NOT EXISTS machines (
   instance_id VARCHAR(255) NOT NULL,
   status VARCHAR(20) DEFAULT 'stopped',
   cost_per_hour DECIMAL(8, 4),
+  streaming_quality VARCHAR(20) DEFAULT 'high' CHECK (streaming_quality IN ('budget', 'good', 'high', 'ultra')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_started TIMESTAMP,
   snapshot_id UUID REFERENCES snapshots(id),
   UNIQUE(provider, instance_id)
 );
 
--- Snapshots (game library backups)
-CREATE TABLE IF NOT EXISTS snapshots (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  machine_id UUID REFERENCES machines(id) ON DELETE SET NULL,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  provider VARCHAR(20) NOT NULL,
-  region VARCHAR(50) NOT NULL,
-  snapshot_provider_id VARCHAR(255) NOT NULL,
-  disk_size_gb INTEGER,
-  cost_per_month DECIMAL(8, 4),
-  tags TEXT[] DEFAULT '{}',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(provider, snapshot_provider_id)
-);
+-- snapshots.machine_id can only reference machines(id) once machines exists;
+-- added as a deferred FK rather than reordering again. Guarded so this file
+-- stays safe to run more than once.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_snapshots_machine'
+  ) THEN
+    ALTER TABLE snapshots
+      ADD CONSTRAINT fk_snapshots_machine
+      FOREIGN KEY (machine_id) REFERENCES machines(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- Cost tracking
 CREATE TABLE IF NOT EXISTS costs (
@@ -62,7 +81,7 @@ CREATE TABLE IF NOT EXISTS costs (
   storage_cost DECIMAL(8, 4) DEFAULT 0,
   provider VARCHAR(20) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) PARTITION BY RANGE (date);
+);
 
 -- Game profiles (maintained by admin, visible to all users)
 CREATE TABLE IF NOT EXISTS game_profiles (

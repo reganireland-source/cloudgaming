@@ -16,5 +16,5 @@ CREATE TABLE IF NOT EXISTS quality_updates (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_quality_updates_machine_id ON quality_updates(machine_id);
-CREATE INDEX idx_quality_updates_user_id ON quality_updates(user_id);
+CREATE INDEX IF NOT EXISTS idx_quality_updates_machine_id ON quality_updates(machine_id);
+CREATE INDEX IF NOT EXISTS idx_quality_updates_user_id ON quality_updates(user_id);

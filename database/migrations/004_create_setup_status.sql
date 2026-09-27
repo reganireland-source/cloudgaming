@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS setup_status (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_setup_status_machine_id ON setup_status(machine_id);
-CREATE INDEX idx_setup_status_updated_at ON setup_status(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_setup_status_machine_id ON setup_status(machine_id);
+CREATE INDEX IF NOT EXISTS idx_setup_status_updated_at ON setup_status(updated_at DESC);
 
 -- Add trigger to auto-update updated_at
 CREATE OR REPLACE FUNCTION update_setup_status_timestamp()
@@ -24,6 +24,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS setup_status_timestamp_trigger ON setup_status;
 CREATE TRIGGER setup_status_timestamp_trigger
   BEFORE UPDATE ON setup_status
   FOR EACH ROW
