@@ -161,46 +161,54 @@ export default function PerformancePage() {
   }, [selectedMachineId, refreshInterval]);
 
   if (loading) {
-    return <div className="text-center py-12">Loading...</div>;
+    return (
+      <div className="text-center py-12">
+        <p className="font-mono text-neon-cyan">
+          > SCANNING_PERFORMANCE_METRICS...
+        </p>
+      </div>
+    );
   }
 
   return (
     <div>
-      <div className="mb-8 flex justify-between items-start">
+      <div className="mb-8 flex flex-col sm:flex-row justify-between items-start gap-4">
         <div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Performance Portal</h1>
-          <p className="text-gray-600">Real-time monitoring of CPU, GPU, network, and streaming performance</p>
+          <h1 className="text-4xl font-bold neon-text mb-2 font-mono">[ PERFORMANCE_PORTAL ]</h1>
+          <p className="font-mono text-neon-lime text-sm">
+            {'> realtime_cpu_gpu_network_streaming_monitoring'.toUpperCase()}
+          </p>
         </div>
         <div className="flex gap-2">
           <select
             value={refreshInterval}
             onChange={(e) => setRefreshInterval(parseInt(e.target.value))}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="input-neon px-4 py-2 rounded font-mono text-sm"
           >
-            <option value="5">Refresh: 5s</option>
-            <option value="10">Refresh: 10s</option>
-            <option value="30">Refresh: 30s</option>
-            <option value="60">Refresh: 1m</option>
+            <option value="5">[ 5s ]</option>
+            <option value="10">[ 10s ]</option>
+            <option value="30">[ 30s ]</option>
+            <option value="60">[ 1m ]</option>
           </select>
         </div>
       </div>
 
       {/* Machine Selection */}
       {machines.length > 1 && (
-        <div className="bg-white rounded-lg shadow p-4 mb-6">
-          <p className="text-sm text-gray-600 mb-3">Select Machine:</p>
+        <div className="neon-card rounded-lg p-4 mb-6 border-2 border-neon-cyan">
+          <p className="text-xs text-neon-cyan mb-3 font-mono font-bold">[ SELECT_MACHINE ]</p>
           <div className="flex gap-2 flex-wrap">
             {machines.map((machine) => (
               <button
                 key={machine.id}
                 onClick={() => setSelectedMachineId(machine.id)}
-                className={`px-4 py-2 rounded-lg font-medium transition ${
+                className={`px-4 py-2 rounded font-mono font-bold text-sm transition border-2 ${
                   selectedMachineId === machine.id
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'border-neon-magenta bg-magenta-950/30 text-neon-magenta'
+                    : 'border-neon-cyan/50 text-neon-cyan/70 hover:border-neon-cyan hover:text-neon-cyan'
                 }`}
               >
-                {machine.instance_type} ({machine.provider.toUpperCase()})
+                {machine.instance_type} / {machine.provider.toUpperCase()}
               </button>
             ))}
           </div>
@@ -220,32 +228,32 @@ export default function PerformancePage() {
       )}
 
       {/* Performance Tips */}
-      <div className="mt-12 bg-blue-50 rounded-lg border border-blue-200 p-6">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Performance Tips</h3>
+      <div className="mt-12 neon-card rounded-lg border-2 border-neon-cyan p-6">
+        <h3 className="text-lg font-bold neon-text mb-4 font-mono">[ PERFORMANCE_TIPS ]</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-2">💻 CPU Usage</h4>
-            <p className="text-sm text-gray-700">Keep below 80% for stable performance. High CPU usage can cause stuttering and frame drops.</p>
+          <div className="neon-card-cyan rounded p-4 border border-neon-cyan">
+            <h4 className="font-bold text-neon-cyan mb-2 font-mono text-sm">💻 CPU_USAGE</h4>
+            <p className="text-xs text-neon-lime font-mono">Keep below 80% for stable perf. High usage → stuttering + frame drops.</p>
           </div>
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-2">🎮 GPU Usage</h4>
-            <p className="text-sm text-gray-700">Gaming workloads are GPU-intensive. 80-95% usage is normal. Above 95% may cause thermal throttling.</p>
+          <div className="neon-card-magenta rounded p-4 border border-neon-magenta">
+            <h4 className="font-bold text-neon-magenta mb-2 font-mono text-sm">🎮 GPU_USAGE</h4>
+            <p className="text-xs text-neon-cyan font-mono">Gaming: 80-95% normal. Above 95% = thermal throttling risk.</p>
           </div>
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-2">📊 Frame Rate</h4>
-            <p className="text-sm text-gray-700">Target 60 FPS for smooth gameplay. Drops below 50 FPS indicate performance issues that need investigation.</p>
+          <div className="neon-card-lime rounded p-4 border border-neon-lime">
+            <h4 className="font-bold text-neon-lime mb-2 font-mono text-sm">📊 FRAME_RATE</h4>
+            <p className="text-xs text-neon-magenta font-mono">Target 60 FPS. Below 50 FPS = investigate performance.</p>
           </div>
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-2">🌐 Network</h4>
-            <p className="text-sm text-gray-700">Packet loss over 1% or latency over 100ms affects streaming quality. Use wired connections when possible.</p>
+          <div className="neon-card-pink rounded p-4 border border-neon-pink">
+            <h4 className="font-bold text-neon-pink mb-2 font-mono text-sm">🌐 NETWORK</h4>
+            <p className="text-xs text-neon-cyan font-mono">Packet loss >1% or latency >100ms = quality issues. Use wired.</p>
           </div>
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-2">🌡️ Temperature</h4>
-            <p className="text-sm text-gray-700">CPU should stay below 80°C, GPU below 75°C. High temps throttle performance. Check cooling system if consistently hot.</p>
+          <div className="neon-card rounded p-4 border border-neon-cyan">
+            <h4 className="font-bold text-neon-cyan mb-2 font-mono text-sm">🌡️ TEMPERATURE</h4>
+            <p className="text-xs text-neon-lime font-mono">CPU <80°C, GPU <75°C. High temps = throttle. Check cooling.</p>
           </div>
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-2">💾 Storage</h4>
-            <p className="text-sm text-gray-700">Disk I/O bottlenecks can impact load times. Monitor read/write speeds. SSD gives better gaming performance.</p>
+          <div className="neon-card-magenta rounded p-4 border border-neon-magenta">
+            <h4 className="font-bold text-neon-magenta mb-2 font-mono text-sm">💾 STORAGE</h4>
+            <p className="text-xs text-neon-cyan font-mono">Disk I/O bottlenecks impact load times. SSD > HDD for gaming.</p>
           </div>
         </div>
       </div>
