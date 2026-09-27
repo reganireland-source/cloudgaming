@@ -78,52 +78,54 @@ export default function RecommendationsPage() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Game Recommendations</h1>
-        <p className="text-gray-600">Find the best cloud region and instance for your game and location</p>
+        <h1 className="text-4xl font-bold neon-text mb-2 font-mono">[ GAME_RECON ]</h1>
+        <p className="font-mono text-neon-lime text-sm">
+          {'> find_optimal_region_and_instance_for_location_budget'.toUpperCase()}
+        </p>
       </div>
 
       {/* Search Form */}
-      <form onSubmit={handleSearch} className="bg-white rounded-lg shadow p-6 mb-8">
+      <form onSubmit={handleSearch} className="neon-card rounded-lg p-6 mb-8 border-2 border-neon-cyan">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Game Title</label>
+            <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">GAME_TITLE</label>
             <input
               type="text"
               value={gameTitle}
               onChange={(e) => setGameTitle(e.target.value)}
-              placeholder="e.g., Elden Ring"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Elden_Ring"
+              className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Your Latitude</label>
+            <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">LATITUDE</label>
             <input
               type="number"
               step="0.0001"
               value={userLat}
               onChange={(e) => setUserLat(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Your Longitude</label>
+            <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">LONGITUDE</label>
             <input
               type="number"
               step="0.0001"
               value={userLng}
               onChange={(e) => setUserLng(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Budget ($/hr)</label>
+            <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">BUDGET_$/HR</label>
             <input
               type="number"
               step="0.01"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
-              placeholder="Optional"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="optional"
+              className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
             />
           </div>
         </div>
@@ -131,16 +133,16 @@ export default function RecommendationsPage() {
           <button
             type="submit"
             disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-medium"
+            className="btn-neon-cyan disabled:opacity-50 disabled:cursor-not-allowed font-mono"
           >
-            {loading ? 'Searching...' : 'Get Recommendations'}
+            {loading ? '[ SEARCHING... ]' : '[ RECOMMEND ]'}
           </button>
           <button
             type="button"
             onClick={handleSetMyLocation}
-            className="bg-gray-200 hover:bg-gray-300 text-gray-900 px-6 py-2 rounded-lg font-medium"
+            className="btn-neon-magenta font-mono"
           >
-            Use My Location
+            [ USE_LOCATION ]
           </button>
         </div>
       </form>
@@ -149,55 +151,55 @@ export default function RecommendationsPage() {
       {recommendations.length > 0 ? (
         <div className="space-y-4">
           {recommendations.map((rec, idx) => (
-            <div key={idx} className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition">
+            <div key={idx} className={`rounded-lg p-6 transition border-2 ${idx === 0 ? 'neon-card-magenta border-neon-magenta' : 'neon-card border-neon-cyan'}`}>
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-center">
                 <div>
-                  <h3 className="font-semibold text-gray-900 text-lg">{rec.provider.toUpperCase()}</h3>
-                  <p className="text-sm text-gray-600">{rec.region}</p>
-                  <p className="text-xs text-gray-500 mt-1">{rec.instanceType}</p>
+                  <h3 className={`font-bold text-lg font-mono ${idx === 0 ? 'text-neon-magenta' : 'text-neon-cyan'}`}>{rec.provider.toUpperCase()}</h3>
+                  <p className="text-xs text-neon-lime font-mono">{rec.region}</p>
+                  <p className="text-xs text-neon-cyan/60 mt-1 font-mono">{rec.instanceType}</p>
                 </div>
 
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Streaming Quality</p>
-                  <p className="font-semibold text-gray-900">{rec.quality.name}</p>
-                  <p className="text-xs text-gray-600">{rec.quality.resolution} @ {rec.quality.fps}fps</p>
+                  <p className="text-xs text-neon-cyan/70 mb-1 font-mono font-bold">QUALITY</p>
+                  <p className="font-bold text-neon-magenta font-mono">{rec.quality.name}</p>
+                  <p className="text-xs text-neon-lime font-mono">{rec.quality.resolution}@{rec.quality.fps}fps</p>
                 </div>
 
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Latency</p>
-                  <p className="text-2xl font-bold text-orange-600">{rec.latencyMs}ms</p>
-                  <p className="text-xs text-gray-600 mt-1">{rec.latencyMs < 30 ? '✓ Excellent' : rec.latencyMs < 60 ? '⚠ Good' : 'Fair'}</p>
+                  <p className="text-xs text-neon-cyan/70 mb-1 font-mono font-bold">LATENCY</p>
+                  <p className="text-2xl font-bold text-neon-pink font-mono">{rec.latencyMs}ms</p>
+                  <p className="text-xs text-neon-lime mt-1 font-mono">{rec.latencyMs < 30 ? '✓_Excellent' : rec.latencyMs < 60 ? '⚠_Good' : '⚠_Fair'}</p>
                 </div>
 
-                <div className="bg-gray-50 rounded p-4">
-                  <p className="text-xs text-gray-600 mb-2">Hourly Cost</p>
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-600">Compute:</span>
-                      <span className="font-medium">${rec.computePerHour.toFixed(3)}</span>
+                <div className={`rounded p-4 border ${idx === 0 ? 'border-neon-magenta/50' : 'border-neon-cyan/50'}`}>
+                  <p className="text-xs text-neon-cyan/70 mb-2 font-mono font-bold">COST_$/HR</p>
+                  <div className="space-y-1 font-mono text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-neon-cyan/70">Compute:</span>
+                      <span className="text-neon-lime font-bold">${rec.computePerHour.toFixed(3)}</span>
                     </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-600">Egress:</span>
-                      <span className="font-medium">${rec.egressPerHour.toFixed(3)}</span>
+                    <div className="flex justify-between">
+                      <span className="text-neon-cyan/70">Egress:</span>
+                      <span className="text-neon-lime font-bold">${rec.egressPerHour.toFixed(3)}</span>
                     </div>
-                    <div className="flex justify-between text-xs border-t pt-1">
-                      <span className="font-semibold">Total:</span>
-                      <span className="font-bold">${rec.totalPerHour.toFixed(3)}</span>
+                    <div className="flex justify-between border-t border-neon-cyan/20 pt-1">
+                      <span className={`font-bold ${idx === 0 ? 'text-neon-magenta' : 'text-neon-cyan'}`}>Total:</span>
+                      <span className={`font-bold text-lg ${idx === 0 ? 'text-neon-magenta' : 'text-neon-lime'}`}>${rec.totalPerHour.toFixed(3)}</span>
                     </div>
                   </div>
                 </div>
 
-                <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium whitespace-nowrap">
-                  Launch Machine
+                <button className={idx === 0 ? 'btn-neon-magenta' : 'btn-neon-cyan'}>
+                  [ LAUNCH ]
                 </button>
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <div className="bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
-          <p className="text-gray-600 mb-4">Search for a game to see recommendations</p>
-          <p className="text-sm text-gray-500">We'll find the best instance type, region, and streaming quality for your budget and location</p>
+        <div className="neon-card rounded-lg border-2 border-dashed border-neon-cyan p-12 text-center">
+          <p className="text-neon-cyan font-mono mb-4">[ SEARCH_FOR_GAME_RECOMMENDATIONS ]</p>
+          <p className="text-sm text-neon-lime font-mono">optimal_instance_region_quality_budgetfinder</p>
         </div>
       )}
     </div>

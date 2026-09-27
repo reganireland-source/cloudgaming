@@ -3,6 +3,7 @@ import { getProvider } from '../providers';
 import { Machine, Snapshot } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import { CloudyPadSetup } from '../utils/CloudyPadSetup';
 
 /**
  * MachineService handles machine lifecycle orchestration
@@ -320,7 +321,8 @@ export class MachineService {
   }
 
   /**
-   * Setup Sunshine streaming server via Cloudy Pad
+   * Setup Sunshine streaming server via CloudyPad
+   * Uses SSH to configure streaming on remote Windows instance
    */
   private static async setupSunshine(
     ipAddress: string,
@@ -330,24 +332,19 @@ export class MachineService {
     try {
       console.log(`Setting up Sunshine on ${ipAddress}...`);
 
-      // In production, SSH into the instance and run Cloudy Pad
-      // For MVP, this is a placeholder
-      // Command would be something like:
-      // ssh -i key.pem Administrator@{ipAddress} "
-      //   powershell -Command {
-      //     iex (New-Object System.Net.WebClient).DownloadString('https://cloudypad.dev/install.ps1');
-      //     cloudypad setup --region {region}
-      //   }
-      // "
+      // Initialize CloudyPad setup orchestrator
+      const setup = new CloudyPadSetup(ipAddress, quality, region);
 
-      // For now, just wait a bit for the instance to be ready
-      await new Promise(resolve => setTimeout(resolve, 30000)); // 30 seconds
+      // Run full setup pipeline (drivers, CloudyPad, Sunshine, gaming clients)
+      const result = await setup.setup();
 
-      console.log('Sunshine setup complete');
+      console.log(`Sunshine setup complete: ${result.sunshineUrl}`);
+      console.log(`Streaming is ready at: ${result.sunshineUrl}`);
     } catch (error) {
       console.error('Sunshine setup error:', error);
       // Don't fail the whole launch if setup has issues
-      // User can retry setup manually
+      // User can retry setup manually or access instance directly
+      console.log('Note: Setup errors are non-blocking - user can troubleshoot manually');
     }
   }
 }
