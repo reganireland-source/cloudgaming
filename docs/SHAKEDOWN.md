@@ -35,6 +35,12 @@ gcloud beta quotas preferences create --project=$P --service=compute.googleapis.
 
 **Free trial?** GPUs are blocked on trial accounts. Billing → *Activate full account*.
 
+**Easier:** once your keys are saved, open **Regions** in the app. It runs these
+checks against every cloud and region and shows *Ready / No quota / Not enabled*
+with the exact fix (console link and CLI) per region. Recon shows the same badge
+on every option, so a "best" region you have no quota for still shows up, marked
+as needing setup.
+
 ---
 
 ## 1. Deploy and run the pre-flight check  (≈5 min)
@@ -101,7 +107,12 @@ come from the machine's own serial console:
 
 Later starts skip all of this (about 1–2 minutes).
 
-### If it fails, the error card says why. The GCP ones:
+### If it fails, the error card says why
+
+The card starts with the **cause**: *Quota* or *Region* (your account's setup;
+see Regions), *Permissions* or *Keys* (the key's role; see Config), *Account*
+(billing or trial), or *Out of stock* (the cloud's temporary shortage, not
+yours). The GCP ones:
 
 | Card title | What it means | Fix |
 |---|---|---|

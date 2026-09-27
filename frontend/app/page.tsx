@@ -18,12 +18,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import CloudLogo from '@/components/CloudLogo';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Machine {
   id: string; provider: string; region: string; instance_type: string; status: string;
-  cost_per_hour: number; game_title: string | null; spot: boolean;
+  cost_per_hour: number; game_title: string | null; spot: boolean; created_at: string;
 }
 interface Inventory {
   clouds: string[];
@@ -111,7 +112,7 @@ export default function Dashboard() {
         <p className="text-xs text-neon-amber">⚠ Couldn’t read {inventory.errors.map((e) => CLOUD[e.provider]?.label || e.provider).join(', ')} just now — numbers from it may be missing. Details on the <Link href="/map" className="underline">Map</Link>.</p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[1.4fr,1fr]">
+      <div className="grid gap-4 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1.4fr),minmax(0,1fr)]">
         {/* ---- Machines ---- */}
         <section className="space-y-2">
           <div className="flex items-baseline justify-between"><h2 className="label">Your machines</h2><Link href="/machines" className="text-xs text-neon-cyan hover:underline">Manage →</Link></div>
@@ -121,12 +122,16 @@ export default function Dashboard() {
             </div>
           ) : (
             <ul className="space-y-1.5">
-              {machines.slice(0, 8).map((m) => {
+              {[...machines].sort((a, b) => {
+                // Live machines first (running → busy → stopped), failed last; newest first within each.
+                const rank = (s: string) => ({ running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, stopped: 2 } as Record<string, number>)[s] ?? 3;
+                return rank(a.status) - rank(b.status) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+              }).slice(0, 8).map((m) => {
                 const c = CLOUD[m.provider] || { color: '#94a3b8', letter: '?', label: m.provider };
                 return (
                   <li key={m.id}>
                     <Link href="/machines" className="flex items-center gap-2.5 rounded border border-white/10 bg-white/[0.02] px-2.5 py-2 hover:border-white/25">
-                      <span aria-hidden className="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full text-[0.62rem] font-bold text-white" style={{ background: c.color }}>{c.letter}</span>
+                      <CloudLogo provider={m.provider} size={20} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-slate-100 truncate">{m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</span>
                         <span className="block text-[0.7rem] text-slate-500 truncate">{c.label} · {m.region}{m.spot ? ' · spot' : ''}</span>

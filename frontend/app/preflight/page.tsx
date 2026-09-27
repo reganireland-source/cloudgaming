@@ -120,6 +120,7 @@ export default function PreflightPage() {
         <div className={`rounded-lg border px-3 py-2.5 text-sm ${fails ? 'border-neon-pink/50 bg-neon-pink/[0.05] text-neon-pink' : 'border-neon-lime/50 bg-neon-lime/[0.05] text-neon-lime'}`}>
           {fails ? '✗ ' : '✓ '}{summary}
           {!signedIn && <span className="block text-xs text-slate-400 mt-0.5"><Link href="/login?next=/preflight" className="text-neon-cyan hover:underline">Sign in</Link> to also check that your saved cloud keys still decrypt.</span>}
+          {signedIn && <span className="block text-xs text-slate-400 mt-0.5">GPU quota and which regions are switched on, per cloud: see <Link href="/regions" className="text-neon-cyan hover:underline">Regions</Link>.</span>}
         </div>
       )}
 

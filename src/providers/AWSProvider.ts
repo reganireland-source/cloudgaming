@@ -1208,6 +1208,16 @@ export class AWSProvider extends CloudProvider {
   }
 
   /** A Service Quotas value for EC2 in a region (e.g. 'L-DB2E81BA' = on-demand G and VT vCPUs). */
+  /**
+   * Which regions are switched on for this account: region id → AWS's
+   * OptInStatus ('opt-in-not-required' | 'opted-in' | 'not-opted-in').
+   * Opt-in regions (e.g. Hong Kong) must be enabled before anything works there.
+   */
+  async getRegionOptIn(): Promise<Record<string, string>> {
+    const res = await this.ec2For('us-east-1').describeRegions({ AllRegions: true }).promise();
+    return Object.fromEntries((res.Regions || []).map((r) => [String(r.RegionName), String(r.OptInStatus || 'opt-in-not-required')]));
+  }
+
   async getEc2Quota(region: string, quotaCode: string): Promise<number> {
     const sq = new AWS.ServiceQuotas(this.clientConfig(region));
     try {

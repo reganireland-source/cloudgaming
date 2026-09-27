@@ -33,6 +33,42 @@ export interface FriendlyError {
   consoleUrl?: string;     // the one console page that fixes it, if any
   consoleLabel?: string;   // the button text for that link
   raw?: string;            // the original error message, for reference
+  /** WHY it failed, in one word, so the card can say so plainly (see causeOf). */
+  cause?: ErrorCause;
+}
+
+/**
+ * The kind of problem behind an error. The error card leads with this, so
+ * "your account has no GPU quota in this region" is never confused with
+ * "the app is broken":
+ *   quota       a limit on YOUR cloud account (GPU quota / service limit)
+ *   region      the region isn't switched on / offered for your account
+ *   permission  the app's key isn't allowed to do this (roles, policies)
+ *   capacity    the cloud has no spare machines right now (temporary)
+ *   credentials the saved key is wrong, expired or deleted
+ *   account     billing / subscription / free-trial limits
+ *   other       anything else
+ */
+export type ErrorCause = 'quota' | 'region' | 'permission' | 'capacity' | 'credentials' | 'account' | 'other';
+
+const CAUSE_CODES: Record<Exclude<ErrorCause, 'other'>, string[]> = {
+  quota: ['GPU_QUOTA_GLOBAL', 'GPU_QUOTA_REGION', 'QUOTA', 'AWS_GPU_QUOTA', 'AWS_SPOT_QUOTA', 'AZURE_GPU_QUOTA', 'AZURE_SPOT_QUOTA',
+    'AZURE_QUOTA', 'OCI_SERVICE_LIMIT', 'OCI_COMPARTMENT_QUOTA'],
+  region: ['OCI_REGION_NOT_SUBSCRIBED', 'AZURE_SKU_NOT_AVAILABLE', 'AWS_ACCOUNT_NOT_READY', 'GPU_NOT_IN_REGION', 'AWS_TYPE_NOT_IN_REGION', 'UNKNOWN_REGION'],
+  permission: ['GCP_PERMISSION', 'AWS_PERMISSION', 'AZURE_PERMISSION', 'OCI_NOT_AUTHORIZED_OR_NOT_FOUND', 'ORG_POLICY_EXTERNAL_IP',
+    'ORG_POLICY', 'AZURE_POLICY', 'GCP_API_DISABLED', 'AZURE_RP_NOT_REGISTERED'],
+  capacity: ['ZONE_EXHAUSTED', 'AWS_NO_CAPACITY', 'AZURE_CAPACITY', 'OCI_OUT_OF_CAPACITY', 'AWS_TYPE_NOT_IN_ZONE', 'AWS_SUBNET_FULL'],
+  credentials: ['GCP_KEY_INVALID', 'AWS_KEY_INVALID', 'AWS_KEY_EXPIRED', 'AWS_KEY_MISSING', 'AZURE_SECRET_INVALID', 'AZURE_SECRET_EXPIRED',
+    'AZURE_APP_NOT_FOUND', 'AZURE_TENANT_NOT_FOUND', 'AZURE_SIGNIN', 'AZURE_CREDENTIALS_FORMAT', 'OCI_PRIVATE_KEY', 'OCI_NOT_AUTHENTICATED',
+    'OCI_BAD_USER', 'OCI_BAD_TENANCY', 'OCI_BAD_FINGERPRINT', 'OCI_NO_PRIVATE_KEY', 'OCI_PUBLIC_KEY_GIVEN', 'GCP_KEY_WRONG_TYPE',
+    'GCP_KEY_NOT_JSON', 'NO_CREDENTIALS', 'CREDENTIALS_UNREADABLE'],
+  account: ['GCP_BILLING', 'AZURE_FREE_TRIAL', 'AZURE_SUBSCRIPTION_DISABLED', 'AZURE_SUBSCRIPTION_NOT_FOUND'],
+};
+const CAUSE_BY_CODE: Record<string, ErrorCause> = Object.fromEntries(
+  (Object.entries(CAUSE_CODES) as Array<[ErrorCause, string[]]>).flatMap(([cause, codes]) => codes.map((c) => [c, cause]))
+);
+export function causeOf(code: string): ErrorCause {
+  return CAUSE_BY_CODE[code] || 'other';
 }
 
 /**
@@ -106,13 +142,16 @@ const COMMON_RULES: Rule[] = [
  * @param projectId GCP only: the user's project, so console links open on it
  */
 export function toFriendlyError(error: unknown, provider = 'gcp', projectId?: string): FriendlyError {
-  if (error instanceof FriendlyCloudError) return error.friendly;
+  if (error instanceof FriendlyCloudError) return { ...error.friendly, cause: error.friendly.cause || causeOf(error.friendly.code) };
   if (provider === 'gcp') setGcpProjectContext(projectId);
 
   const raw = errorText(error);
   for (const rule of [...rulesFor(provider), ...COMMON_RULES]) {
     const match = raw.match(rule.test);
-    if (match) return { ...rule.build(raw, match), raw };
+    if (match) {
+      const built = rule.build(raw, match);
+      return { ...built, raw, cause: causeOf(built.code) };
+    }
   }
 
   return {
@@ -125,5 +164,6 @@ export function toFriendlyError(error: unknown, provider = 'gcp', projectId?: st
       'If it persists, send the operation id to whoever runs this app — the server logs have more detail.',
     ],
     raw,
+    cause: 'other',
   };
 }

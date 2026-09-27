@@ -21,6 +21,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 import { RecommendationEngine } from '../../services/RecommendationEngine';
+import { getRegionAccess } from '../../services/RegionAccessService';
 
 const router = Router();
 
@@ -49,6 +50,23 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get regions error:', error);
     res.status(500).json({ error: 'Failed to fetch regions' });
+  }
+});
+
+/**
+ * GET /api/regions/access[?refresh=true]
+ * "Your Cloud Regions": for every cloud you've connected, every region the
+ * app can launch in — ready / no GPU quota / not switched on / couldn't
+ * check — with the exact fix for each. See services/RegionAccessService.ts.
+ * Read-only; cached 10 minutes per cloud.
+ */
+router.get('/access', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getRegionAccess(req.userId!, req.query.refresh === 'true'));
+  } catch (error) {
+    console.error('Region access error:', error);
+    res.status(500).json({ error: 'Couldn\'t check your cloud regions', details: String(error) });
   }
 });
 

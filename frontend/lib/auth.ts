@@ -120,6 +120,8 @@ export interface FriendlyError {
   consoleUrl?: string;
   consoleLabel?: string;
   raw?: string;
+  /** Why it failed (quota, region, permission, capacity, credentials, account, other). */
+  cause?: 'quota' | 'region' | 'permission' | 'capacity' | 'credentials' | 'account' | 'other';
 }
 
 // ----------------------------------------------------------------------------

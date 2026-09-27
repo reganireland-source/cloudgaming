@@ -176,7 +176,10 @@ export default function SettingsPage() {
         {loading ? (
           <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; CHECKING_SESSION…</p>
         ) : user ? (
-          <CredentialManager onEditingChange={setGuideFor} />
+          <>
+            <CredentialManager onEditingChange={setGuideFor} />
+            <p className="mt-4 text-xs text-slate-400">Keys saved? <Link href="/regions" className="text-neon-cyan hover:underline">Regions</Link> shows where each cloud will let you launch (quota, region switched on) and how to fix the rest.</p>
+          </>
         ) : (
           <div className="text-sm text-slate-300 space-y-3">
             <p>Sign in to add your cloud keys. Each account only ever sees and uses its own keys.</p>

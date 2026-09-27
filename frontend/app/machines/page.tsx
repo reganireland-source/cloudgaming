@@ -305,6 +305,16 @@ function MachinesPageInner() {
   };
 
   const running = (machines || []).filter((m) => m.status === 'running');
+  // Status first, then newest first. A failed launch with an active
+  // operation (e.g. being retried or deleted) stays with the live ones.
+  const RANK: Record<string, number> = { running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, stopped: 2 };
+  const isDead = (m: Machine) => ['failed', 'missing'].includes(m.status) && !activeOps[m.id];
+  const byRank = (a: Machine, b: Machine) =>
+    (RANK[a.status] ?? 3) - (RANK[b.status] ?? 3) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  const sorted = {
+    live: (machines || []).filter((m) => !isDead(m)).sort(byRank),
+    failed: (machines || []).filter(isDead).sort(byRank),
+  };
   const hourly = running.reduce((sum, m) => sum + m.cost_per_hour, 0);
 
   return (
@@ -349,8 +359,10 @@ function MachinesPageInner() {
         </div>
       )}
 
+      {/* Usable machines first (running → busy → stopped), failed launches
+          last and folded away; newest first within each group. */}
       <div className="space-y-4">
-        {machines?.map((m) => (
+        {sorted.live.map((m) => (
           <MachineCard
             key={m.id}
             machine={m}
@@ -360,6 +372,24 @@ function MachinesPageInner() {
           />
         ))}
       </div>
+      {sorted.failed.length > 0 && (
+        <details className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2" open={sorted.live.length === 0}>
+          <summary className="cursor-pointer text-sm text-slate-400">
+            Failed launches ({sorted.failed.length}) <span className="text-xs text-slate-500">— nothing is running or billing for these; delete them to tidy up</span>
+          </summary>
+          <div className="mt-3 space-y-4">
+            {sorted.failed.map((m) => (
+              <MachineCard
+                key={m.id}
+                machine={m}
+                activeOp={activeOps[m.id] || null}
+                onAction={runAction}
+                onOpFinished={() => finished(m.id)}
+              />
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* ---- Recent activity across all machines ---- */}
       {recent.length > 0 && (

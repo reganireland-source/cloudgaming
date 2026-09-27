@@ -32,7 +32,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import CloudLogo from '@/components/CloudLogo';
 import { apiFetch, ApiError } from '@/lib/auth';
+import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
 import { useAuth } from '@/components/AuthProvider';
 import LaunchMachineModal, { type LaunchPreset } from '@/components/LaunchMachineModal';
 import { placeLabel, type Place } from '@/lib/places';
@@ -69,11 +71,6 @@ interface ReconResult {
 }
 interface ChosenPlace { label: string; lat: number; lng: number; source: 'search' | 'ip' | 'gps' | 'manual' }
 
-// Same colours / letters as the infrastructure map, so a cloud looks the same everywhere.
-const CLOUD: Record<string, { color: string; letter: string }> = {
-  gcp: { color: '#3987e5', letter: 'G' }, aws: { color: '#c98500', letter: 'A' },
-  azure: { color: '#199e70', letter: 'Z' }, oracle: { color: '#d55181', letter: 'O' },
-};
 const RATING: Record<Rating, { label: string; className: string }> = {
   excellent: { label: 'Excellent', className: 'text-neon-lime' },
   good: { label: 'Good', className: 'text-neon-cyan' },
@@ -144,6 +141,13 @@ export default function RecommendationsPage() {
   const [launch, setLaunch] = useState<LaunchPreset | null>(null);
   const [locating, setLocating] = useState(false);
   const [locateNote, setLocateNote] = useState<string | null>(null);
+  // Can your accounts launch in each region? (quota / region on / keys). Every
+  // option stays listed either way — a badge says what setup it still needs.
+  const [access, setAccess] = useState<Record<string, RegionAccess> | null>(null);
+  useEffect(() => {
+    if (!user) { setAccess(null); return; }
+    fetchRegionAccess().then((r) => setAccess(indexAccess(r))).catch(() => setAccess(null));
+  }, [user]);
 
   const pickCategory = (id: string) => {
     const c = CATEGORIES.find((x) => x.id === id)!;
@@ -390,6 +394,20 @@ export default function RecommendationsPage() {
                 {loading && <span className="text-[0.7rem] text-neon-cyan animate-pulse">updating…</span>}
               </div>
 
+              {access && tier.options.length > 0 && (() => {
+                const ok = (o: Option) => { const a = access[`${o.provider}:${o.region}`]; return !!a && statusFor(a, o.gpuModel) === 'ready'; };
+                const firstReady = tier.options.find(ok);
+                if (ok(tier.options[0])) return null;
+                return (
+                  <p className="text-[0.72rem] text-neon-amber">
+                    ! The top pick needs setup on your account first.{' '}
+                    {firstReady
+                      ? <>Best one you can launch right now: <span className="text-slate-100">{firstReady.regionName} ({firstReady.providerLabel})</span>, #{tier.options.indexOf(firstReady) + 1} below.</>
+                      : <>None of these are ready yet.</>}{' '}
+                    <Link href="/regions" className="text-neon-cyan hover:underline">See your regions</Link>
+                  </p>
+                );
+              })()}
               {tier.options.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-slate-400">
                   Nothing in this tier fits {money(parseFloat(budget) || 0)}/hour.{tier.cheapest && <> Cheapest is {money(tier.cheapest.totalPerHour)}/h in {tier.cheapest.regionName} ({tier.cheapest.providerLabel}).</>}
@@ -398,6 +416,7 @@ export default function RecommendationsPage() {
                 <ol className="space-y-2">
                   {tier.options.map((o, i) => (
                     <OptionRow key={`${o.provider}-${o.region}`} option={o} rank={i} tier={tier} signedIn={!!user}
+                      access={access?.[`${o.provider}:${o.region}`]}
                       showSpot={spot}
                       onLaunch={() => setLaunch({ provider: o.provider, region: o.region, shapeId: o.shapeId, quality: TIER_QUALITY[tier.id], game: result.game?.title || game.trim() || undefined, spot: o.spot })} />
                   ))}
@@ -420,15 +439,14 @@ export default function RecommendationsPage() {
 
 // ---------------------------------------------------------------------------
 
-function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot }: { option: Option; rank: number; tier: Tier; onLaunch: () => void; signedIn: boolean; showSpot: boolean }) {
+function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot, access }: { option: Option; rank: number; tier: Tier; onLaunch: () => void; signedIn: boolean; showSpot: boolean; access?: RegionAccess }) {
   const so = o.spotOffer;
-  const c = CLOUD[o.provider] || { color: '#94a3b8', letter: '?' };
   const same = (x: Option | null) => !!x && x.provider === o.provider && x.region === o.region;
   const tags = [rank === 0 ? 'Top pick' : null, same(tier.cheapest) ? 'Cheapest' : null, same(tier.closest) ? 'Closest' : null].filter(Boolean) as string[];
   return (
     <li className={`rounded-lg border p-2.5 sm:p-3 ${rank === 0 ? 'border-neon-magenta/50 bg-neon-magenta/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
       <div className="flex items-start gap-2.5">
-        <span aria-hidden className="mt-0.5 shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.7rem] font-bold text-white" style={{ background: c.color }}>{c.letter}</span>
+        <CloudLogo provider={o.provider} size={24} className="mt-0.5" />
         <div className="min-w-0 flex-1">
           <p className="text-sm text-slate-100 leading-tight">
             {o.regionName} <span className="text-slate-500 text-xs">· {o.providerLabel}</span>
@@ -460,6 +478,7 @@ function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot }: { op
               <DiscountBadge pct={so.discountPct} deal={so.deal} source={so.source} compact /> spot here: {money(so.totalPerHour)}/h
             </p>
           ) : null)}
+          {access && <AccessNote access={access} spot={o.spot} rank={rank} gpu={o.gpuModel} />}
         </div>
         {signedIn ? (
           <button type="button" onClick={onLaunch} className={`shrink-0 text-xs font-mono px-2.5 py-1.5 ${rank === 0 ? 'btn-neon-magenta' : 'btn-neon'}`}>LAUNCH</button>
@@ -468,6 +487,33 @@ function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot }: { op
         )}
       </div>
     </li>
+  );
+}
+
+/** Whether your account can launch here — shown on every option, never filtered. */
+function AccessNote({ access: a, spot, rank, gpu }: { access: RegionAccess; spot: boolean; rank: number; gpu: string }) {
+  const status = statusFor(a, gpu);
+  const st = ACCESS_STYLE[status];
+  const spotShort = spot && status === 'ready' && a.spotReady === false;
+  if (status === 'ready' && !spotShort) {
+    return <p className="mt-1.5 text-[0.7rem] text-neon-lime"><span aria-hidden>✓</span> Ready — your account can launch here</p>;
+  }
+  const why = spotShort ? 'On-demand is ready, but your spot quota here is too low'
+    : status === 'no-quota' && a.status === 'ready' ? `${rank === 0 ? 'Best option' : 'Would work'}, but you have no ${gpu} quota here yet (other GPUs are ready)`
+    : a.status === 'no-quota' ? `${rank === 0 ? 'Best option' : 'Would work'}, but you have no GPU quota here yet`
+    : a.status === 'not-enabled' ? `${rank === 0 ? 'Best option' : 'Would work'}, but this region isn’t switched on for your account`
+    : a.status === 'not-connected' ? 'You haven’t connected this cloud yet'
+    : 'Couldn’t check your access here';
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.7rem] text-slate-400">
+      <span className={`inline-flex items-center gap-1 rounded border px-1 uppercase tracking-label text-[0.6rem] ${spotShort ? ACCESS_STYLE['no-quota'].className : st.className}`}>
+        <span aria-hidden className="font-bold">{spotShort ? '!' : st.icon}</span>{spotShort ? 'Spot quota' : st.short}
+      </span>
+      <span>{why} —</span>
+      <Link href={a.status === 'not-connected' ? '/settings' : '/regions'} className="text-neon-cyan hover:underline whitespace-nowrap">
+        {a.status === 'not-connected' ? 'connect it' : a.status === 'unknown' ? 'see why' : 'how to fix'}
+      </Link>
+    </p>
   );
 }
 

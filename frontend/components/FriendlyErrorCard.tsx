@@ -19,7 +19,21 @@
  * ============================================================================
  */
 
+import Link from 'next/link';
 import type { FriendlyError } from '@/lib/auth';
+
+/**
+ * One plain sentence on WHOSE problem this is, shown above everything else,
+ * so a quota limit on your cloud account is never mistaken for a bug.
+ */
+const CAUSE: Record<string, { label: string; text: string; link?: { href: string; label: string } }> = {
+  quota: { label: 'Quota', text: 'A GPU limit on your cloud account in this region — not a problem with the app. Raise it with the cloud, or use a region where you already have quota.', link: { href: '/regions', label: 'See your regions & quotas' } },
+  region: { label: 'Region', text: 'This region isn’t switched on or offered for your cloud account — not a problem with the app.', link: { href: '/regions', label: 'See which regions you can use' } },
+  permission: { label: 'Permissions', text: 'The key you saved isn’t allowed to do this in your cloud account. Give it the missing role/policy (steps below).', link: { href: '/settings', label: 'Open Config' } },
+  capacity: { label: 'Out of stock', text: 'The cloud has no spare machines of this type here right now. Temporary — nothing is wrong with your account or the app.' },
+  credentials: { label: 'Keys', text: 'The saved cloud key is wrong, expired or was deleted.', link: { href: '/settings', label: 'Update keys on Config' } },
+  account: { label: 'Account', text: 'Your cloud account’s billing or subscription is blocking this.' },
+};
 
 export default function FriendlyErrorCard({
   friendly,
@@ -39,6 +53,13 @@ export default function FriendlyErrorCard({
         <span aria-hidden>✗</span>
         <span>{title}</span>
       </p>
+      {friendly?.cause && CAUSE[friendly.cause] && (
+        <p className="mt-2 rounded border border-white/15 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 leading-relaxed">
+          <span className="mr-1.5 rounded bg-neon-amber/15 border border-neon-amber/50 px-1 uppercase tracking-label text-[0.62rem] text-neon-amber">Cause: {CAUSE[friendly.cause].label}</span>
+          {CAUSE[friendly.cause].text}
+          {CAUSE[friendly.cause].link && <> <Link href={CAUSE[friendly.cause].link!.href} className="text-neon-cyan hover:underline whitespace-nowrap">{CAUSE[friendly.cause].link!.label} →</Link></>}
+        </p>
+      )}
       {friendly?.explanation && <p className="mt-2 text-slate-300 leading-relaxed">{friendly.explanation}</p>}
 
       {/* Numbered fix steps, or the single tip for simple errors. */}

@@ -40,6 +40,7 @@ import Link from 'next/link';
 import { apiUrl } from '@/lib/api';
 import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
+import CloudLogo from '@/components/CloudLogo';
 import InfraMap, { CLOUD_STYLE, STATUS_STYLE, estimatePingMs, type AvailableRegion, type GroupStatus, type LatLng, type MarkerGroup } from '@/components/InfraMap';
 import OperationConsole from '@/components/OperationConsole';
 import FriendlyErrorCard from '@/components/FriendlyErrorCard';
@@ -86,17 +87,8 @@ function vmState(status: string): GroupStatus {
 }
 const STATE_RANK: GroupStatus[] = ['problem', 'changing', 'running', 'stopped', 'resources'];
 
-function ShapeIcon({ provider, size = 12 }: { provider: string; size?: number }) {
-  const s = CLOUD_STYLE[provider];
-  if (!s) return null;
-  return (
-    <svg width={size} height={size} viewBox="0 0 12 12" aria-hidden className="inline-block align-[-1px]">
-      {s.shape === 'circle' && <circle cx="6" cy="6" r="5" fill={s.color} />}
-      {s.shape === 'square' && <rect x="1" y="1" width="10" height="10" rx="1.5" fill={s.color} />}
-      {s.shape === 'triangle' && <polygon points="6,0.5 11.5,11 0.5,11" fill={s.color} />}
-      {s.shape === 'diamond' && <polygon points="6,0 12,6 6,12 0,6" fill={s.color} />}
-    </svg>
-  );
+function ShapeIcon({ provider, size = 14 }: { provider: string; size?: number }) {
+  return <CloudLogo provider={provider} size={size} className="align-[-2px]" />;
 }
 
 function StatusChip({ status }: { status: string }) {
@@ -127,13 +119,11 @@ export default function InfrastructureMapPage() {
   // Where you are, and how we know (see header).
   const [location, setLocation] = useState<(LatLng & { source: 'manual' | 'gps' | 'ip' | 'timezone'; label?: string; approximate?: boolean }) | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  // On phones the detail panel sits below the map, out of sight: bring it
-  // into view when a marker is picked (lg = side-by-side, nothing to do).
+  // The detail panel sits below the full-width map: when a marker is
+  // picked, scroll just enough to bring it into view.
   const detailRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (selected && typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches) {
-      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    if (selected) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [selected]);
   const [visible, setVisible] = useState<Set<string>>(new Set(['gcp', 'aws', 'azure', 'oracle']));
   const [layers, setLayers] = useState({ available: true, rings: true, paths: true });
@@ -329,18 +319,20 @@ export default function InfrastructureMapPage() {
         </details>
       ))}
 
-      <div className="-order-1 lg:order-none grid lg:grid-cols-[1fr,340px] gap-4">
-        {/* ---- Map + legend ---- */}
-        <div className="space-y-2 self-start">
-          <div className="neon-card rounded-lg border border-white/10 p-2">
+      <div className="-order-1 lg:order-none space-y-3">
+        {/* ---- Map: the full width of the page ---- */}
+        <div className="neon-card rounded-lg border border-white/10 p-2">
             {catalog ? (
               <InfraMap groups={groups} available={available} user={location} backend={backend}
                 userLabel={location?.source === 'ip' && location.label ? `You · ${location.label.split(',')[0]}` : 'You'}
                 showAvailable={layers.available} showRings={layers.rings} showPaths={layers.paths}
                 selectedKey={selected} onSelect={setSelected} onPickLocation={saveLocation} />
             ) : <p className="font-mono text-sm text-neon-cyan animate-pulse p-6">&gt; LOADING_MAP…</p>}
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.68rem] text-slate-400">
+        </div>
+
+        {/* ---- Below the map: details (left, wider) + legend ---- */}
+        <div className="grid lg:grid-cols-[minmax(0,1fr),minmax(0,420px)] gap-4">
+          <div className="lg:order-2 flex flex-wrap content-start gap-x-4 gap-y-1 text-[0.68rem] text-slate-400">
             {(Object.keys(STATUS_STYLE) as GroupStatus[]).map((k) => (
               <span key={k} className="inline-flex items-center gap-1.5">
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><circle cx="7" cy="7" r="5" fill="none" stroke={STATUS_STYLE[k].color} strokeWidth="2" strokeDasharray={STATUS_STYLE[k].dashed ? '2 2' : undefined} /></svg>
@@ -364,10 +356,9 @@ export default function InfrastructureMapPage() {
               ) : 'locating…'}
             </span>
           </div>
-        </div>
 
         {/* ---- Detail panel ---- */}
-        <aside ref={detailRef} className="rounded-lg border border-white/10 bg-cyber-panel/50 p-3 sm:p-4 space-y-3 self-start scroll-mt-3">
+        <aside ref={detailRef} className="lg:order-1 rounded-lg border border-white/10 bg-cyber-panel/50 p-3 sm:p-4 space-y-3 self-start scroll-mt-3">
           {!selectedGroup ? (
             <>
               <p className="label">Details</p>
@@ -469,6 +460,7 @@ export default function InfrastructureMapPage() {
             </div>
           )}
         </aside>
+        </div>
       </div>
 
       {/* ---- Table view (the same data as text) ---- */}

@@ -65,6 +65,7 @@ export const AWS_RULES: Rule[] = [
           'In the AWS console open IAM → Users → your user → "Security credentials" and check the key is listed as Active.',
           'If you no longer have the secret (AWS shows it only once), click "Create access key" to make a new pair.',
           'On the Config page here, remove the AWS credentials and add them again, pasting both values carefully (no spaces).',
+          'If the same key works in other regions, this region is probably an "opt-in" one (e.g. Hong Kong) that isn\'t switched on for your account — AWS answers with this same error. Check the Regions page here, or enable it under Account → AWS Regions.',
         ],
         consoleUrl: AWS_CONSOLE.iamUsers,
         consoleLabel: 'Open IAM users',

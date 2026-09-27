@@ -51,6 +51,7 @@ import crypto from 'crypto';
 import * as common from 'oci-common';
 import * as core from 'oci-core';
 import * as identity from 'oci-identity';
+import * as limits from 'oci-limits';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
 import { RegionData } from '../types';
 // Shared errors FIRST: it registers the Oracle rules from oracle/errors.
@@ -341,6 +342,37 @@ export class OracleProvider extends CloudProvider {
       page = res.opcNextPage || undefined;
     } while (page);
     return all;
+  }
+
+  /** Regions this tenancy is subscribed to (others must be subscribed in the console first). */
+  async getSubscribedRegions(): Promise<string[]> {
+    const { identity: id } = this.clients(this.homeRegion);
+    const res = await id.listRegionSubscriptions({ tenancyId: this.tenancyOcid });
+    return res.items.filter((r) => String(r.status) === 'READY').map((r) => String(r.regionName));
+  }
+
+  /**
+   * The A10 GPU service limit in a region, summed over its availability
+   * domains: { limit, used }. Oracle limits are per availability domain and
+   * start at 0 on new accounts. Returns null if no A10 limit is listed.
+   */
+  async getGpuLimit(region: string): Promise<{ limit: number; used: number } | null> {
+    const client = new limits.LimitsClient({ authenticationDetailsProvider: this.auth }, CLIENT_CONFIG);
+    client.regionId = region;
+    const values = await client.listLimitValues({ compartmentId: this.tenancyOcid, serviceName: 'compute' });
+    const a10 = values.items.filter((v) => /a10/i.test(String(v.name)) && !/bm|bare/i.test(String(v.name)));
+    if (!a10.length) return null;
+    let limit = 0; let used = 0;
+    for (const v of a10) {
+      limit += Number(v.value) || 0;
+      if ((Number(v.value) || 0) > 0 && v.availabilityDomain) {
+        try {
+          const av = await client.getResourceAvailability({ serviceName: 'compute', limitName: String(v.name), compartmentId: this.tenancyOcid, availabilityDomain: v.availabilityDomain });
+          used += Number(av.resourceAvailability.used) || 0;
+        } catch { /* usage is a nice-to-have */ }
+      }
+    }
+    return { limit, used };
   }
 
   /** The availability domains of a region, e.g. ["Uocm:AP-SINGAPORE-1-AD-1"]. */

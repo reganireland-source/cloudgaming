@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import CloudLogo from '@/components/CloudLogo';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
@@ -165,7 +166,7 @@ export default function CostsPage() {
               const cl = CLOUD[c.provider] || { label: c.provider, color: '#94a3b8' };
               return (
                 <li key={c.provider} className="flex items-center gap-3 rounded border border-white/10 px-3 py-2 text-sm">
-                  <span aria-hidden className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: cl.color }} />
+                  <CloudLogo provider={c.provider} size={18} />
                   <span className="text-slate-200 flex-1 min-w-0 truncate">{cl.label}</span>
                   <span className="text-xs text-slate-500 tabular-nums hidden xs:inline">{money(c.compute)} machine · {money(c.storage)} disk</span>
                   <span className="text-slate-100 tabular-nums">{money(c.total)}</span>

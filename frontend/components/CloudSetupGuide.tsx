@@ -89,6 +89,8 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'Filter "GPUs (all regions)" → select → Edit → request at least 1.',
         'Filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs" for your region (e.g. asia-southeast1) → request at least 1.',
         'For spot machines, also request "Preemptible NVIDIA T4 GPUs" (or L4).',
+        'Quota is per GPU model: T4 quota covers GOOD-tier machines only; BETTER (L4) needs "NVIDIA L4 GPUs" as well. Request both in each region you travel to.',
+        'Region names: asia-southeast1 = Singapore, asia-east2 = Hong Kong, asia-east1 = Taiwan, asia-northeast1 = Tokyo, asia-northeast3 = Seoul, asia-south1 = Mumbai, australia-southeast1 = Sydney, us-west1 = Oregon, us-west2 = Los Angeles.',
         'Approval usually takes from a few minutes to 2 business days.',
       ],
       cli: {
@@ -146,18 +148,30 @@ gcloud beta quotas preferences create --project=$P --service=compute.googleapis.
         'Service Quotas → AWS services → Amazon EC2, in the region you\'ll use.',
         'Find "Running On-Demand G and VT instances" → Request increase → 8.',
         'For spot machines, also request "All G and VT Spot Instance Requests" → 8.',
+        'Quota is per region: switch region (top right) and repeat for each place you travel to.',
+        'Hong Kong (ap-east-1) is an opt-in region: Account → AWS Regions → Enable it first, and wait a few minutes. Until then AWS answers as if your key were wrong.',
+        'Region names: ap-southeast-1 = Singapore, ap-east-1 = Hong Kong, ap-northeast-1 = Tokyo, ap-northeast-2 = Seoul, ap-south-1 = Mumbai, ap-southeast-2 = Sydney, us-west-2 = Oregon, us-west-1 = N. California.',
         'Approval takes from minutes to a couple of days; brand-new accounts may be asked for a use case.',
       ],
       cli: {
         shell: 'CloudShell', href: 'https://console.aws.amazon.com/cloudshell/home',
-        note: 'Run it in the region you\'ll launch in (region menu, top right). L-DB2E81BA = on-demand G/VT, L-3819A6DF = spot G/VT.',
-        code: `# Current limits (vCPUs; 0 = blocked)
-aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value
-aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value
+        note: 'L-DB2E81BA = on-demand G/VT, L-3819A6DF = spot G/VT. Edit the region list to the places you travel to.',
+        code: `REGIONS="ap-southeast-1 ap-northeast-1 ap-south-1 us-west-2"
+
+# Current limits per region (vCPUs; 0 = blocked)
+for R in $REGIONS; do
+  echo "$R on-demand=$(aws service-quotas get-service-quota --region $R --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value) spot=$(aws service-quotas get-service-quota --region $R --service-code ec2 --quota-code L-3819A6DF --query Quota.Value)"
+done
 
 # Request 8 vCPUs of each (enough for one g5.2xlarge)
-aws service-quotas request-service-quota-increase --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
-aws service-quotas request-service-quota-increase --service-code ec2 --quota-code L-3819A6DF --desired-value 8`,
+for R in $REGIONS; do
+  aws service-quotas request-service-quota-increase --region $R --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
+  aws service-quotas request-service-quota-increase --region $R --service-code ec2 --quota-code L-3819A6DF --desired-value 8
+done
+
+# Opt-in regions (e.g. Hong Kong): which are off, and switch one on
+aws ec2 describe-regions --all-regions --query "Regions[?OptInStatus=='not-opted-in'].RegionName" --output text
+aws account enable-region --region-name ap-east-1`,
       },
     },
     warnings: [
@@ -193,6 +207,8 @@ aws service-quotas request-service-quota-increase --service-code ec2 --quota-cod
         'Find "Standard NCASv3_T4 Family vCPUs" → request 8.',
         'For spot machines, also request "Total Regional Spot vCPUs" → 8.',
         'No NCASv3_T4 row for a region (this happens for Southeast Asia/Singapore on new subscriptions)? Check the machine exists there with  az vm list-skus --location <region> --size Standard_NC4as_T4_v3 --all -o table  (Restrictions should be None). If so, Azure just hasn\'t created the quota for you: open a support request → Service and subscription limits (quotas) → Compute-VM (cores-vCPUs) → that region → NCASv3_T4 → 8. Meanwhile use a nearby region, e.g. Malaysia West (Kuala Lumpur) for Singapore.',
+        'az quota update fails with "InvalidResourceName" for a region? Same cause — there\'s no quota entry to update; use the support request above.',
+        'Region names in the portal aren\'t cities: Southeast Asia = Singapore, East Asia = Hong Kong, Malaysia West = Kuala Lumpur, Japan East = Tokyo, Japan West = Osaka, Korea Central = Seoul, Central India = Pune, South India = Chennai, Australia East = Sydney.',
         'Requests Azure can’t auto-approve show a red ✗ — that isn’t a refusal; follow up with a support request and they’re reviewed by hand in a few days.',
       ],
       cli: {
@@ -241,13 +257,18 @@ az quota update --resource-name lowPriorityCores --resource-type lowPriority \\
       summary: 'GPU shapes need a service limit increase, per availability domain.',
       steps: [
         'Governance → Limits, Quotas and Usage → Service: Compute → your region.',
+        'Subscribe to the region first if it isn\'t your home region: region menu → Manage regions → Subscribe (takes a few minutes; can\'t be undone).',
         'Search "GPU.A10" ("GPUs for GPU.A10 based VM and BM instances") → Request a service limit increase → 1.',
+        'Limits are per region and per availability domain; the app tries every domain, so 1 in any domain is enough.',
         'Approval takes hours to a couple of days.',
       ],
       cli: {
         shell: 'Cloud Shell', href: 'https://cloud.oracle.com/?cloudshell=true',
         note: 'Checking is easy from the command line; the increase request itself is simplest in the console (steps above).',
-        code: `# Your GPU A10 limits per availability domain (0 = request an increase)
+        code: `# Regions you're subscribed to
+oci iam region-subscription list --output table
+
+# Your GPU A10 limits per availability domain (0 = request an increase)
 oci limits value list --service-name compute --compartment-id <tenancy-ocid> --all \\
   --query "data[?contains(name,'a10')]" --output table`,
       },
@@ -264,6 +285,7 @@ const ORDER: ProviderKey[] = ['gcp', 'aws', 'azure', 'oracle'];
 /** Shown under every cloud: what makes a first launch go smoothly. */
 const FIRST_LAUNCH_TIPS: React.ReactNode[] = [
   <>Run the <a href="/preflight" className="text-neon-cyan hover:underline">pre-flight check</a> after adding keys — it spots setup mistakes before you pay for a machine.</>,
+  <>If a launch fails, the error card starts with its <strong>cause</strong>: Quota, Region, Permissions, Out of stock, Keys or Account. Quota and Region problems are yours to fix (see <a href="/regions" className="text-neon-cyan hover:underline">Regions</a>); Out of stock is the cloud’s and passes on its own.</>,
   <>Start small: on <a href="/recommendations" className="text-neon-cyan hover:underline">Recon</a> pick <strong>Classic</strong> (GOOD tier, T4) with <strong>Reliable</strong> pricing. T4 is the most widely available GPU and needs the smallest quota; on-demand can’t be taken back mid-test.</>,
   <>Turn on <strong>auto-stop</strong> (15 minutes) in the launch form, so a forgotten machine shuts itself down.</>,
   <>The <strong>first boot takes 20–35 minutes</strong> (NVIDIA driver, a several-GB streaming container, then Chrome, Discord and Battle.net). The progress bar shows each stage; later starts take 1–2 minutes.</>,
@@ -429,6 +451,9 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
           ))}
         </ol>
         {guide.quota.cli && <CliBlock {...guide.quota.cli} />}
+        <p className="mt-3 text-xs text-slate-300 leading-relaxed">
+          <span className="text-neon-amber">Shortcut:</span> once your keys are saved, the <a href="/regions" className="text-neon-cyan hover:underline">Regions</a> page runs these checks for you across every region and cloud, and shows Ready / No quota / Not enabled with the exact fix for each.
+        </p>
       </section>
 
       {/* ---- First launch: tips that apply to every cloud ---- */}

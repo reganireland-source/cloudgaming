@@ -32,6 +32,7 @@
  * ============================================================================
  */
 
+import CloudLogo from './CloudLogo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { geoEqualEarth, geoPath, geoCircle, geoDistance, geoInterpolate } from 'd3-geo';
 import { feature } from 'topojson-client';
@@ -84,7 +85,7 @@ export function estimatePingMs(a: LatLng, b: LatLng): number {
 }
 
 const W = 960;
-const H = 480;
+const H = 440;
 
 function Shape({ shape, size, color, dim }: { shape: string; size: number; color: string; dim?: boolean }) {
   const common = { fill: color, stroke: '#0c1018', strokeWidth: 1.5, opacity: dim ? 0.3 : 1 };
@@ -119,7 +120,10 @@ export default function InfraMap({
   const [hover, setHover] = useState<{ x: number; y: number; lines: string[] } | null>(null);
 
   const { projection, path, landPath, spherePath } = useMemo(() => {
-    const projection = geoEqualEarth().fitSize([W, H], { type: 'Sphere' } as any);
+    // Fit the lived-in latitudes (58°S – 80°N), not the whole sphere: drops
+    // Antarctica and polar ocean so the land is drawn bigger.
+    const band = { type: 'Polygon', coordinates: [[[-179.9, -58], [-179.9, 80], [0, 80], [179.9, 80], [179.9, -58], [0, -58], [-179.9, -58]]] };
+    const projection = geoEqualEarth().fitSize([W, H], band as any);
     const path = geoPath(projection);
     const topo: any = landTopo;
     const land = feature(topo, topo.objects.land) as any;
@@ -258,8 +262,8 @@ export default function InfraMap({
                   <animate attributeName="r" from={size + 4.5} to={size + 11} dur="2s" repeatCount="indefinite" />
                   <animate attributeName="opacity" from="0.6" to="0" dur="2s" repeatCount="indefinite" />
                 </circle>}
-                <Shape shape={st.shape} size={size} color={st.color} />
-                <text y={3.5} textAnchor="middle" fontSize={9} fontWeight={700} fill="#0c1018" pointerEvents="none">{st.letter}</text>
+                <circle r={size + 2} fill="#0c1018" stroke={st.color} strokeWidth={1.5} />
+                <g pointerEvents="none"><CloudLogo provider={g.provider} size={size * 2} x={-size} y={-size} /></g>
                 {g.count > 1 && (
                   <g transform={`translate(${size + 3},${-size - 3})`}>
                     <circle r={6.5} fill="#f8fafc" stroke="#0c1018" strokeWidth={1} />

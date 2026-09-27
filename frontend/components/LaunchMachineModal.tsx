@@ -22,6 +22,7 @@ import Link from 'next/link';
 import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
+import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
 
 interface Region { id: string; name: string; gpus: string[]; egressPerGb: number }
 interface Shape {
@@ -68,6 +69,10 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [operationId, setOperationId] = useState<string | null>(null);
+  // Quota / region status per region (a hint, not a gate: it can be up to
+  // 10 minutes old, and the launch itself says exactly what failed).
+  const [access, setAccess] = useState<Record<string, RegionAccess>>({});
+  useEffect(() => { fetchRegionAccess().then((r) => setAccess(indexAccess(r))).catch(() => undefined); }, []);
 
   useEffect(() => {
     apiFetch<Options>('/machines/options')
@@ -209,10 +214,18 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       <label htmlFor="launch-region" className="label block mb-2">2 · Region</label>
                       <select id="launch-region" value={region} onChange={(e) => setRegion(e.target.value)} className="input-neon w-full px-3 py-2">
                         {current.regions.map((r) => (
-                          <option key={r.id} value={r.id}>{r.name} ({r.id}) · {r.gpus.join('/')}</option>
+                          <option key={r.id} value={r.id}>{access[`${provider}:${r.id}`] ? `${ACCESS_STYLE[access[`${provider}:${r.id}`].status].icon} ` : ''}{r.name} ({r.id}) · {r.gpus.join('/')}</option>
                         ))}
                       </select>
-                      <p className="text-xs text-slate-500 mt-1">Pick the one closest to you — distance adds lag.</p>
+                      {(() => {
+                        const a = access[`${provider}:${region}`];
+                        const st = a ? statusFor(a, shape?.gpuModel) : null;
+                        if (!a || st === 'ready' && !(spot && a.spotReady === false)) return <p className="text-xs text-slate-500 mt-1">{a ? <span className="text-neon-lime">✓ Your account has GPU quota here. </span> : null}Pick the one closest to you — distance adds lag.</p>;
+                        const msg = st === 'ready' ? 'Your spot quota here is too low — launch on-demand, or raise it.'
+                          : a.status === 'ready' ? `No ${shape?.gpuModel} quota here (${a.summary}). Pick a ${a.quotas.filter((q) => q.limit - q.used >= 1 && /T4|L4/.test(q.label)).map((q) => q.label.replace(/NVIDIA | GPUs/g, '')).join('/') || 'different'} size, or request it.`
+                          : `${ACCESS_STYLE[a.status].label}: ${a.summary}. The launch will probably fail.`;
+                        return <p className="text-xs text-neon-amber mt-1">! {msg} <Link href="/regions" className="text-neon-cyan hover:underline whitespace-nowrap">How to fix</Link></p>;
+                      })()}
                     </div>
                     <div>
                       <label htmlFor="launch-disk" className="label block mb-2">4 · Disk size (GB)</label>
