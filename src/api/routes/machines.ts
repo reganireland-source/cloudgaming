@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
+import { MachineService } from '../../services/MachineService';
 
 const router = Router();
 
@@ -60,18 +61,34 @@ router.post('/', async (req: Request, res: Response) => {
     const userId = req.userId;
     const { provider, region, instanceType, gameTitle, quality } = req.body;
 
-    if (!provider || !region || !instanceType) {
+    if (!provider || !region || !instanceType || !gameTitle) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // TODO: Validate game profile and quality
-    // TODO: Call cloud provider to launch instance
-    // TODO: Insert machine record
+    // Validate game profile exists
+    const gameResult = await query(
+      'SELECT * FROM game_profiles WHERE title ILIKE $1',
+      [gameTitle]
+    );
 
-    res.status(501).json({ error: 'Not yet implemented' });
+    if (gameResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Game not found in library' });
+    }
+
+    // Launch machine
+    const machine = await MachineService.launchMachine(
+      userId,
+      provider,
+      region,
+      instanceType,
+      gameTitle,
+      quality || 'Good'
+    );
+
+    res.status(201).json(machine);
   } catch (error) {
     console.error('Launch machine error:', error);
-    res.status(500).json({ error: 'Failed to launch machine' });
+    res.status(500).json({ error: 'Failed to launch machine', details: String(error) });
   }
 });
 
@@ -84,35 +101,59 @@ router.post('/:id/start', async (req: Request, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    // TODO: Verify ownership
-    // TODO: Call cloud provider to start instance
-    // TODO: Update status in DB
+    // Verify ownership
+    const machineResult = await query(
+      'SELECT user_id FROM machines WHERE id = $1',
+      [id]
+    );
 
-    res.status(501).json({ error: 'Not yet implemented' });
+    if (machineResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+
+    if (machineResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await MachineService.startMachine(id, userId);
+
+    res.json({ status: 'starting' });
   } catch (error) {
     console.error('Start machine error:', error);
-    res.status(500).json({ error: 'Failed to start machine' });
+    res.status(500).json({ error: 'Failed to start machine', details: String(error) });
   }
 });
 
 /**
  * POST /api/machines/:id/stop
- * Stop a machine
+ * Stop a machine (with optional snapshot)
  */
 router.post('/:id/stop', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
+    const { snapshot } = req.body;
 
-    // TODO: Verify ownership
-    // TODO: Create snapshot if requested
-    // TODO: Call cloud provider to stop instance
-    // TODO: Update status in DB
+    // Verify ownership
+    const machineResult = await query(
+      'SELECT user_id FROM machines WHERE id = $1',
+      [id]
+    );
 
-    res.status(501).json({ error: 'Not yet implemented' });
+    if (machineResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+
+    if (machineResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await MachineService.stopMachine(id, userId, snapshot !== false);
+
+    res.json({ status: 'stopping' });
   } catch (error) {
     console.error('Stop machine error:', error);
-    res.status(500).json({ error: 'Failed to stop machine' });
+    res.status(500).json({ error: 'Failed to stop machine', details: String(error) });
   }
 });
 
@@ -123,16 +164,38 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
 router.post('/:id/migrate', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { targetProvider, targetRegion, targetQuality } = req.body;
+    const userId = req.userId;
+    const { targetProvider, targetRegion } = req.body;
 
-    // TODO: Verify ownership
-    // TODO: Start migration orchestration
-    // TODO: Return migration status
+    if (!targetProvider || !targetRegion) {
+      return res.status(400).json({ error: 'Missing target provider or region' });
+    }
 
-    res.status(501).json({ error: 'Not yet implemented' });
+    // Verify ownership
+    const machineResult = await query(
+      'SELECT user_id FROM machines WHERE id = $1',
+      [id]
+    );
+
+    if (machineResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+
+    if (machineResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const newMachine = await MachineService.migrateMachine(
+      id,
+      userId,
+      targetProvider,
+      targetRegion
+    );
+
+    res.json({ status: 'migrating', newMachine });
   } catch (error) {
     console.error('Migrate machine error:', error);
-    res.status(500).json({ error: 'Failed to migrate machine' });
+    res.status(500).json({ error: 'Failed to migrate machine', details: String(error) });
   }
 });
 
@@ -145,14 +208,26 @@ router.delete('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    // TODO: Verify ownership
-    // TODO: Call cloud provider to terminate
-    // TODO: Delete machine record
+    // Verify ownership
+    const machineResult = await query(
+      'SELECT user_id FROM machines WHERE id = $1',
+      [id]
+    );
 
-    res.status(501).json({ error: 'Not yet implemented' });
+    if (machineResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+
+    if (machineResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await MachineService.deleteMachine(id, userId);
+
+    res.json({ status: 'terminated' });
   } catch (error) {
     console.error('Delete machine error:', error);
-    res.status(500).json({ error: 'Failed to delete machine' });
+    res.status(500).json({ error: 'Failed to delete machine', details: String(error) });
   }
 });
 
