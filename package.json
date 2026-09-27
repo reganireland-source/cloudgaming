@@ -1,0 +1,40 @@
+{
+  "name": "cloudgaming-hub-backend",
+  "version": "0.1.0",
+  "description": "Multi-cloud gaming infrastructure orchestrator",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "migrate": "node -r ts-node/register src/db/migrate.ts",
+    "lint": "eslint src --ext .ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.10.0",
+    "aws-sdk": "^2.1477.0",
+    "@azure/arm-compute": "^30.0.0",
+    "@azure/identity": "^3.2.4",
+    "@google-cloud/compute": "^4.2.0",
+    "oracle/oci-sdk": "^2.70.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1",
+    "joi": "^17.11.0",
+    "node-cron": "^3.0.2",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2",
+    "ts-node": "^10.9.1",
+    "@types/node": "^20.10.6",
+    "@types/express": "^4.17.21",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0"
+  }
+}
