@@ -24,7 +24,8 @@
  * the same), then by price.
  *
  * If a game title is given and found in game_profiles, its gpu_class picks
- * the suggested tier. No login or cloud keys are needed: this only reads the
+ * the suggested tier, and `priority` (latency / balanced / price) sets the
+ * ranking. No login or cloud keys are needed: this only reads the
  * price catalogs.
  * ============================================================================
  */
@@ -72,6 +73,20 @@ function rating(ms: number): 'excellent' | 'good' | 'fair' | 'poor' {
 }
 const BAND = { excellent: 0, good: 1, fair: 2, poor: 3 };
 
+/**
+ * What matters most when ranking regions (the Recon page picks it from the
+ * kind of game — e.g. esports → 'latency', indie → 'price'):
+ *   latency   closest first, price only breaks ties
+ *   balanced  ping band first (≤30 / ≤50 / ≤80 ms), then price   [default]
+ *   price     cheapest among anything playable (≤ 80 ms), then the rest
+ */
+export type Priority = 'latency' | 'balanced' | 'price';
+const RANK: Record<Priority, (a: ReconOption, b: ReconOption) => number> = {
+  latency: (a, b) => a.latencyMs - b.latencyMs || a.totalPerHour - b.totalPerHour,
+  balanced: (a, b) => BAND[a.latencyRating] - BAND[b.latencyRating] || a.totalPerHour - b.totalPerHour || a.latencyMs - b.latencyMs,
+  price: (a, b) => Number(a.latencyRating === 'poor') - Number(b.latencyRating === 'poor') || a.totalPerHour - b.totalPerHour || a.latencyMs - b.latencyMs,
+};
+
 export interface ReconOption {
   provider: ProviderName;
   providerLabel: string;
@@ -93,7 +108,7 @@ export interface ReconOption {
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
-export async function recon(opts: { lat: number; lng: number; budgetPerHour?: number; spot?: boolean; gameTitle?: string; limit?: number }) {
+export async function recon(opts: { lat: number; lng: number; budgetPerHour?: number; spot?: boolean; gameTitle?: string; priority?: Priority; limit?: number }) {
   const limit = opts.limit ?? 6;
 
   // Game → suggested tier (optional; the page still works if the DB is down).
@@ -141,7 +156,7 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
         if (best) all.push(best);
       }
     }
-    all.sort((a, b) => BAND[a.latencyRating] - BAND[b.latencyRating] || a.totalPerHour - b.totalPerHour || a.latencyMs - b.latencyMs);
+    all.sort(RANK[opts.priority || 'balanced']);
     const affordable = opts.budgetPerHour ? all.filter((o) => o.totalPerHour <= opts.budgetPerHour!) : all;
     // Laggy regions (> 80 ms) only pad the list when fewer than 3 others fit.
     const playable = affordable.filter((o) => o.latencyRating !== 'poor');
@@ -163,5 +178,5 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
     };
   });
 
-  return { location: { lat: opts.lat, lng: opts.lng }, spot: !!opts.spot, budgetPerHour: opts.budgetPerHour ?? null, game, gameNotFound, games, tiers };
+  return { location: { lat: opts.lat, lng: opts.lng }, priority: opts.priority || 'balanced', spot: !!opts.spot, budgetPerHour: opts.budgetPerHour ?? null, game, gameNotFound, games, tiers };
 }

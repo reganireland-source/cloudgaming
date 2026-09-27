@@ -8,12 +8,16 @@
  * 1. Where are you? Type a city or country ("Melbourne", "Japan",
  *    "Portland, Oregon"), use your internet connection's location, or enter
  *    coordinates. Names become lat/lng via app/api/geocode.
- * 2. Pick a hardware tier — GOOD (T4, 1080p60), BETTER (L4/A10G, 1440p60),
- *    BEST (L4/A10G/A10 with more CPU, up to 4K60). Each tier card shows its
- *    best nearby price; a game title highlights the tier it needs.
- * 3. The list ranks every cloud region for that tier by estimated ping, then
- *    price (machine + data sent to you). [ LAUNCH ] opens the launch form
- *    pre-filled with that exact cloud, region and machine.
+ * 2. What do you play? A broad category (competitive, modern AAA,
+ *    demanding/4K, classic, indie) — no game name needed. Each category
+ *    sets the hardware tier AND what matters most when ranking regions:
+ *    esports → lowest ping; indie → lowest price; AAA → balanced.
+ * 3. General first, specific if wanted: the tier cards — GOOD (T4,
+ *    1080p60), BETTER (L4/A10G, 1440p60), BEST (more GPU + CPU, up to 4K60)
+ *    — can be switched directly, and "Fine-tune" holds a specific game,
+ *    a budget, spot pricing and the sort order.
+ * 4. The list ranks every cloud region for that tier; [ LAUNCH ] opens the
+ *    launch form pre-filled with that exact cloud, region and machine.
  *
  * Numbers come from GET /api/recon (src/services/ReconService.ts), which
  * reads the same price catalogs as the launch form. Results refresh by
@@ -29,6 +33,7 @@ import LaunchMachineModal, { type LaunchPreset } from '@/components/LaunchMachin
 import { placeLabel, type Place } from '@/lib/places';
 
 type TierId = 'good' | 'better' | 'best';
+type Priority = 'latency' | 'balanced' | 'price';
 type Rating = 'excellent' | 'good' | 'fair' | 'poor';
 
 interface Option {
@@ -59,6 +64,25 @@ const RATING: Record<Rating, { label: string; className: string }> = {
   fair: { label: 'Fair', className: 'text-neon-amber' },
   poor: { label: 'Laggy', className: 'text-neon-pink' },
 };
+/**
+ * Catch-all game categories. Each one encodes the deciding factor for that
+ * kind of game: the hardware it needs (tier) and what to optimise for when
+ * choosing a region (priority).
+ */
+const CATEGORIES: Array<{ id: string; label: string; examples: string; tier: TierId; priority: Priority; why: string }> = [
+  { id: 'competitive', label: 'Competitive', examples: 'Valorant, CS2, Fortnite, Rocket League', tier: 'good', priority: 'latency',
+    why: 'Every millisecond counts, and these run fast on a T4 — so the closest region wins, price second.' },
+  { id: 'modern-aaa', label: 'Modern AAA', examples: 'Cyberpunk 2077, Elden Ring, Starfield', tier: 'better', priority: 'balanced',
+    why: 'Needs a current GPU for 1440p — the best-value region with a good ping.' },
+  { id: 'demanding', label: 'Demanding / 4K', examples: 'Flight Simulator, Baldur’s Gate 3, big sims & strategy', tier: 'best', priority: 'balanced',
+    why: 'Heavy on GPU and CPU — the most powerful machines, at a good ping.' },
+  { id: 'classic', label: 'Classic', examples: 'GTA V, Skyrim, The Witcher 3, older AAA', tier: 'good', priority: 'balanced',
+    why: 'A T4 runs these at 1080p60 — no need to pay for more; good ping, then lowest price.' },
+  { id: 'indie', label: 'Indie & casual', examples: 'Hades, Stardew Valley, Minecraft, turn-based', tier: 'good', priority: 'price',
+    why: 'Light on hardware and forgiving of a little lag — the cheapest region that’s still playable.' },
+];
+const PRIORITY_LABEL: Record<Priority, string> = { latency: 'Lowest ping', balanced: 'Balanced', price: 'Lowest price' };
+
 // Tier → the launch form's streaming quality.
 const TIER_QUALITY: Record<TierId, string> = { good: 'good', better: 'high', best: 'ultra' };
 const QUICK_PICKS = ['Sydney', 'Singapore', 'Tokyo', 'London', 'New York', 'Los Angeles'];
@@ -72,13 +96,25 @@ export default function RecommendationsPage() {
   const [game, setGame] = useState('');
   const [budget, setBudget] = useState('');
   const [spot, setSpot] = useState(false);
-  const [tierId, setTierId] = useState<TierId>('better');
+  const [categoryId, setCategoryId] = useState('modern-aaa');
+  const category = CATEGORIES.find((c) => c.id === categoryId)!;
+  const [sortOverride, setSortOverride] = useState<Priority | null>(null); // set in Fine-tune
+  const priority = sortOverride || category.priority;
+  const [fineTune, setFineTune] = useState(false);
+  const [tierId, setTierId] = useState<TierId>(category.tier);
   const [result, setResult] = useState<ReconResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [launch, setLaunch] = useState<LaunchPreset | null>(null);
   const [locating, setLocating] = useState(false);
   const [locateNote, setLocateNote] = useState<string | null>(null);
+
+  const pickCategory = (id: string) => {
+    const c = CATEGORIES.find((x) => x.id === id)!;
+    setCategoryId(id);
+    setTierId(c.tier);
+    setSortOverride(null);
+  };
 
   // ---- Location: remembered place, else the connection's rough location ----
   const choose = useCallback((p: ChosenPlace) => {
@@ -125,7 +161,7 @@ export default function RecommendationsPage() {
     const t = setTimeout(async () => {
       setLoading(true);
       setError(null);
-      const qs = new URLSearchParams({ lat: String(place.lat), lng: String(place.lng) });
+      const qs = new URLSearchParams({ lat: String(place.lat), lng: String(place.lng), priority });
       if (budget && parseFloat(budget) > 0) qs.set('budget', budget);
       if (spot) qs.set('spot', 'true');
       if (game.trim()) qs.set('game', game.trim());
@@ -145,7 +181,7 @@ export default function RecommendationsPage() {
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [place, budget, spot, game]);
+  }, [place, budget, spot, game, priority]);
 
   const tier = result?.tiers.find((t) => t.id === tierId);
 
@@ -183,26 +219,65 @@ export default function RecommendationsPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-[2fr,1fr,auto] gap-3 items-end">
-          <div className="col-span-2 sm:col-span-1">
-            <label htmlFor="recon-game" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">GAME <span className="text-slate-500 font-normal">(optional)</span></label>
-            <input id="recon-game" list="recon-games" value={game} onChange={(e) => setGame(e.target.value)} placeholder="e.g. Elden Ring"
-              className="input-neon w-full px-3 py-2 rounded font-mono text-sm" autoComplete="off" />
-            <datalist id="recon-games">{result?.games.map((g) => <option key={g} value={g} />)}</datalist>
+        <div>
+          <p id="recon-cat" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">WHAT_DO_YOU_PLAY</p>
+          <div role="radiogroup" aria-labelledby="recon-cat" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {CATEGORIES.map((c) => {
+              const on = c.id === categoryId;
+              return (
+                <button key={c.id} type="button" role="radio" aria-checked={on} onClick={() => pickCategory(c.id)}
+                  className={`text-left rounded border px-2.5 py-2 transition ${on ? 'border-neon-cyan bg-neon-cyan/[0.07]' : 'border-white/10 hover:border-white/25'}`}>
+                  <span className={`block text-sm font-semibold ${on ? 'text-neon-cyan' : 'text-slate-200'}`}>{c.label}</span>
+                  <span className="text-[0.68rem] text-slate-500 leading-snug line-clamp-1 sm:line-clamp-2">{c.examples}</span>
+                </button>
+              );
+            })}
           </div>
-          <div>
-            <label htmlFor="recon-budget" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">MAX_$/HOUR</label>
-            <input id="recon-budget" type="number" inputMode="decimal" min="0" step="0.05" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="any"
-              className="input-neon w-full px-3 py-2 rounded font-mono text-sm" />
-          </div>
-          <label className="flex items-center gap-2 text-xs text-slate-300 pb-2.5 cursor-pointer" title="Spare capacity sold cheaply; the cloud can stop it at short notice.">
-            <input type="checkbox" checked={spot} onChange={(e) => setSpot(e.target.checked)} className="accent-cyan-400 h-4 w-4" />
-            Spot pricing
-          </label>
+          <p className="mt-2 text-xs text-slate-400">
+            <span className="text-slate-200">{category.label}:</span> {category.why}
+          </p>
         </div>
-        {result?.gameNotFound && game.trim() && (
-          <p className="text-xs text-slate-400">“{game.trim()}” isn’t in the game library yet — pick a tier yourself{result.games.length ? ` (known: ${result.games.join(', ')})` : ''}.</p>
-        )}
+
+        {/* ---- Specific, only if wanted ---- */}
+        <div>
+          <button type="button" onClick={() => setFineTune((v) => !v)} aria-expanded={fineTune}
+            className="text-left text-xs text-slate-400 hover:text-neon-cyan">
+            {fineTune ? '▾' : '▸'} Fine-tune <span className="text-slate-500">— specific game, budget, spot pricing, sort order{(game.trim() || budget || spot || sortOverride) ? ' · active' : ''}</span>
+          </button>
+          {fineTune && (
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-[2fr,1fr,auto] gap-3 items-end">
+              <div className="col-span-2 sm:col-span-1">
+                <label htmlFor="recon-game" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">SPECIFIC_GAME</label>
+                <input id="recon-game" list="recon-games" value={game} onChange={(e) => setGame(e.target.value)} placeholder="e.g. Elden Ring"
+                  className="input-neon w-full px-3 py-2 rounded font-mono text-sm" autoComplete="off" />
+                <datalist id="recon-games">{result?.games.map((g) => <option key={g} value={g} />)}</datalist>
+              </div>
+              <div>
+                <label htmlFor="recon-budget" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">MAX_$/HOUR</label>
+                <input id="recon-budget" type="number" inputMode="decimal" min="0" step="0.05" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="any"
+                  className="input-neon w-full px-3 py-2 rounded font-mono text-sm" />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-slate-300 pb-2.5 cursor-pointer" title="Spare capacity sold cheaply; the cloud can stop it at short notice.">
+                <input type="checkbox" checked={spot} onChange={(e) => setSpot(e.target.checked)} className="accent-cyan-400 h-4 w-4" />
+                Spot pricing
+              </label>
+              <div className="col-span-2 sm:col-span-3">
+                <p id="recon-sort" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">SORT_BY</p>
+                <div role="radiogroup" aria-labelledby="recon-sort" className="inline-flex rounded border border-white/10 overflow-hidden">
+                  {(['latency', 'balanced', 'price'] as Priority[]).map((p) => (
+                    <button key={p} type="button" role="radio" aria-checked={priority === p} onClick={() => setSortOverride(p === category.priority ? null : p)}
+                      className={`px-2.5 py-1.5 text-xs border-r last:border-r-0 border-white/10 ${priority === p ? 'bg-neon-cyan/15 text-neon-cyan' : 'text-slate-400 hover:text-slate-200'}`}>
+                      {PRIORITY_LABEL[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {result?.gameNotFound && game.trim() && (
+                <p className="col-span-2 sm:col-span-3 text-xs text-slate-400">“{game.trim()}” isn’t in the game library yet — the category above still applies{result.games.length ? ` (known: ${result.games.join(', ')})` : ''}.</p>
+              )}
+            </div>
+          )}
+        </div>
       </section>
 
       {error && <p className="text-sm text-neon-amber">⚠ {error}</p>}
@@ -216,7 +291,7 @@ export default function RecommendationsPage() {
             {result.tiers.map((t) => {
               const pick = t.options[0];
               const selected = t.id === tierId;
-              const suggested = result.game?.suggestedTier === t.id;
+              const suggested = (result.game?.suggestedTier || category.tier) === t.id;
               return (
                 <button key={t.id} type="button" role="radio" aria-checked={selected} onClick={() => setTierId(t.id)}
                   className={`relative text-left rounded-lg border p-2 sm:p-3 transition ${selected ? 'border-neon-cyan bg-neon-cyan/[0.07]' : 'border-white/10 hover:border-white/25'}`}>
@@ -236,7 +311,8 @@ export default function RecommendationsPage() {
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                 <p className="text-xs text-slate-400">
                   <span className="text-slate-200 font-semibold">{tier.label}:</span> {tier.gpuClass} · {tier.resolution}{tier.fps} · {tier.bestFor}.
-                  {result.game?.suggestedTier === tier.id && <> Suggested for {result.game.title}.</>}
+                  {(result.game?.suggestedTier || category.tier) === tier.id && <> Suggested for {result.game?.title || category.label}.</>}
+                  {' '}Sorted by {PRIORITY_LABEL[priority].toLowerCase()}.
                   {tier.notOfferedBy.length > 0 && <> Not offered on {tier.notOfferedBy.join(' or ')}.</>}
                 </p>
                 {loading && <span className="text-[0.7rem] text-neon-cyan animate-pulse">updating…</span>}

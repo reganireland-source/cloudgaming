@@ -6,7 +6,8 @@
  * Mounted at /api/recon in src/index.ts, WITHOUT the login check: it only
  * reads the price catalogs, so anyone can compare before signing up.
  *
- *   GET /api/recon?lat=..&lng=..[&budget=0.9][&spot=true][&game=Elden]
+ *   GET /api/recon?lat=..&lng=..[&priority=latency|balanced|price]
+ *                  [&budget=0.9][&spot=true][&game=Elden]
  *     → best regions per hardware tier (Good / Better / Best), see
  *       src/services/ReconService.ts
  *
@@ -16,7 +17,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { recon } from '../../services/ReconService';
+import { recon, type Priority } from '../../services/ReconService';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.get('/', async (req: Request, res: Response) => {
       lat, lng,
       budgetPerHour: Number.isFinite(budget) && budget > 0 ? budget : undefined,
       spot: req.query.spot === 'true',
+      priority: (['latency', 'balanced', 'price'] as const).find((p) => p === req.query.priority) as Priority | undefined,
       gameTitle: typeof req.query.game === 'string' ? req.query.game.slice(0, 100) : undefined,
     }));
   } catch (error) {
