@@ -24,17 +24,23 @@ export class CloudyPadSetup {
   private region: string;
   private timeoutMs: number;
   private retryDelayMs: number;
+  private machineId?: string;
+  private statusCallback?: (stage: string, progress: number, message: string) => Promise<void>;
 
   constructor(
     ipAddress: string,
     quality: string,
     region: string,
     keyPath?: string,
-    username?: string
+    username?: string,
+    machineId?: string,
+    statusCallback?: (stage: string, progress: number, message: string) => Promise<void>
   ) {
     this.ipAddress = ipAddress;
     this.quality = quality;
     this.region = region;
+    this.machineId = machineId;
+    this.statusCallback = statusCallback;
     // Use provided values or fall back to environment variables
     this.keyPath = keyPath || env.SSH_KEY_PATH;
     this.username = username || env.SSH_USERNAME;
@@ -50,39 +56,63 @@ export class CloudyPadSetup {
     }
   }
 
+  private async reportStatus(stage: string, progress: number, message: string): Promise<void> {
+    if (this.statusCallback) {
+      await this.statusCallback(stage, progress, message);
+    }
+  }
+
   /**
    * Main orchestration: Wait for instance, install drivers, setup CloudyPad
    */
   async setup(): Promise<{ sunshineUrl: string; status: string }> {
     try {
       console.log(`[CloudyPad] Starting setup for ${this.ipAddress}`);
+      await this.reportStatus('initializing', 10, 'Initializing setup orchestrator...');
 
       // 1. Wait for instance to be reachable
+      await this.reportStatus('waiting_for_instance', 15, 'Waiting for instance to become reachable via SSH...');
       await this.waitForInstanceReady();
       console.log('[CloudyPad] Instance is reachable');
+      await this.reportStatus('waiting_for_instance', 20, 'Instance is reachable');
 
       // 2. Install GPU drivers (NVIDIA/AMD)
+      await this.reportStatus('installing_drivers', 25, 'Installing GPU drivers (NVIDIA/AMD)...');
       await this.installGPUDrivers();
       console.log('[CloudyPad] GPU drivers installed');
+      await this.reportStatus('installing_drivers', 40, 'GPU drivers installed successfully');
 
       // 3. Download and install CloudyPad
+      await this.reportStatus('installing_cloudypad', 45, 'Downloading and installing CloudyPad...');
       await this.installCloudyPad();
       console.log('[CloudyPad] CloudyPad installed');
+      await this.reportStatus('installing_cloudypad', 60, 'CloudyPad installed with Sunshine');
 
       // 4. Configure Sunshine with quality settings
+      await this.reportStatus('configuring_sunshine', 65, `Configuring Sunshine for ${this.quality} quality...`);
       await this.configureSunshine();
       console.log('[CloudyPad] Sunshine configured');
+      await this.reportStatus('configuring_sunshine', 75, 'Sunshine configuration complete');
 
       // 5. Install gaming clients (Battle.net, Steam, etc.)
+      await this.reportStatus('installing_clients', 80, 'Installing gaming clients (Battle.net, Steam, Epic Games)...');
       await this.installGamingClients();
       console.log('[CloudyPad] Gaming clients installed');
+      await this.reportStatus('installing_clients', 85, 'Gaming clients installation started');
 
       // 6. Start Sunshine service
+      await this.reportStatus('starting_service', 90, 'Starting Sunshine streaming service...');
       await this.startSunshine();
       console.log('[CloudyPad] Sunshine service started');
+      await this.reportStatus('starting_service', 95, 'Sunshine service started successfully');
 
       const sunshineUrl = `http://${this.ipAddress}:47990`;
       console.log(`[CloudyPad] Setup complete - Sunshine web UI: ${sunshineUrl}`);
+
+      // Generate a random 6-digit PIN for Sunshine pairing
+      const sunshinePin = Math.floor(100000 + Math.random() * 900000).toString();
+
+      await this.reportStatus('complete', 100, 'Setup complete and streaming service is ready!');
 
       return {
         sunshineUrl,
@@ -90,6 +120,7 @@ export class CloudyPadSetup {
       };
     } catch (error) {
       console.error('[CloudyPad] Setup failed:', error);
+      await this.reportStatus('failed', 0, `Setup failed: ${error}`);
       throw error;
     }
   }

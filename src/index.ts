@@ -12,6 +12,7 @@ import costRoutes from './api/routes/costs';
 import regionRoutes from './api/routes/regions';
 import performanceRoutes from './api/routes/performance';
 import streamingRoutes from './api/routes/streaming';
+import setupStatusRoutes from './api/routes/setup-status';
 
 // Middleware
 import { authMiddleware } from './api/middleware/auth';
@@ -53,6 +54,7 @@ app.use('/api/costs', authMiddleware, costRoutes);
 app.use('/api/regions', authMiddleware, regionRoutes);
 app.use('/api/performance', authMiddleware, performanceRoutes);
 app.use('/api/streaming', streamingRoutes);
+app.use('/api/setup-status', authMiddleware, setupStatusRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
