@@ -32,6 +32,25 @@ A multi-cloud gaming infrastructure platform that enables cost-optimized game st
 - Budget caps with alert thresholds
 - Per-machine cost calculation
 
+### 🖥️ Performance Portal (More Accessible Than Traditional Cloud Platforms)
+- **Real-Time Monitoring**: CPU, GPU, bandwidth, FPS, packet loss, temperatures updated every minute
+- **Health Status Indicators**: Healthy/Warning/Critical alerts with specific issues
+- **Comprehensive Metrics**:
+  - CPU & GPU usage (%) with thermal monitoring
+  - GPU memory and system memory utilization
+  - Network bandwidth (upload/download) and latency
+  - Streaming frame rate (FPS) and frame drops
+  - Disk I/O performance (IOPS and throughput)
+  - Network packet loss and connection quality
+- **Performance Charts**: 
+  - Area charts for CPU/GPU usage trends
+  - Streaming quality indicators (FPS vs packet loss)
+  - Disk I/O performance visualization
+  - Network bandwidth trends
+- **Statistics Dashboard**: Current, average, and peak metrics for 1-hour window
+- **Health Checks**: Automatic detection of thermal throttling, high packet loss, low FPS
+- **Performance Tips**: Best practice guidance for each metric
+
 ## Architecture
 
 ```
@@ -42,7 +61,8 @@ cloudgaming/
 │   │   │   ├── auth.ts          # User registration/login
 │   │   │   ├── machines.ts      # Machine lifecycle
 │   │   │   ├── costs.ts         # Cost aggregation
-│   │   │   └── regions.ts       # Region recommendations
+│   │   │   ├── regions.ts       # Region recommendations
+│   │   │   └── performance.ts   # Real-time performance metrics
 │   │   └── middleware/
 │   │       └── auth.ts          # JWT authentication
 │   ├── providers/               # Cloud provider abstraction
@@ -54,9 +74,11 @@ cloudgaming/
 │   ├── services/                # Business logic
 │   │   ├── CostService.ts       # Cost aggregation & forecasting
 │   │   ├── RecommendationEngine.ts  # Game-aware recommendations
+│   │   ├── PerformanceService.ts # Real-time performance metrics & health status
 │   │   └── MachineService.ts    # Machine orchestration
 │   ├── jobs/                    # Background jobs
 │   │   ├── SyncCosts.ts         # Hourly cost sync, idle shutdown, budget alerts
+│   │   ├── CollectPerformance.ts # Minute-level performance metric collection
 │   │   └── index.ts             # Job scheduling (node-cron)
 │   ├── config/
 │   │   ├── env.ts               # Environment validation
@@ -73,13 +95,16 @@ cloudgaming/
     │   ├── page.tsx             # Dashboard with BoM visualization
     │   ├── machines/
     │   │   └── page.tsx         # Machine management
+    │   ├── performance/
+    │   │   └── page.tsx         # Real-time performance monitoring portal
     │   ├── recommendations/
     │   │   └── page.tsx         # Game recommendation search
     │   ├── costs/
     │   │   └── page.tsx         # Cost tracking & forecasting
     │   └── globals.css          # Tailwind styles
     ├── components/
-    │   └── BillOfMaterials.tsx  # Cost diagram component
+    │   ├── BillOfMaterials.tsx  # Cost diagram component
+    │   └── PerformanceStats.tsx # Performance charts and metrics
     ├── tailwind.config.js       # Tailwind configuration
     └── next.config.js           # Next.js configuration
 ```
@@ -92,6 +117,7 @@ cloudgaming/
 - **machines**: Running gaming instances with provider/region/status
 - **snapshots**: Machine images for cross-cloud migration
 - **costs**: Hourly cost records (partitioned by date)
+- **performance_metrics**: Real-time performance data (CPU, GPU, bandwidth, FPS, temps) per machine per minute
 
 ### Reference Data
 - **game_profiles**: Library with GPU class, target quality, VRAM (Valorant, Elden Ring, Baldur's Gate 3, Minecraft)
@@ -133,6 +159,13 @@ GET  /api/regions               # List all regions with pricing
 POST /api/regions/test-latency  # Calculate latency to region
 GET  /api/regions/recommend     # Get game recommendations (game, lat, lng, budget)
 GET  /api/regions/qualities     # Streaming quality tiers for a region
+```
+
+### Performance Monitoring
+```
+GET  /api/performance/:machineId           # Get performance stats (CPU, GPU, network, FPS, temps)
+GET  /api/performance/:machineId/realtime  # Get latest performance metric
+GET  /api/performance/:machineId/health    # Get machine health status (healthy/warning/critical)
 ```
 
 ## Bill of Materials Visualization
