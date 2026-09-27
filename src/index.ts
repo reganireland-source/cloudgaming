@@ -78,6 +78,7 @@ import machineRoutes from './api/routes/machines';          // launch / start / 
 import costRoutes from './api/routes/costs';                // spend history and forecasts
 import regionRoutes from './api/routes/regions';            // cloud regions and their prices
 import reconRoutes from './api/routes/recon';              // Recon page: best region per hardware tier
+import { prewarmSpotPrices } from './services/SpotPriceService';
 import performanceRoutes from './api/routes/performance';   // CPU/GPU/network metrics for a machine
 import streamingRoutes from './api/routes/streaming';       // how to connect Sunshine/Moonlight to a machine
 import setupStatusRoutes from './api/routes/setup-status';  // progress of the automated machine setup
@@ -239,6 +240,7 @@ failOrphanedOperations();
 // these log lines are the first thing to look for in Railway's logs to
 // confirm a deploy succeeded.
 app.listen(PORT, () => {
+  prewarmSpotPrices(); // fetch AWS's live spot data now, so the first Recon page is quick
   console.log(`Gints Global Gaming Hubjob backend running on port ${PORT}`);
   console.log(`Environment: ${env.NODE_ENV}`);
   console.log(`Log level: ${env.LOG_LEVEL}`);

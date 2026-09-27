@@ -26,11 +26,16 @@ import FriendlyErrorCard from './FriendlyErrorCard';
 interface Region { id: string; name: string; gpus: string[]; egressPerGb: number }
 interface Shape {
   id: string; label: string; gpuModel: string; vcpus: number; memoryGb: number; bestFor: string;
-  prices: Record<string, { onDemand: number; spot: number | null }>;
+  prices: Record<string, {
+    onDemand: number; spot: number | null;
+    // Spot detail (src/services/SpotPriceService.ts): live where the cloud publishes it.
+    spotDiscountPct?: number | null; spotSource?: 'live' | 'fixed' | 'estimate' | null;
+    spotInterruption?: { label: string; level: number } | null;
+  }>;
 }
 interface ProviderOption {
   provider: string; label: string; configured: boolean; lastCheckOk: boolean | null; lastCheckSummary: string | null;
-  available: boolean; supportsSpot: boolean; spotLabel: string; defaultRegion: string; defaultDiskGb: number;
+  available: boolean; supportsSpot: boolean; spotLabel: string; spotOnReclaim?: string; defaultRegion: string; defaultDiskGb: number;
   minDiskGb: number; diskPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
 }
 interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[] }
@@ -240,6 +245,12 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                               <span className="font-semibold text-slate-100">{s.label}</span>
                               <span className="text-neon-lime tabular-nums">≈${p?.onDemand.toFixed(2)}/h</span>
                             </span>
+                            {p?.spot != null && (
+                              <span className="block mt-0.5 text-[0.68rem] text-slate-500 tabular-nums">
+                                spot ≈${p.spot.toFixed(2)}/h
+                                {p.spotDiscountPct != null && <> · −{p.spotDiscountPct}%{p.spotSource === 'estimate' ? ' est.' : ''}{p.spotSource === 'live' && p.spotDiscountPct >= 65 ? ' 🔥' : ''}</>}
+                              </span>
+                            )}
                             <span className="block text-slate-400 mt-1 leading-snug">{s.bestFor}</span>
                           </button>
                         );
@@ -252,9 +263,19 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     <label className="flex items-start gap-3 text-sm text-slate-300 rounded border border-white/10 p-3 cursor-pointer">
                       <input type="checkbox" className="mt-1" checked={spot} onChange={(e) => setSpot(e.target.checked)} />
                       <span>
-                        Use a <strong>{current.spotLabel}</strong> — about ${price.spot.toFixed(2)}/h instead of ${price.onDemand.toFixed(2)}/h.
+                        Use a <strong>{current.spotLabel}</strong> — about ${price.spot.toFixed(2)}/h instead of ${price.onDemand.toFixed(2)}/h
+                        {price.spotDiscountPct != null && (
+                          <span className={`ml-1.5 inline-block whitespace-nowrap rounded border px-1 text-[0.66rem] uppercase tracking-label align-middle ${
+                            price.spotSource === 'live' && price.spotDiscountPct >= 65 ? 'border-neon-lime/60 bg-neon-lime/10 text-neon-lime'
+                            : price.spotSource === 'live' && price.spotDiscountPct >= 55 ? 'border-neon-cyan/50 bg-neon-cyan/10 text-neon-cyan' : 'border-white/15 text-slate-300'}`}>
+                            {price.spotSource === 'live' && price.spotDiscountPct >= 65 ? '🔥 ' : ''}−{price.spotDiscountPct}%
+                            {price.spotSource === 'live' ? ' live' : price.spotSource === 'estimate' ? ' est.' : ''}
+                          </span>
+                        )}
                         <span className="block text-xs text-slate-500 mt-0.5">
-                          The cloud can take it back at short notice (your game stops; the disk is kept). Great for casual play, bad for long sessions.
+                          Not guaranteed: the cloud can take it back at short notice. {current.spotOnReclaim || 'Your game stops.'}
+                          {price.spotInterruption && <> Here it’s reclaimed <span className={price.spotInterruption.level >= 3 ? 'text-neon-amber' : 'text-slate-300'}>{price.spotInterruption.label}</span> of the time.</>}
+                          {' '}Great for casual play, risky for long sessions.
                         </span>
                       </span>
                     </label>

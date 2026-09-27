@@ -15,7 +15,12 @@
  * 3. General first, specific if wanted: the tier cards — GOOD (T4,
  *    1080p60), BETTER (L4/A10G, 1440p60), BEST (more GPU + CPU, up to 4K60)
  *    — can be switched directly, and "Fine-tune" holds a specific game,
- *    a budget, spot pricing and the sort order.
+ *    a budget and the sort order.
+ * 4. Pricing: RELIABLE (on-demand) or SPOT — the clouds' spare capacity at a
+ *    steep discount, which the cloud can take back at short notice. Spot
+ *    makes big machines cheap, so the page suggests "going large" when a
+ *    bigger tier on spot costs less than a smaller one on-demand, and flags
+ *    LIVE deep discounts (AWS / Azure publish live spot data).
  * 4. The list ranks every cloud region for that tier; [ LAUNCH ] opens the
  *    launch form pre-filled with that exact cloud, region and machine.
  *
@@ -41,11 +46,22 @@ interface Option {
   shapeId: string; shapeLabel: string; gpuModel: string; vcpus: number; memoryGb: number;
   latencyMs: number; latencyRating: Rating;
   computePerHour: number; spot: boolean; spotLabel: string; egressPerHour: number; totalPerHour: number;
+  onDemandPerHour: number;
+  spotOffer: SpotOffer | null;
 }
+type Deal = 'deep' | 'good' | null;
+interface SpotOffer {
+  spotPerHour: number; onDemandPerHour: number; discountPct: number; totalPerHour: number;
+  source: 'live' | 'fixed' | 'estimate'; interruption: { label: string; level: number } | null; onReclaim: string; deal: Deal;
+}
+interface PriceFrom { totalPerHour: number; regionName: string; providerLabel: string }
 interface Tier {
   id: TierId; label: string; gpuClass: string; gpuShort: string; resolution: string; fps: number; gbPerHour: number; bestFor: string;
   options: Option[]; totalOptions: number; overBudget: number; tooFar: number; closest: Option | null; cheapest: Option | null;
   offeredBy: string[]; notOfferedBy: string[];
+  onDemandFrom: PriceFrom | null;
+  spotFrom: (PriceFrom & { discountPct: number; deal: Deal; source: string }) | null;
+  bestDeal: { discountPct: number; regionName: string; providerLabel: string; deal: Deal } | null;
 }
 interface ReconResult {
   game: { title: string; gpuClass: string; suggestedTier: TierId } | null;
@@ -89,6 +105,22 @@ const QUICK_PICKS = ['Sydney', 'Singapore', 'Tokyo', 'London', 'New York', 'Los 
 const STORE_KEY = 'recon.place';
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+
+// Discount highlight: deep (≥ 65% off, live) / good (≥ 55%, live) / plain.
+const DEAL_STYLE: Record<'deep' | 'good' | 'plain', { label: string; className: string }> = {
+  deep: { label: 'Deep discount', className: 'border-neon-lime/60 bg-neon-lime/10 text-neon-lime' },
+  good: { label: 'Good deal', className: 'border-neon-cyan/50 bg-neon-cyan/10 text-neon-cyan' },
+  plain: { label: '', className: 'border-white/15 text-slate-300' },
+};
+function DiscountBadge({ pct, deal, source, compact }: { pct: number; deal: Deal; source: string; compact?: boolean }) {
+  const st = DEAL_STYLE[deal || 'plain'];
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1 text-[0.62rem] uppercase tracking-label tabular-nums ${st.className}`}
+      title={source === 'live' ? 'Live spot price from the cloud' : source === 'fixed' ? 'This cloud always gives this discount' : 'Estimated discount (no live feed for this cloud)'}>
+      {deal === 'deep' && <span aria-hidden>🔥</span>}−{pct}%{!compact && st.label ? ` · ${st.label}` : ''}{source === 'estimate' ? ' est.' : ''}
+    </span>
+  );
+}
 
 export default function RecommendationsPage() {
   const { user } = useAuth();
@@ -238,14 +270,44 @@ export default function RecommendationsPage() {
           </p>
         </div>
 
+        {/* ---- Pricing: reliable or spot ---- */}
+        <div>
+          <p id="recon-pricing" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">PRICING</p>
+          <div role="radiogroup" aria-labelledby="recon-pricing" className="grid grid-cols-2 gap-2">
+            {[
+              { on: false, title: 'Reliable', sub: 'On-demand · never interrupted' },
+              { on: true, title: 'Spot · big & cheap', sub: 'Up to 90% off · can be reclaimed' },
+            ].map((m) => (
+              <button key={m.title} type="button" role="radio" aria-checked={spot === m.on} onClick={() => setSpot(m.on)}
+                className={`text-left rounded border px-2.5 py-2 transition ${spot === m.on ? (m.on ? 'border-neon-lime bg-neon-lime/[0.07]' : 'border-neon-cyan bg-neon-cyan/[0.07]') : 'border-white/10 hover:border-white/25'}`}>
+                <span className={`block text-sm font-semibold ${spot === m.on ? (m.on ? 'text-neon-lime' : 'text-neon-cyan') : 'text-slate-200'}`}>{m.title}</span>
+                <span className="text-[0.68rem] text-slate-500 leading-snug line-clamp-1 sm:line-clamp-none">{m.sub}</span>
+              </button>
+            ))}
+          </div>
+          {spot ? (
+            <p className="mt-2 text-xs text-slate-400">
+              <span className="text-neon-amber">⚠ Not guaranteed:</span> spot machines run on the cloud’s spare hardware for 50–90% less, but the cloud can reclaim them at short notice — great for casual sessions, risky mid-match. AWS, Google and Azure <em>stop</em> the machine and keep your disk; Oracle <em>deletes</em> it.
+            </p>
+          ) : (() => {
+            const deal = result?.tiers.map((t) => t.bestDeal).filter(Boolean).sort((a, b) => b!.discountPct - a!.discountPct)[0];
+            return deal ? (
+              <p className="mt-2 text-xs text-slate-400">
+                <DiscountBadge pct={deal.discountPct} deal={deal.deal} source="live" compact /> live spot price right now in {deal.regionName} ({deal.providerLabel}).{' '}
+                <button type="button" onClick={() => setSpot(true)} className="text-neon-lime hover:underline">See spot prices →</button>
+              </p>
+            ) : null;
+          })()}
+        </div>
+
         {/* ---- Specific, only if wanted ---- */}
         <div>
           <button type="button" onClick={() => setFineTune((v) => !v)} aria-expanded={fineTune}
             className="text-left text-xs text-slate-400 hover:text-neon-cyan">
-            {fineTune ? '▾' : '▸'} Fine-tune <span className="text-slate-500">— specific game, budget, spot pricing, sort order{(game.trim() || budget || spot || sortOverride) ? ' · active' : ''}</span>
+            {fineTune ? '▾' : '▸'} Fine-tune <span className="text-slate-500">— specific game, budget, sort order{(game.trim() || budget || sortOverride) ? ' · active' : ''}</span>
           </button>
           {fineTune && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-[2fr,1fr,auto] gap-3 items-end">
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-[2fr,1fr] gap-3 items-end">
               <div className="col-span-2 sm:col-span-1">
                 <label htmlFor="recon-game" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">SPECIFIC_GAME</label>
                 <input id="recon-game" list="recon-games" value={game} onChange={(e) => setGame(e.target.value)} placeholder="e.g. Elden Ring"
@@ -257,11 +319,7 @@ export default function RecommendationsPage() {
                 <input id="recon-budget" type="number" inputMode="decimal" min="0" step="0.05" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="any"
                   className="input-neon w-full px-3 py-2 rounded font-mono text-sm" />
               </div>
-              <label className="flex items-center gap-2 text-xs text-slate-300 pb-2.5 cursor-pointer" title="Spare capacity sold cheaply; the cloud can stop it at short notice.">
-                <input type="checkbox" checked={spot} onChange={(e) => setSpot(e.target.checked)} className="accent-cyan-400 h-4 w-4" />
-                Spot pricing
-              </label>
-              <div className="col-span-2 sm:col-span-3">
+              <div className="col-span-2">
                 <p id="recon-sort" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">SORT_BY</p>
                 <div role="radiogroup" aria-labelledby="recon-sort" className="inline-flex rounded border border-white/10 overflow-hidden">
                   {(['latency', 'balanced', 'price'] as Priority[]).map((p) => (
@@ -273,7 +331,7 @@ export default function RecommendationsPage() {
                 </div>
               </div>
               {result?.gameNotFound && game.trim() && (
-                <p className="col-span-2 sm:col-span-3 text-xs text-slate-400">“{game.trim()}” isn’t in the game library yet — the category above still applies{result.games.length ? ` (known: ${result.games.join(', ')})` : ''}.</p>
+                <p className="col-span-2 text-xs text-slate-400">“{game.trim()}” isn’t in the game library yet — the category above still applies{result.games.length ? ` (known: ${result.games.join(', ')})` : ''}.</p>
               )}
             </div>
           )}
@@ -301,10 +359,17 @@ export default function RecommendationsPage() {
                   <span className="block text-[0.7rem] text-slate-500 truncate" title={t.gpuClass}>{t.gpuShort}</span>
                   <span className="block mt-1 text-sm text-slate-100 tabular-nums">{pick ? <>{money(pick.totalPerHour)}<span className="text-slate-500 text-[0.7rem]">/h</span></> : <span className="text-slate-500 text-xs">over budget</span>}</span>
                   {pick && <span className={`block text-[0.7rem] tabular-nums ${RATING[pick.latencyRating].className}`}>~{pick.latencyMs} ms</span>}
+                  {spot && pick?.spotOffer && pick.spot ? (
+                    <span className="block mt-1"><DiscountBadge pct={pick.spotOffer.discountPct} deal={pick.spotOffer.deal} source={pick.spotOffer.source} compact /></span>
+                  ) : !spot && t.spotFrom ? (
+                    <span className="block mt-1 text-[0.66rem] text-slate-500 tabular-nums">spot {money(t.spotFrom.totalPerHour)}{t.spotFrom.deal === 'deep' ? ' 🔥' : ''}</span>
+                  ) : null}
                 </button>
               );
             })}
           </div>
+
+          <GoLarge tiers={result.tiers} tierId={tierId} spot={spot} onSwitch={(t, useSpot) => { setTierId(t); setSpot(useSpot); }} />
 
           {tier && (
             <section aria-live="polite" className="space-y-2 sm:space-y-3">
@@ -326,12 +391,13 @@ export default function RecommendationsPage() {
                 <ol className="space-y-2">
                   {tier.options.map((o, i) => (
                     <OptionRow key={`${o.provider}-${o.region}`} option={o} rank={i} tier={tier} signedIn={!!user}
+                      showSpot={spot}
                       onLaunch={() => setLaunch({ provider: o.provider, region: o.region, shapeId: o.shapeId, quality: TIER_QUALITY[tier.id], game: result.game?.title || game.trim() || undefined, spot: o.spot })} />
                   ))}
                 </ol>
               )}
               <p className="text-[0.68rem] text-slate-500">
-                Ping is estimated from distance; real numbers depend on your internet provider. Price = machine{spot ? ' (spot where offered)' : ''} + data streamed to you at {tier.resolution}{tier.fps} (~{tier.gbPerHour} GB/h). Estimates exclude tax and disk storage.
+                Ping is estimated from distance; real numbers depend on your internet provider. Price = machine{spot ? ' (spot)' : ''} + data streamed to you at {tier.resolution}{tier.fps} (~{tier.gbPerHour} GB/h). Estimates exclude tax and disk storage.{spot && ' Spot discounts marked “est.” are our assumption (Google publishes no live feed); others are live from the cloud or, for Oracle, its fixed 50%.'}
                 {tier.overBudget > 0 && <> {tier.overBudget} more region{tier.overBudget === 1 ? '' : 's'} hidden over your budget.</>}
                 {tier.tooFar > 0 && <> {tier.tooFar} far-away region{tier.tooFar === 1 ? '' : 's'} (over 80 ms) hidden.</>}
               </p>
@@ -347,7 +413,8 @@ export default function RecommendationsPage() {
 
 // ---------------------------------------------------------------------------
 
-function OptionRow({ option: o, rank, tier, onLaunch, signedIn }: { option: Option; rank: number; tier: Tier; onLaunch: () => void; signedIn: boolean }) {
+function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot }: { option: Option; rank: number; tier: Tier; onLaunch: () => void; signedIn: boolean; showSpot: boolean }) {
+  const so = o.spotOffer;
   const c = CLOUD[o.provider] || { color: '#94a3b8', letter: '?' };
   const same = (x: Option | null) => !!x && x.provider === o.provider && x.region === o.region;
   const tags = [rank === 0 ? 'Top pick' : null, same(tier.cheapest) ? 'Cheapest' : null, same(tier.closest) ? 'Closest' : null].filter(Boolean) as string[];
@@ -366,6 +433,26 @@ function OptionRow({ option: o, rank, tier, onLaunch, signedIn }: { option: Opti
             <span className="text-slate-100 font-semibold">{money(o.totalPerHour)}/h</span>
             <span className="text-slate-500">{money(o.computePerHour)} {o.spot ? o.spotLabel.toLowerCase() : 'machine'} + {money(o.egressPerHour)} data</span>
           </div>
+          {so && (showSpot && o.spot ? (
+            // Spot mode: how big the discount is, and how "unsecured" it is.
+            <div className="mt-1.5 space-y-0.5 text-[0.7rem]">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <DiscountBadge pct={so.discountPct} deal={so.deal} source={so.source} />
+                <span className="text-slate-500 tabular-nums">vs <span className="line-through">{money(so.onDemandPerHour)}</span> on-demand</span>
+              </p>
+              <p className="text-slate-500">
+                {so.interruption
+                  ? <>Reclaimed <span className={so.interruption.level >= 3 ? 'text-neon-amber' : 'text-slate-300'}>{so.interruption.label}</span> of the time here{so.interruption.level >= 3 ? ' — expect interruptions' : ''}. </>
+                  : null}
+                <span className={o.provider === 'oracle' ? 'text-neon-pink' : ''}>{so.onReclaim}</span>
+              </p>
+            </div>
+          ) : !showSpot && so.deal ? (
+            // Reliable mode: still point out a live spot bargain on this exact machine.
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[0.7rem] text-slate-500 tabular-nums">
+              <DiscountBadge pct={so.discountPct} deal={so.deal} source={so.source} compact /> spot here: {money(so.totalPerHour)}/h
+            </p>
+          ) : null)}
         </div>
         {signedIn ? (
           <button type="button" onClick={onLaunch} className={`shrink-0 text-xs font-mono px-2.5 py-1.5 ${rank === 0 ? 'btn-neon-magenta' : 'btn-neon'}`}>LAUNCH</button>
@@ -478,5 +565,37 @@ function CoordinatesEditor({ place, onSet }: { place: ChosenPlace | null; onSet:
       <button type="submit" disabled={!valid} className="btn-neon text-xs px-2 py-1 disabled:opacity-40">Set</button>
       <button type="button" onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-100">Cancel</button>
     </form>
+  );
+}
+
+/**
+ * "Go large for less": when a bigger tier on spot costs no more than the
+ * selected tier (or GOOD) on-demand, say so — that's the point of spot.
+ */
+function GoLarge({ tiers, tierId, spot, onSwitch }: { tiers: Tier[]; tierId: TierId; spot: boolean; onSwitch: (t: TierId, spot: boolean) => void }) {
+  const order: TierId[] = ['good', 'better', 'best'];
+  const current = tiers.find((t) => t.id === tierId);
+  if (!current?.onDemandFrom) return null;
+  // Biggest tier above the current one whose spot price beats the current tier on-demand.
+  const bigger = order.slice(order.indexOf(tierId) + 1).reverse()
+    .map((id) => tiers.find((t) => t.id === id))
+    .find((t) => t?.spotFrom && t.spotFrom.totalPerHour <= current.onDemandFrom!.totalPerHour);
+  if (!bigger?.spotFrom) return null;
+  const saving = current.onDemandFrom.totalPerHour - bigger.spotFrom.totalPerHour;
+  return (
+    <div className="rounded-lg border border-neon-lime/40 bg-neon-lime/[0.05] px-3 py-2.5 text-xs text-slate-300 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <p className="min-w-0 flex-1">
+        <span className="text-neon-lime font-semibold">Go large for less:</span>{' '}
+        {bigger.label.toUpperCase()} ({bigger.gpuShort}, {bigger.resolution}{bigger.fps}) on spot in {bigger.spotFrom.regionName} ({bigger.spotFrom.providerLabel}) is <span className="text-slate-100 tabular-nums">{money(bigger.spotFrom.totalPerHour)}/h</span>
+        {' '}— {saving > 0.005 ? <>{money(saving)}/h less than</> : 'about the same as'} {current.label.toUpperCase()} on-demand ({money(current.onDemandFrom.totalPerHour)}/h).
+        {' '}<DiscountBadge pct={bigger.spotFrom.discountPct} deal={bigger.spotFrom.deal} source={bigger.spotFrom.source} compact />
+        {' '}{/oracle/i.test(bigger.spotFrom.providerLabel)
+          ? <span className="text-neon-pink">Oracle deletes the machine and its disk if it reclaims it.</span>
+          : <span className="text-slate-500">Can be interrupted; your disk is kept.</span>}
+      </p>
+      <button type="button" onClick={() => onSwitch(bigger.id, true)} className="btn-neon-lime text-xs px-2.5 py-1.5 whitespace-nowrap">
+        {spot ? `Switch to ${bigger.label}` : `Use spot ${bigger.label}`}
+      </button>
+    </div>
   );
 }

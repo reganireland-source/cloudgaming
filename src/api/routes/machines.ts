@@ -33,6 +33,7 @@ import { MachineRequestError, MachineService } from '../../services/MachineServi
 import { FriendlyCloudError } from '../../providers/errors';
 import { CATALOGS } from '../../providers/registry';
 import { listCredentialSummaries } from '../../services/CredentialService';
+import { getSpotInfo, ON_RECLAIM } from '../../services/SpotPriceService';
 
 const router = Router();
 
@@ -73,7 +74,7 @@ router.get('/options', async (req: Request, res: Response) => {
   try {
     const creds = await listCredentialSummaries(req.userId!);
     const games = await query('SELECT title, gpu_class, target_quality FROM game_profiles ORDER BY title');
-    const providers = Object.values(CATALOGS).map((c) => {
+    const providers = await Promise.all(Object.values(CATALOGS).map(async (c) => {
       const cred = creds.find((x) => x.provider === c.provider);
       return {
         provider: c.provider,
@@ -84,22 +85,31 @@ router.get('/options', async (req: Request, res: Response) => {
         available: c.shapes.length > 0 && c.regions.length > 0,
         supportsSpot: c.supportsSpot,
         spotLabel: c.spotLabel,
+        spotOnReclaim: ON_RECLAIM[c.provider],   // what happens if the cloud takes a spot machine back
         defaultRegion: (cred?.metadata as any)?.region || c.defaultRegion,
         defaultDiskGb: c.defaultDiskGb,
         minDiskGb: c.minDiskGb,
         diskPerGbMonth: c.diskPerGbMonth,
         priceNote: c.priceNote,
         regions: c.regions,
-        // Price every shape in every region up front, so the form updates instantly.
-        shapes: c.shapes.map((s) => ({
+        // Price every shape in every region up front, so the form updates
+        // instantly. Spot prices are live where the cloud publishes them
+        // (src/services/SpotPriceService.ts).
+        shapes: await Promise.all(c.shapes.map(async (s) => ({
           ...s,
-          prices: Object.fromEntries(c.regions.map((r) => [r.id, {
-            onDemand: c.estimateHourly(s.id, r.id, false),
-            spot: c.supportsSpot ? c.estimateHourly(s.id, r.id, true) : null,
-          }])),
-        })),
+          prices: Object.fromEntries(await Promise.all(c.regions.map(async (r) => {
+            const spot = c.supportsSpot && r.gpus.includes(s.gpuModel) ? await getSpotInfo(c.provider, r.id, s.id).catch(() => null) : null;
+            return [r.id, {
+              onDemand: spot?.source === 'live' && c.provider === 'azure' ? spot.onDemandPerHour : c.estimateHourly(s.id, r.id, false),
+              spot: spot ? spot.spotPerHour : c.supportsSpot ? c.estimateHourly(s.id, r.id, true) : null,
+              spotDiscountPct: spot?.discountPct ?? null,
+              spotSource: spot?.source ?? null,            // 'live' | 'fixed' | 'estimate'
+              spotInterruption: spot?.interruption ?? null, // AWS: how often it's reclaimed here
+            }] as const;
+          }))),
+        }))),
       };
-    });
+    }));
     res.json({ providers, games: games.rows, qualities: ['budget', 'good', 'high', 'ultra'] });
   } catch (error) {
     sendRouteError(res, error, 'Failed to load launch options');

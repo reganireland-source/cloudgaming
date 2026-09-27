@@ -25,7 +25,10 @@
  *
  * If a game title is given and found in game_profiles, its gpu_class picks
  * the suggested tier, and `priority` (latency / balanced / price) sets the
- * ranking. No login or cloud keys are needed: this only reads the
+ * ranking. Every option also carries its spot/preemptible offer (live
+ * discount + interruption risk where published, SpotPriceService.ts), so the
+ * page can show spot deals in either pricing mode. No login or cloud keys
+ * are needed: this only reads the
  * price catalogs.
  * ============================================================================
  */
@@ -33,6 +36,7 @@
 import { query } from '../config/database';
 import { CATALOGS } from '../providers/registry';
 import type { CatalogShape, ProviderName } from '../providers/shared/types';
+import { getSpotInfo, type SpotInfo } from './SpotPriceService';
 
 export type TierId = 'good' | 'better' | 'best';
 
@@ -103,7 +107,21 @@ export interface ReconOption {
   spot: boolean;            // true when computePerHour is a spot price
   spotLabel: string;
   egressPerHour: number;
-  totalPerHour: number;
+  totalPerHour: number;     // computePerHour + egressPerHour
+  onDemandPerHour: number;  // machine price on-demand (always filled, for comparison)
+  /** Spot/preemptible offer for this exact machine, whether or not spot was asked for. */
+  spotOffer: (SpotInfo & { totalPerHour: number; deal: 'deep' | 'good' | null }) | null;
+}
+
+/**
+ * When is a spot price worth shouting about? Only for LIVE prices (an
+ * estimate's discount is our own assumption, so it can't be a "deal"):
+ *   deep  ≥ 65% off on-demand
+ *   good  ≥ 55% off
+ */
+function dealOf(info: SpotInfo): 'deep' | 'good' | null {
+  if (info.source !== 'live') return null;
+  return info.discountPct >= 65 ? 'deep' : info.discountPct >= 55 ? 'good' : null;
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -126,6 +144,17 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
     console.error('[Recon] game lookup failed:', (error as Error).message);
   }
 
+  // Spot offers for every size/region we might show, fetched in parallel
+  // (live AWS/Azure data is cached; failures fall back to estimates).
+  const spotKey = (p: string, r: string, s: string) => `${p}|${r}|${s}`;
+  const spotOffers = new Map<string, SpotInfo | null>();
+  await Promise.all(Object.values(CATALOGS).flatMap((catalog) =>
+    catalog.regions.flatMap((region) => catalog.shapes
+      .filter((shape) => region.gpus.includes(shape.gpuModel))
+      .map(async (shape) => {
+        spotOffers.set(spotKey(catalog.provider, region.id, shape.id), await getSpotInfo(catalog.provider, region.id, shape.id).catch(() => null));
+      }))));
+
   const tiers = TIERS.map((tier) => {
     const all: ReconOption[] = [];
     const offeredBy = new Set<string>();
@@ -136,10 +165,11 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
         let best: ReconOption | null = null;
         for (const shape of shapes) {
           if (!region.gpus.includes(shape.gpuModel)) continue;
-          const onDemand = catalog.estimateHourly(shape.id, region.id, false);
-          const spotPrice = opts.spot && catalog.supportsSpot ? catalog.estimateHourly(shape.id, region.id, true) : 0;
-          const useSpot = spotPrice > 0;
-          const compute = useSpot ? spotPrice : onDemand;
+          const offer = spotOffers.get(spotKey(catalog.provider, region.id, shape.id)) || null;
+          // A live on-demand price (Azure) beats our estimate when we have it.
+          const onDemand = offer?.source === 'live' && catalog.provider === 'azure' ? offer.onDemandPerHour : catalog.estimateHourly(shape.id, region.id, false);
+          const useSpot = !!opts.spot && !!offer;
+          const compute = useSpot ? offer!.spotPerHour : onDemand;
           if (!compute) continue;
           const egress = tier.gbPerHour * region.egressPerGb;
           const latencyMs = estimatePingMs(opts.lat, opts.lng, region.lat, region.lng);
@@ -150,6 +180,8 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
             latencyMs, latencyRating: rating(latencyMs),
             computePerHour: round3(compute), spot: useSpot, spotLabel: catalog.spotLabel,
             egressPerHour: round3(egress), totalPerHour: round3(compute + egress),
+            onDemandPerHour: round3(onDemand),
+            spotOffer: offer ? { ...offer, totalPerHour: round3(offer.spotPerHour + egress), deal: dealOf(offer) } : null,
           };
           if (!best || option.totalPerHour < best.totalPerHour) best = option;
         }
@@ -165,6 +197,13 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
     // "Cheapest" among regions you could actually play on (≤ 80 ms), if any.
     const pool = all.some((o) => o.latencyRating !== 'poor') ? all.filter((o) => o.latencyRating !== 'poor') : all;
     const cheapest = [...pool].sort((a, b) => a.totalPerHour - b.totalPerHour)[0] || null;
+    // For the tier cards and the "go large on spot" hint: the cheapest
+    // playable option on each pricing model, whichever mode is selected.
+    const odTotal = (o: ReconOption) => round3(o.onDemandPerHour + o.egressPerHour);
+    const cheapestOnDemand = [...pool].sort((a, b) => odTotal(a) - odTotal(b))[0];
+    const withSpot = pool.filter((o) => o.spotOffer);
+    const cheapestSpot = [...withSpot].sort((a, b) => a.spotOffer!.totalPerHour - b.spotOffer!.totalPerHour)[0];
+    const bestDeal = [...withSpot].filter((o) => o.spotOffer!.deal).sort((a, b) => b.spotOffer!.discountPct - a.spotOffer!.discountPct)[0];
     return {
       ...tier,
       options: shown,
@@ -173,6 +212,12 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
       tooFar: affordable.filter((o) => o.latencyRating === 'poor' && !shown.includes(o)).length,
       closest,
       cheapest,
+      onDemandFrom: cheapestOnDemand ? { totalPerHour: odTotal(cheapestOnDemand), regionName: cheapestOnDemand.regionName, providerLabel: cheapestOnDemand.providerLabel } : null,
+      spotFrom: cheapestSpot ? {
+        totalPerHour: cheapestSpot.spotOffer!.totalPerHour, discountPct: cheapestSpot.spotOffer!.discountPct, deal: cheapestSpot.spotOffer!.deal,
+        source: cheapestSpot.spotOffer!.source, regionName: cheapestSpot.regionName, providerLabel: cheapestSpot.providerLabel,
+      } : null,
+      bestDeal: bestDeal ? { discountPct: bestDeal.spotOffer!.discountPct, regionName: bestDeal.regionName, providerLabel: bestDeal.providerLabel, deal: bestDeal.spotOffer!.deal } : null,
       offeredBy: [...offeredBy],
       notOfferedBy: Object.values(CATALOGS).map((c) => c.label).filter((l) => !offeredBy.has(l)),
     };
