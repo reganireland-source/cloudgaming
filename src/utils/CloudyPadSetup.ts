@@ -2,12 +2,19 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { env } from '../config/env';
 
 const execAsync = promisify(exec);
 
 /**
  * CloudyPadSetup manages remote setup of Sunshine streaming server via CloudyPad
  * Handles SSH connection, driver installation, and Sunshine configuration
+ *
+ * Configuration via environment variables:
+ * - SSH_KEY_PATH: Path to private key for Windows instances (default: /root/.ssh/cloudgaming-key.pem)
+ * - SSH_USERNAME: Windows username (default: Administrator)
+ * - SSH_TIMEOUT_MS: SSH command timeout (default: 300000ms / 5min)
+ * - SSH_RETRY_DELAY_MS: Delay between connection retries (default: 10000ms / 10sec)
  */
 export class CloudyPadSetup {
   private ipAddress: string;
@@ -15,19 +22,32 @@ export class CloudyPadSetup {
   private username: string;
   private quality: string;
   private region: string;
+  private timeoutMs: number;
+  private retryDelayMs: number;
 
   constructor(
     ipAddress: string,
     quality: string,
     region: string,
-    keyPath: string = '/root/.ssh/cloudgaming-key.pem',
-    username: string = 'Administrator'
+    keyPath?: string,
+    username?: string
   ) {
     this.ipAddress = ipAddress;
     this.quality = quality;
     this.region = region;
-    this.keyPath = keyPath;
-    this.username = username;
+    // Use provided values or fall back to environment variables
+    this.keyPath = keyPath || env.SSH_KEY_PATH;
+    this.username = username || env.SSH_USERNAME;
+    this.timeoutMs = env.SSH_TIMEOUT_MS;
+    this.retryDelayMs = env.SSH_RETRY_DELAY_MS;
+
+    // Validate SSH key exists
+    if (!fs.existsSync(this.keyPath)) {
+      console.warn(
+        `[CloudyPad] Warning: SSH key not found at ${this.keyPath}. ` +
+        `Setup will fail. Ensure key exists or set SSH_KEY_PATH environment variable.`
+      );
+    }
   }
 
   /**
@@ -75,22 +95,30 @@ export class CloudyPadSetup {
   }
 
   /**
-   * Wait for Windows instance SSH to be ready (max 10 minutes)
+   * Wait for Windows instance SSH to be ready
+   * Retries based on SSH_TIMEOUT_MS and SSH_RETRY_DELAY_MS environment variables
    */
   private async waitForInstanceReady(): Promise<void> {
-    const maxRetries = 60;
-    const retryDelayMs = 10000; // 10 seconds
+    const maxRetries = Math.ceil(this.timeoutMs / this.retryDelayMs);
+    const totalWaitMinutes = (maxRetries * this.retryDelayMs) / 60000;
 
     for (let i = 0; i < maxRetries; i++) {
       try {
         await this.executeRemoteCommand('echo ready');
+        console.log(`[CloudyPad] Instance ready after ${(i * this.retryDelayMs) / 1000}s`);
         return;
       } catch (error) {
         if (i === maxRetries - 1) {
-          throw new Error(`Instance ${this.ipAddress} did not become ready after ${maxRetries * retryDelayMs / 1000}s`);
+          throw new Error(
+            `Instance ${this.ipAddress} did not become ready after ${totalWaitMinutes.toFixed(1)} minutes. ` +
+            `Last error: ${error}`
+          );
         }
-        console.log(`[CloudyPad] Waiting for instance... (attempt ${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+        console.log(
+          `[CloudyPad] Waiting for instance... (attempt ${i + 1}/${maxRetries}, ` +
+          `timeout in ${totalWaitMinutes.toFixed(1)} min)`
+        );
+        await new Promise(resolve => setTimeout(resolve, this.retryDelayMs));
       }
     }
   }
@@ -250,6 +278,7 @@ powershell -Command "
 
   /**
    * Execute command on remote Windows instance via SSH
+   * Uses timeout from SSH_TIMEOUT_MS environment variable
    */
   private async executeRemoteCommand(command: string): Promise<string> {
     const sshCommand = `
@@ -263,7 +292,7 @@ ssh -i ${this.keyPath} \
 
     try {
       const { stdout, stderr } = await execAsync(sshCommand, {
-        timeout: 300000, // 5 minutes
+        timeout: this.timeoutMs,
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
       });
 

@@ -4,6 +4,7 @@ import { Machine, Snapshot } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import { CloudyPadSetup } from '../utils/CloudyPadSetup';
+import { env } from '../config/env';
 
 /**
  * MachineService handles machine lifecycle orchestration
@@ -48,7 +49,7 @@ export class MachineService {
       const launchResult = await cloudProvider.launchInstance(
         { region, instanceType },
         {
-          imageId: 'ami-0c55b159cbfafe1f0', // Windows Server 2022 - adjust per region
+          imageId: env.CLOUDGAMING_AMI_ID, // From CLOUDGAMING_AMI_ID env var
           keyName: 'cloudgaming-key',
           securityGroupId: 'sg-0123456789abcdef0', // TODO: Create security group
           spotInstance: true,

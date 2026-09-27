@@ -13,6 +13,15 @@ export const env = {
   AZURE_SUBSCRIPTION_ID: process.env.AZURE_SUBSCRIPTION_ID || '',
   GCP_PROJECT_ID: process.env.GCP_PROJECT_ID || '',
 
+  // Gaming AMI Configuration
+  CLOUDGAMING_AMI_ID: process.env.CLOUDGAMING_AMI_ID || 'ami-0c55b159cbfafe1f0',
+
+  // SSH Configuration for CloudyPad setup
+  SSH_KEY_PATH: process.env.SSH_KEY_PATH || '/root/.ssh/cloudgaming-key.pem',
+  SSH_USERNAME: process.env.SSH_USERNAME || 'Administrator',
+  SSH_TIMEOUT_MS: parseInt(process.env.SSH_TIMEOUT_MS || '300000', 10), // 5 minutes
+  SSH_RETRY_DELAY_MS: parseInt(process.env.SSH_RETRY_DELAY_MS || '10000', 10), // 10 seconds
+
   // Mail
   MAIL_SERVICE: process.env.MAIL_SERVICE || 'smtp',
   MAIL_FROM: process.env.MAIL_FROM || 'noreply@cloudgaming.dev',
