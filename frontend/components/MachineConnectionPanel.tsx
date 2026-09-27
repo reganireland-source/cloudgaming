@@ -22,6 +22,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch, ApiError } from '@/lib/auth';
+import MoonlightLauncher from './MoonlightLauncher';
 
 export interface ConnectionInfo {
   machineId: string;
@@ -59,10 +60,12 @@ function CopyButton({ value }: { value: string }) {
 }
 
 export default function MachineConnectionPanel({
-  machineId, status, onStage,
+  machineId, status, quality = 'high', onStage,
 }: {
   machineId: string;
   status: string;
+  /** The machine's streaming preset, so the Moonlight command matches it. */
+  quality?: string;
   /** Tells the parent the latest setup stage (for the architecture diagram). */
   onStage?: (stage: ConnectionInfo['setup']['current']) => void;
 }) {
@@ -174,9 +177,17 @@ export default function MachineConnectionPanel({
         </dd>
       </dl>
 
-      {/* ---- How to pair ---- */}
-      <details open={info.setup.ready}>
-        <summary className="label cursor-pointer">How to start playing</summary>
+      {/* ---- One-click pairing + ready-made Moonlight command ---- */}
+      {info.ipAddress && info.status === 'running' && (
+        <div className="rounded-md border border-neon-magenta/25 bg-neon-magenta/[0.03] p-4">
+          <p className="text-sm font-semibold text-slate-100 mb-3">▶ Play with Moonlight</p>
+          <MoonlightLauncher machineId={machineId} host={info.ipAddress} quality={quality} ready={info.setup.ready} />
+        </div>
+      )}
+
+      {/* ---- Manual steps (phones/TVs, or if the command route doesn't suit) ---- */}
+      <details>
+        <summary className="label cursor-pointer">Manual steps (phones, TVs, or pairing by hand)</summary>
         <ol className="mt-2 list-decimal pl-5 space-y-1.5 text-xs text-slate-300 leading-relaxed">
           <li>Install <a href="https://moonlight-stream.org" target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline">Moonlight</a> on the device you'll play on (PC, Mac, phone, TV).</li>
           <li>In Moonlight, click <strong>+</strong> (Add PC) and enter the IP address above. Moonlight shows a 4-digit PIN.</li>

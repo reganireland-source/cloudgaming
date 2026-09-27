@@ -20,6 +20,7 @@ import os from 'os';
 import pool, { query } from '../../config/database';
 import { getSystemStatus, getHistory, summarise, PROVIDER_PROBES } from '../../services/StatusService';
 import { getMetrics } from '../../services/Metrics';
+import { CATALOGS } from '../../providers/registry';
 import { env } from '../../config/env';
 
 const router = Router();
@@ -106,6 +107,30 @@ router.get('/version', (req: Request, res: Response) => {
     railwayEnvironment: process.env.RAILWAY_ENVIRONMENT_NAME || null,
     startedAt: startedAt.toISOString(),                         // ISO format, e.g. "2026-09-27T06:07:34.777Z"
     uptimeSeconds: Math.floor(process.uptime()),                // seconds since the process started, rounded down
+  });
+});
+
+/**
+ * GET /api/status/catalog — every cloud region we can launch in, with its
+ * location, GPUs and cheapest estimated hourly price, plus where the backend
+ * itself runs. PUBLIC (no user data): it powers the world map.
+ */
+router.get('/catalog', (_req: Request, res: Response) => {
+  const providers = Object.values(CATALOGS).map((c) => ({
+    provider: c.provider,
+    label: c.label,
+    priceNote: c.priceNote,
+    regions: c.regions.map((r) => {
+      const prices = c.shapes
+        .filter((s) => r.gpus.includes(s.gpuModel))
+        .map((s) => ({ shape: s.label, gpu: s.gpuModel, onDemand: c.estimateHourly(s.id, r.id, false) }))
+        .sort((a, b) => a.onDemand - b.onDemand);
+      return { ...r, cheapest: prices[0] || null, shapes: prices };
+    }),
+  }));
+  res.json({
+    providers,
+    backendRegion: process.env.RAILWAY_REPLICA_REGION || process.env.RAILWAY_REGION || null,
   });
 });
 

@@ -216,7 +216,7 @@ function MachineCard({
       {tab === 'connect' && (
         <div className="pt-4">
           {['running', 'stopped', 'starting'].includes(machine.status)
-            ? <MachineConnectionPanel machineId={machine.id} status={machine.status} onStage={setStage} />
+            ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} />
             : <p className="text-xs text-slate-500">Connection details appear once the machine exists and is running.</p>}
         </div>
       )}

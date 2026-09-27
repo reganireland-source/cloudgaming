@@ -41,6 +41,7 @@
  */
 
 import crypto from 'crypto';
+import https from 'https';
 import { query } from '../config/database';
 import { CATALOGS, isProviderName } from '../providers/registry';
 import { FriendlyCloudError } from '../providers/errors';
@@ -398,6 +399,78 @@ export class MachineService {
     };
   }
 
+  /**
+   * ONE-CLICK MOONLIGHT PAIRING (the approach CloudyPad uses, minus SSH).
+   *
+   * Pairing proves to Sunshine that a Moonlight device is yours: Moonlight
+   * shows a 4-digit PIN and waits; someone must type the same PIN into
+   * Sunshine. Here the backend picks the PIN, the user runs
+   *     moonlight pair <ip> --pin <PIN>
+   * on their device, and the backend enters the PIN into Sunshine for them
+   * (POST https://<ip>:47990/api/pin with the machine's admin login). Sunshine
+   * only accepts a PIN while a device is waiting to pair, so we retry every
+   * 3 seconds for up to 3 minutes.
+   *
+   * Sunshine uses a self-signed HTTPS certificate, so certificate checking is
+   * turned off for THIS request only; the admin password still protects it.
+   */
+  static async pair(userId: string, machineId: string): Promise<{ operationId: string; pin: string; host: string }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    if (machine.status !== 'running' || !machine.ip_address) {
+      throw new MachineRequestError(409, 'The machine must be running (with an IP address) to pair Moonlight.', 'Start it first, and wait for "Ready to stream" in Setup progress.');
+    }
+    let login: { username?: string; password?: string } = {};
+    try {
+      login = decryptCredentials(userId, `sunshine:${machineId}`, machine.connection_secret);
+    } catch {
+      throw new MachineRequestError(409, 'The Sunshine login for this machine is unavailable.', 'Pair manually through the Sunshine admin page instead.');
+    }
+    const pin = String(crypto.randomInt(1000, 10000)); // 4 digits, 1000–9999
+    const host = machine.ip_address as string;
+
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'pair', machineId, title: `Pair Moonlight with ${host}` });
+    op.runInBackground(async () => {
+      await op.info(`Run this on the device you play on:  moonlight pair ${host} --pin ${pin}`);
+      await op.info('Waiting for Moonlight to start pairing… (the backend will enter the PIN into Sunshine for you)');
+      const deadline = Date.now() + 3 * 60 * 1000;
+      let attempts = 0;
+      let lastProblem = '';
+      while (Date.now() < deadline) {
+        attempts++;
+        const result = await sendSunshinePin(host, login.username || '', login.password || '', pin);
+        if (result.ok) {
+          await op.success('Sunshine accepted the PIN — Moonlight is paired with this machine. You can now stream.');
+          return { paired: true, attempts };
+        }
+        if (result.problem !== lastProblem) {
+          lastProblem = result.problem;
+          if (result.status === 401) {
+            throw new FriendlyCloudError({
+              code: 'SUNSHINE_LOGIN_REJECTED',
+              title: 'Sunshine rejected the saved admin login',
+              explanation: 'The username/password stored for this machine no longer match Sunshine\'s (it may have been changed on the machine).',
+              fixes: ['Pair manually: open the Sunshine admin page, sign in, go to PIN and enter the PIN Moonlight shows.'],
+            });
+          }
+          if (result.problem) await op.info(`Still waiting… (${result.problem})`);
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      throw new FriendlyCloudError({
+        code: 'PAIRING_TIMEOUT',
+        title: 'Moonlight didn\'t start pairing within 3 minutes',
+        explanation: 'Sunshine only accepts the PIN while Moonlight is waiting to pair, and no pairing request arrived.',
+        fixes: [
+          `Run the command exactly as shown: moonlight pair ${host} --pin ${pin}`,
+          'Check Moonlight is installed (moonlight-stream.org) and that the machine\'s setup reached "Ready to stream".',
+          'Some Moonlight versions need the address written as ::ffff:' + host,
+          'Then press "Pair Moonlight" again for a fresh PIN.',
+        ],
+      });
+    }, 'Pairing finished.');
+    return { operationId: op.id, pin, host };
+  }
+
   /** Change the streaming preset (saved; applied by Sunshine's own settings page). */
   static async updateQuality(userId: string, machineId: string, newQuality: string) {
     const quality = String(newQuality || '').toLowerCase();
@@ -430,3 +503,42 @@ class AlreadyRecorded extends Error {
   }
 }
 export { AlreadyRecorded };
+
+/**
+ * POST the PIN to Sunshine's API. Never throws: returns ok, or a short
+ * description of why not (so the pairing loop can keep retrying).
+ */
+function sendSunshinePin(host: string, username: string, password: string, pin: string): Promise<{ ok: boolean; status?: number; problem: string }> {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ pin, name: 'CloudGaming Hub' });
+    const req = https.request(
+      {
+        host,
+        port: 47990,
+        path: '/api/pin',
+        method: 'POST',
+        rejectUnauthorized: false, // Sunshine's certificate is self-signed (see pair())
+        timeout: 8000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
+        },
+      },
+      (res) => {
+        let text = '';
+        res.on('data', (chunk) => { text += chunk; });
+        res.on('end', () => {
+          let status: unknown;
+          try { status = JSON.parse(text).status; } catch { /* not JSON */ }
+          // Sunshine answers {"status": true} or {"status": "true"} on success.
+          if (res.statusCode === 200 && (status === true || status === 'true')) return resolve({ ok: true, problem: '' });
+          resolve({ ok: false, status: res.statusCode, problem: res.statusCode === 200 ? 'no device is waiting to pair yet' : `Sunshine answered HTTP ${res.statusCode}` });
+        });
+      }
+    );
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, problem: 'Sunshine didn\'t answer (is setup finished?)' }); });
+    req.on('error', (e) => resolve({ ok: false, problem: `can't reach Sunshine yet (${(e as NodeJS.ErrnoException).code || e.message})` }));
+    req.end(body);
+  });
+}

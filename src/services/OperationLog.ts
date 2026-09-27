@@ -225,6 +225,7 @@ export async function hasRunningOperation(machineId: string): Promise<boolean> {
   const result = await query(
     `SELECT 1 FROM cloud_operations
      WHERE machine_id = $1 AND status = 'running'
+       AND action <> 'pair'   -- waiting for Moonlight to pair doesn't block other actions
        AND created_at > NOW() - INTERVAL '30 minutes'`,
     [machineId]
   );

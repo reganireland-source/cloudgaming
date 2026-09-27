@@ -16,6 +16,7 @@
  *   DELETE /api/machines/:id             destroy       → 202 { operationId } (or 200 if nothing at the cloud)
  *   GET    /api/machines/:id/connection  IP, Sunshine login, setup progress
  *   POST   /api/machines/:id/quality     change streaming preset  body { quality }
+ *   POST   /api/machines/:id/pair        one-click Moonlight pairing → 202 { operationId, pin, host }
  *
  * "202 Accepted" means: the request is fine and work has STARTED. The
  * frontend follows its progress at GET /api/operations/:operationId
@@ -168,6 +169,15 @@ router.get('/:id/connection', async (req: Request, res: Response) => {
     res.json(await MachineService.connection(req.userId!, req.params.id));
   } catch (error) {
     sendRouteError(res, error, 'Failed to load connection details');
+  }
+});
+
+/** POST /api/machines/:id/pair — one-click Moonlight pairing (see MachineService.pair). */
+router.post('/:id/pair', async (req: Request, res: Response) => {
+  try {
+    res.status(202).json(await MachineService.pair(req.userId!, req.params.id));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to start pairing');
   }
 });
 
