@@ -48,7 +48,12 @@ interface Guide {
   beforeYouStart: string[];
   steps: Step[];
   fields: { field: string; value: string; example: string }[]; // form field -> what to paste
-  quota: { summary: string; steps: string[] };
+  quota: {
+    summary: string;
+    steps: string[];
+    /** The same request from the command line, for the cloud's browser shell. */
+    cli?: { shell: string; href: string; code: string; note?: string };
+  };
   warnings: string[];
 }
 
@@ -86,6 +91,28 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'For spot machines, also request "Preemptible NVIDIA T4 GPUs" (or L4).',
         'Approval usually takes from a few minutes to 2 business days.',
       ],
+      cli: {
+        shell: 'Cloud Shell', href: 'https://shell.cloud.google.com/',
+        note: 'Step 2 lists the exact quota IDs; run step 3 once per ID you need. The all-regions quota takes no --dimensions. If "beta" isn\'t recognised, try "gcloud quotas".',
+        code: `P=<your-project-id>
+R=asia-southeast1   # your region
+
+# 1. Current GPU limits (0 = request an increase)
+gcloud compute project-info describe --project $P --flatten=quotas \\
+  --filter="quotas.metric~GPUS" --format="table(quotas.metric,quotas.limit,quotas.usage)"
+gcloud compute regions describe $R --project $P --flatten=quotas \\
+  --filter="quotas.metric~GPU" --format="table(quotas.metric,quotas.limit,quotas.usage)"
+
+# 2. The quota IDs to request
+gcloud services enable cloudquotas.googleapis.com --project $P
+gcloud beta quotas info list --service=compute.googleapis.com --project=$P \\
+  --filter="quotaId~GPU" --format="value(quotaId)"
+
+# 3. Request 1 GPU
+gcloud beta quotas preferences create --project=$P --service=compute.googleapis.com \\
+  --quota-id=<ID from step 2> --preferred-value=1 --dimensions=region=$R \\
+  --email=<your email> --justification="Personal cloud gaming VM, 1 GPU"`,
+      },
     },
     warnings: [
       'The JSON key file is a password — don\'t commit it to git or share it. Delete keys you no longer use (Keys tab).',
@@ -121,6 +148,17 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'For spot machines, also request "All G and VT Spot Instance Requests" → 8.',
         'Approval takes from minutes to a couple of days; brand-new accounts may be asked for a use case.',
       ],
+      cli: {
+        shell: 'CloudShell', href: 'https://console.aws.amazon.com/cloudshell/home',
+        note: 'Run it in the region you\'ll launch in (region menu, top right). L-DB2E81BA = on-demand G/VT, L-3819A6DF = spot G/VT.',
+        code: `# Current limits (vCPUs; 0 = blocked)
+aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value
+aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value
+
+# Request 8 vCPUs of each (enough for one g5.2xlarge)
+aws service-quotas request-service-quota-increase --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
+aws service-quotas request-service-quota-increase --service-code ec2 --quota-code L-3819A6DF --desired-value 8`,
+      },
     },
     warnings: [
       'The app creates a security group "cloudgaming-sunshine" in the default VPC with only the streaming ports open. SSH is not opened.',
@@ -155,6 +193,17 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'Find "Standard NCASv3_T4 Family vCPUs" → request 8.',
         'For spot machines, also request "Total Regional Spot vCPUs" → 8.',
       ],
+      cli: {
+        shell: 'Cloud Shell (Bash)', href: 'https://portal.azure.com/#cloudshell/',
+        note: '"lowPriorityCores" is Azure\'s internal name for "Total Regional Spot vCPUs".',
+        code: `SUB=$(az account show --query id -o tsv); LOC=southeastasia   # your region
+az vm list-usage --location $LOC -o table | grep -Ei "NCASv3_T4|Spot|Low-priority|Total Regional"
+az extension add --name quota
+az quota update --resource-name standardNCASv3_T4Family --resource-type dedicated \\
+  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8
+az quota update --resource-name lowPriorityCores --resource-type lowPriority \\
+  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8`,
+      },
     },
     warnings: [
       'Stopping deallocates the VM (compute billing stops). A VM that is merely "stopped" inside Windows/Linux keeps billing — always stop from here.',
@@ -193,6 +242,13 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'Search "GPU.A10" ("GPUs for GPU.A10 based VM and BM instances") → Request a service limit increase → 1.',
         'Approval takes hours to a couple of days.',
       ],
+      cli: {
+        shell: 'Cloud Shell', href: 'https://cloud.oracle.com/?cloudshell=true',
+        note: 'Checking is easy from the command line; the increase request itself is simplest in the console (steps above).',
+        code: `# Your GPU A10 limits per availability domain (0 = request an increase)
+oci limits value list --service-name compute --compartment-id <tenancy-ocid> --all \\
+  --query "data[?contains(name,'a10')]" --output table`,
+      },
     },
     warnings: [
       'Preemptible (spot) Oracle machines can\'t be stopped — only deleted. Use on-demand if you want to stop and resume.',
@@ -202,6 +258,39 @@ const GUIDES: Record<ProviderKey, Guide> = {
 };
 
 const ORDER: ProviderKey[] = ['gcp', 'aws', 'azure', 'oracle'];
+
+/** Shown under every cloud: what makes a first launch go smoothly. */
+const FIRST_LAUNCH_TIPS: React.ReactNode[] = [
+  <>Run the <a href="/preflight" className="text-neon-cyan hover:underline">pre-flight check</a> after adding keys — it spots setup mistakes before you pay for a machine.</>,
+  <>Start small: on <a href="/recommendations" className="text-neon-cyan hover:underline">Recon</a> pick <strong>Classic</strong> (GOOD tier, T4) with <strong>Reliable</strong> pricing. T4 is the most widely available GPU and needs the smallest quota; on-demand can’t be taken back mid-test.</>,
+  <>Turn on <strong>auto-stop</strong> (15 minutes) in the launch form, so a forgotten machine shuts itself down.</>,
+  <>The <strong>first boot takes 15–30 minutes</strong> (NVIDIA driver, then a several-GB streaming container). The progress bar shows each stage; later starts take 1–2 minutes.</>,
+  <>“Out of GPUs in this area” is common and temporary — the app already tries every zone; try again later or another region.</>,
+  <>Machines run Steam on Linux (via Proton). Most Steam games work, but games with kernel anti-cheat — Valorant, Fortnite, Apex, PUBG, Call of Duty — won’t start. Check <a href="https://www.protondb.com" target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline">protondb.com</a> first.</>,
+  <>While streaming, press <strong>Ctrl+Alt+Shift+S</strong> in Moonlight for live stats. Good: network latency close to Recon’s estimate, decode under 5 ms, no dropped frames.</>,
+  <>Always <strong>stop</strong> from this app (not from inside the machine). Stopped machines still pay for their disk; delete machines you’re done with, then check the <a href="/map" className="text-neon-cyan hover:underline">Map</a> shows no leftovers.</>,
+];
+
+/** A copyable block of shell commands for the cloud's browser terminal. */
+function CliBlock({ shell, href, code, note }: { shell: string; href: string; code: string; note?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <details className="mt-3">
+      <summary className="cursor-pointer text-xs text-neon-amber">Prefer the command line? Do it in {shell}</summary>
+      <div className="mt-2 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-3 text-[0.72rem]">
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline">Open {shell} ↗</a>
+          <button type="button" className="text-neon-cyan hover:underline"
+            onClick={() => navigator.clipboard?.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined)}>
+            {copied ? 'Copied' : 'Copy commands'}
+          </button>
+        </div>
+        <pre className="overflow-x-auto rounded bg-black/50 border border-white/10 p-2.5 text-[0.68rem] leading-relaxed text-slate-200"><code className="block whitespace-pre !bg-transparent !border-0 !p-0 !shadow-none">{code}</code></pre>
+        {note && <p className="text-[0.7rem] text-slate-400">{note}</p>}
+      </div>
+    </details>
+  );
+}
 
 /**
  * @param selected optional: which cloud to show. The Config page passes the
@@ -220,7 +309,7 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
   const guide = GUIDES[active];
 
   return (
-    <div className="neon-card rounded-lg border border-neon-cyan/30 p-6 mb-8">
+    <div className="neon-card rounded-lg border border-neon-cyan/30 p-3 sm:p-6 mb-6 sm:mb-8">
       <h3 className="text-sm tracking-label font-bold neon-text mb-2 font-mono">[ CREDENTIAL_SETUP_GUIDE ]</h3>
       <p className="text-xs text-slate-400 mb-6 max-w-3xl">
         Step-by-step instructions for creating a limited-access login for the app on each cloud. Do the
@@ -335,6 +424,15 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
             <li key={i}>{s}</li>
           ))}
         </ol>
+        {guide.quota.cli && <CliBlock {...guide.quota.cli} />}
+      </section>
+
+      {/* ---- First launch: tips that apply to every cloud ---- */}
+      <section className="mb-6 rounded border border-neon-cyan/25 bg-neon-cyan/[0.03] p-4">
+        <h4 className="text-[0.8rem] font-semibold mb-2 text-neon-cyan">Your first launch — tips for every cloud</h4>
+        <ul className="space-y-1.5 text-xs text-slate-300 list-disc pl-5 leading-relaxed">
+          {FIRST_LAUNCH_TIPS.map((t, i) => <li key={i}>{t}</li>)}
+        </ul>
       </section>
 
       {/* ---- Warnings ---- */}
