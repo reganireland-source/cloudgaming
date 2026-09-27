@@ -249,7 +249,7 @@ export default function PerformancePage() {
           </div>
           <div className="neon-card rounded p-4 border border-neon-cyan">
             <h4 className="font-bold text-neon-cyan mb-2 font-mono text-sm">🌡️ TEMPERATURE</h4>
-            <p className="text-xs text-neon-lime font-mono">CPU <80°C, GPU <75°C. High temps = throttle. Check cooling.</p>
+            <p className="text-xs text-neon-lime font-mono">CPU below 80°C, GPU below 75°C. High temps = throttle. Check cooling.</p>
           </div>
           <div className="neon-card-magenta rounded p-4 border border-neon-magenta">
             <h4 className="font-bold text-neon-magenta mb-2 font-mono text-sm">💾 STORAGE</h4>
