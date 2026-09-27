@@ -1,5 +1,5 @@
 import { query } from '../config/database';
-import { RecommendationResult, GameProfile, StreamingQuality } from '../types';
+import { RecommendationResult } from '../types';
 
 /**
  * RecommendationEngine solves:
@@ -26,7 +26,7 @@ export class RecommendationEngine {
       throw new Error(`Game "${gameTitle}" not found in library`);
     }
 
-    const game: GameProfile = gameResult.rows[0];
+    const game: any = gameResult.rows[0];
 
     // 2. Map GPU class to instance types per provider
     const instanceTypesByGpuClass: Record<string, Record<string, string[]>> = {
@@ -73,18 +73,18 @@ export class RecommendationEngine {
 
     for (const provider of Object.keys(instanceTypes)) {
       const types = instanceTypes[provider];
-      const providerRegions = regions.filter(r => r.provider === provider);
+      const providerRegions = regions.filter((r: any) => r.provider === provider);
 
       for (const region of providerRegions) {
         // Calculate latency (simple Haversine)
         const latency = this.calculateLatency(userLat, userLng, region.lat, region.lng);
 
         // Recommend appropriate quality based on latency
-        let recommendedQuality = qualities.find(q => q.name === 'Good');
+        let recommendedQuality = qualities.find((q: any) => q.name === 'Good');
         if (latency < 30) {
-          recommendedQuality = qualities.find(q => q.name === 'High') || recommendedQuality;
+          recommendedQuality = qualities.find((q: any) => q.name === 'High') || recommendedQuality;
         } else if (latency > 80) {
-          recommendedQuality = qualities.find(q => q.name === 'Budget') || recommendedQuality;
+          recommendedQuality = qualities.find((q: any) => q.name === 'Budget') || recommendedQuality;
         }
 
         // Get best instance type for this game on this provider
@@ -152,7 +152,7 @@ export class RecommendationEngine {
     const qualitiesResult = await query(`SELECT * FROM streaming_qualities ORDER BY name`);
     const qualities = qualitiesResult.rows;
 
-    return qualities.map(q => ({
+    return qualities.map((q: any) => ({
       quality: q.name,
       resolution: q.resolution,
       fps: q.fps,

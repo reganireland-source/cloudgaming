@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { SnapshotService } from '../../services/SnapshotService';
-import { authenticateToken } from '../middleware/auth';
 
 const router = Router();
 
@@ -8,7 +7,7 @@ const router = Router();
  * POST /api/snapshots
  * Create snapshot of running machine game library
  */
-router.post('/', authenticateToken, async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
     const { machineId, paths, description } = req.body;
@@ -35,7 +34,7 @@ router.post('/', authenticateToken, async (req: Request, res: Response) => {
  * GET /api/snapshots
  * List all snapshots for user with cost breakdown
  */
-router.get('/', authenticateToken, async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
     const snapshots = await SnapshotService.listSnapshots(userId);
@@ -50,7 +49,7 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
  * GET /api/snapshots/:snapshotId
  * Get snapshot metadata including replicas and cost
  */
-router.get('/:snapshotId', authenticateToken, async (req: Request, res: Response) => {
+router.get('/:snapshotId', async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
     const { snapshotId } = req.params;
@@ -69,7 +68,6 @@ router.get('/:snapshotId', authenticateToken, async (req: Request, res: Response
  */
 router.post(
   '/:snapshotId/replicate',
-  authenticateToken,
   async (req: Request, res: Response) => {
     try {
       const userId = (req as any).userId;
@@ -103,7 +101,7 @@ router.post(
  * DELETE /api/snapshots/:snapshotId
  * Delete snapshot and all replicas
  */
-router.delete('/:snapshotId', authenticateToken, async (req: Request, res: Response) => {
+router.delete('/:snapshotId', async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
     const { snapshotId } = req.params;

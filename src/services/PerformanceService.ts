@@ -115,18 +115,18 @@ export class PerformanceService {
     const current = history[0];
 
     // Calculate averages
-    const avgCpuUsage = history.reduce((sum, m) => sum + m.cpu_usage, 0) / history.length;
-    const avgGpuUsage = history.reduce((sum, m) => sum + m.gpu_usage, 0) / history.length;
-    const avgStreamingFps = history.reduce((sum, m) => sum + m.streaming_fps, 0) / history.length;
-    const avgPacketLoss = history.reduce((sum, m) => sum + m.network_packet_loss, 0) / history.length;
-    const avgNetworkLatency = history.reduce((sum, m) => sum + m.network_latency, 0) / history.length;
+    const avgCpuUsage = history.reduce((sum: number, m: any) => sum + m.cpu_usage, 0) / history.length;
+    const avgGpuUsage = history.reduce((sum: number, m: any) => sum + m.gpu_usage, 0) / history.length;
+    const avgStreamingFps = history.reduce((sum: number, m: any) => sum + m.streaming_fps, 0) / history.length;
+    const avgPacketLoss = history.reduce((sum: number, m: any) => sum + m.network_packet_loss, 0) / history.length;
+    const avgNetworkLatency = history.reduce((sum: number, m: any) => sum + m.network_latency, 0) / history.length;
 
     // Calculate peaks
-    const peakCpuUsage = Math.max(...history.map(m => m.cpu_usage));
-    const peakGpuUsage = Math.max(...history.map(m => m.gpu_usage));
-    const peakBandwidthUp = Math.max(...history.map(m => m.network_bandwidth_up));
-    const peakBandwidthDown = Math.max(...history.map(m => m.network_bandwidth_down));
-    const peakFrameDrops = Math.max(...history.map(m => m.streaming_frame_drops));
+    const peakCpuUsage = Math.max(...history.map((m: any) => m.cpu_usage));
+    const peakGpuUsage = Math.max(...history.map((m: any) => m.gpu_usage));
+    const peakBandwidthUp = Math.max(...history.map((m: any) => m.network_bandwidth_up));
+    const peakBandwidthDown = Math.max(...history.map((m: any) => m.network_bandwidth_down));
+    const peakFrameDrops = Math.max(...history.map((m: any) => m.streaming_frame_drops));
 
     return {
       current: {
@@ -165,7 +165,7 @@ export class PerformanceService {
         networkBandwidthDown: parseFloat(peakBandwidthDown.toFixed(2)),
         streamingFrameDrops: peakFrameDrops,
       },
-      history: history.map((m) => ({
+      history: history.map((m: any) => ({
         machineId,
         timestamp: new Date(m.timestamp),
         cpuUsage: m.cpu_usage,

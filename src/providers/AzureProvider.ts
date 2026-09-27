@@ -12,7 +12,10 @@ export class AzureProvider extends CloudProvider {
     // Initialize Azure SDK
   }
 
-  async launchInstance(config: ProviderConfig, options: LaunchOptions) {
+  async launchInstance(
+    config: ProviderConfig,
+    options: LaunchOptions
+  ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
     throw new Error('Not implemented');
   }
 
@@ -28,11 +31,17 @@ export class AzureProvider extends CloudProvider {
     throw new Error('Not implemented');
   }
 
-  async getInstanceStatus(instanceId: string) {
+  async getInstanceStatus(instanceId: string): Promise<{
+    status: 'running' | 'stopped' | 'terminated' | 'unknown';
+    ipAddress?: string;
+  }> {
     throw new Error('Not implemented');
   }
 
-  async createSnapshot(instanceId: string, diskPath: string) {
+  async createSnapshot(
+    instanceId: string,
+    diskPath: string
+  ): Promise<{ snapshotId: string; sizeGb: number }> {
     throw new Error('Not implemented');
   }
 
@@ -44,7 +53,19 @@ export class AzureProvider extends CloudProvider {
     throw new Error('Not implemented');
   }
 
-  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig) {
+  async restoreFromSnapshot(
+    snapshotId: string,
+    config: ProviderConfig
+  ): Promise<{ instanceId: string; ipAddress: string }> {
+    throw new Error('Not implemented');
+  }
+
+  async replicateSnapshot(
+    sourceSnapshotId: string,
+    sourceProvider: string,
+    sourceRegion: string,
+    targetRegion: string
+  ): Promise<{ snapshotId: string }> {
     throw new Error('Not implemented');
   }
 
@@ -65,7 +86,11 @@ export class AzureProvider extends CloudProvider {
     return 0.083;
   }
 
-  async queryCosts(userId: string, startDate: Date, endDate: Date) {
+  async queryCosts(
+    userId: string,
+    startDate: Date,
+    endDate: Date
+  ): Promise<{ computeCost: number; egressCost: number; storageCost: number }> {
     throw new Error('Not implemented');
   }
 

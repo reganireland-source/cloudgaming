@@ -42,7 +42,13 @@ interface PerformanceMetric {
 }
 
 // Pricing data (in USD) - Updated periodically
-const PRICING_DATA = {
+interface RegionPricing {
+  egressPerGb: number;
+  snapshotPerGbMonth: number;
+  [instanceType: string]: number;
+}
+
+const PRICING_DATA: Record<string, Record<string, RegionPricing>> = {
   aws: {
     'ap-southeast-1': {
       'g4dn.xlarge': 0.526,

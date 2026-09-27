@@ -61,6 +61,10 @@ router.post('/', async (req: Request, res: Response) => {
     const userId = req.userId;
     const { provider, region, instanceType, gameTitle, quality } = req.body;
 
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     if (!provider || !region || !instanceType || !gameTitle) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -101,6 +105,10 @@ router.post('/:id/start', async (req: Request, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     // Verify ownership
     const machineResult = await query(
       'SELECT user_id FROM machines WHERE id = $1',
@@ -134,6 +142,10 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
     const userId = req.userId;
     const { snapshot } = req.body;
 
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     // Verify ownership
     const machineResult = await query(
       'SELECT user_id FROM machines WHERE id = $1',
@@ -166,6 +178,10 @@ router.post('/:id/migrate', async (req: Request, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
     const { targetProvider, targetRegion } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     if (!targetProvider || !targetRegion) {
       return res.status(400).json({ error: 'Missing target provider or region' });
@@ -209,6 +225,10 @@ router.post('/:id/quality', async (req: Request, res: Response) => {
     const userId = req.userId;
     const { quality } = req.body;
 
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     if (!quality) {
       return res.status(400).json({ error: 'Quality parameter is required' });
     }
@@ -250,6 +270,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     // Verify ownership
     const machineResult = await query(

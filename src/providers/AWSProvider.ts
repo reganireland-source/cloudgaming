@@ -244,6 +244,39 @@ export class AWSProvider extends CloudProvider {
     }
   }
 
+  async replicateSnapshot(
+    sourceSnapshotId: string,
+    sourceProvider: string,
+    sourceRegion: string,
+    targetRegion: string
+  ): Promise<{ snapshotId: string }> {
+    if (sourceProvider !== 'aws') {
+      throw new Error(
+        `Cross-cloud snapshot import from ${sourceProvider} is not implemented yet`
+      );
+    }
+
+    try {
+      // CopySnapshot is called against the destination region's endpoint
+      const destEc2 = new AWS.EC2({ region: targetRegion });
+      const result = await destEc2.copySnapshot({
+        SourceRegion: sourceRegion,
+        SourceSnapshotId: sourceSnapshotId,
+        DestinationRegion: targetRegion,
+        Description: `Replicated from ${sourceRegion}`,
+      }).promise();
+
+      if (!result.SnapshotId) {
+        throw new Error('Copy snapshot did not return a snapshot ID');
+      }
+
+      return { snapshotId: result.SnapshotId };
+    } catch (error) {
+      console.error('AWS replicate snapshot error:', error);
+      throw new Error(`Failed to replicate snapshot: ${error}`);
+    }
+  }
+
   async getRegions(): Promise<RegionData[]> {
     try {
       const result = await this.ec2.describeRegions().promise();

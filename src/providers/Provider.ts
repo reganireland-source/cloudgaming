@@ -79,6 +79,18 @@ export abstract class CloudProvider {
   ): Promise<{ instanceId: string; ipAddress: string }>;
 
   /**
+   * Copy a snapshot from another provider/region into this provider, for
+   * cross-cloud portability. Providers that can't yet import a foreign
+   * snapshot format should throw with a clear "not implemented" message.
+   */
+  abstract replicateSnapshot(
+    sourceSnapshotId: string,
+    sourceProvider: string,
+    sourceRegion: string,
+    targetRegion: string
+  ): Promise<{ snapshotId: string }>;
+
+  /**
    * Get available regions and their costs
    */
   abstract getRegions(): Promise<RegionData[]>;

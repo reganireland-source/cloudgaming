@@ -27,7 +27,7 @@ router.get('/monthly', async (req: Request, res: Response) => {
       [userId, monthStart]
     );
 
-    const total = result.rows.reduce((sum, row) => {
+    const total = result.rows.reduce((sum: number, row: any) => {
       return sum + parseFloat(row.compute) + parseFloat(row.egress) + parseFloat(row.storage);
     }, 0);
 

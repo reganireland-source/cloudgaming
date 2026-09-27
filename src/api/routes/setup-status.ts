@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
-import { authenticateToken } from '../middleware/auth';
 
 const router = Router();
 
@@ -16,7 +15,7 @@ interface SetupStatus {
   updatedAt: string;
 }
 
-router.get('/:machineId', authenticateToken, async (req: Request, res: Response) => {
+router.get('/:machineId', async (req: Request, res: Response) => {
   try {
     const { machineId } = req.params;
     const userId = (req as any).userId;
@@ -62,7 +61,7 @@ router.get('/:machineId', authenticateToken, async (req: Request, res: Response)
   }
 });
 
-router.post('/:machineId', authenticateToken, async (req: Request, res: Response) => {
+router.post('/:machineId', async (req: Request, res: Response) => {
   try {
     const { machineId } = req.params;
     const userId = (req as any).userId;

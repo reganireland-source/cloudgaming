@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { CostAnalysisService } from '../../services/CostAnalysisService';
-import { authenticateToken } from '../middleware/auth';
 
 const router = Router();
 
@@ -8,7 +7,7 @@ const router = Router();
  * POST /api/cost-analysis/compare
  * Compare costs and performance across regions/providers
  */
-router.post('/compare', authenticateToken, async (req: Request, res: Response) => {
+router.post('/compare', async (req: Request, res: Response) => {
   try {
     const {
       instanceType = 'g4dn.xlarge',
@@ -37,7 +36,7 @@ router.post('/compare', authenticateToken, async (req: Request, res: Response) =
  * GET /api/cost-analysis/estimate
  * Estimate monthly cost for a specific configuration
  */
-router.get('/estimate', authenticateToken, async (req: Request, res: Response) => {
+router.get('/estimate', async (req: Request, res: Response) => {
   try {
     const {
       provider = 'aws',
@@ -66,7 +65,7 @@ router.get('/estimate', authenticateToken, async (req: Request, res: Response) =
  * POST /api/cost-analysis/commitment-savings
  * Calculate savings with multi-year commitments
  */
-router.post('/commitment-savings', authenticateToken, async (req: Request, res: Response) => {
+router.post('/commitment-savings', async (req: Request, res: Response) => {
   try {
     const { baseMonthlyCost, commitmentMonths = 12 } = req.body;
 
@@ -88,7 +87,6 @@ router.post('/commitment-savings', authenticateToken, async (req: Request, res: 
  */
 router.get(
   '/performance/:instanceType',
-  authenticateToken,
   async (req: Request, res: Response) => {
     try {
       const {

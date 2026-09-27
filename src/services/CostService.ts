@@ -57,8 +57,8 @@ export class CostService {
       [userId, monthStart]
     );
 
-    const total = result.rows.reduce((sum, row) => sum + parseFloat(row.total), 0);
-    const breakdown: ProviderBreakdown[] = result.rows.map(row => ({
+    const total = result.rows.reduce((sum: number, row: any) => sum + parseFloat(row.total), 0);
+    const breakdown: ProviderBreakdown[] = result.rows.map((row: any) => ({
       provider: row.provider,
       compute: parseFloat(row.compute),
       egress: parseFloat(row.egress),
@@ -87,7 +87,7 @@ export class CostService {
       [userId, startDate]
     );
 
-    return result.rows.map(row => ({
+    return result.rows.map((row: any) => ({
       date: row.date,
       cost: parseFloat(row.total),
     }));
