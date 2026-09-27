@@ -83,7 +83,6 @@ import performanceRoutes from './api/routes/performance';   // CPU/GPU/network m
 import streamingRoutes from './api/routes/streaming';       // how to connect Sunshine/Moonlight to a machine
 import setupStatusRoutes from './api/routes/setup-status';  // progress of the automated machine setup
 import snapshotRoutes from './api/routes/snapshots';        // disk backups that can move between clouds
-import costAnalysisRoutes from './api/routes/cost-analysis'; // compare prices across AWS/Azure/GCP
 import statusRoutes from './api/routes/status';             // health lights + build/version info
 import credentialRoutes from './api/routes/credentials';    // add/check/remove your cloud keys (encrypted)
 import operationRoutes from './api/routes/operations';      // live progress of cloud actions
@@ -193,7 +192,6 @@ app.use('/api/performance', authMiddleware, performanceRoutes);
 app.use('/api/streaming', streamingRoutes);    // login IS required: authMiddleware is attached to each route inside streaming.ts
 app.use('/api/setup-status', authMiddleware, setupStatusRoutes);
 app.use('/api/snapshots', authMiddleware, snapshotRoutes);
-app.use('/api/cost-analysis', authMiddleware, costAnalysisRoutes);
 
 // ---------------------------------------------------------------------------
 // 404 HANDLER — "Not Found"

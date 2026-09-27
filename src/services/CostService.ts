@@ -3,7 +3,7 @@
  * src/services/CostService.ts — ACTUAL SPEND: RECORD, SUMMARISE, FORECAST
  * ============================================================================
  *
- * Where CostAnalysisService ESTIMATES what things would cost, this service
+ * Where Recon (ReconService) ESTIMATES what things would cost, this service
  * works with what was actually SPENT, stored in the `costs` table (one row
  * per machine per day, split into compute / egress / storage).
  *

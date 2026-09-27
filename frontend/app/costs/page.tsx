@@ -1,167 +1,194 @@
 'use client';
 
-import { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
+/**
+ * ============================================================================
+ * app/costs/page.tsx — WHAT YOUR MACHINES HAVE COST (REAL, ESTIMATED)
+ * ============================================================================
+ *
+ * Every number here comes from your own machines:
+ *   - Running now / standing cost: live from your clouds (/api/inventory)
+ *   - This month / projection:     /api/costs/forecast
+ *   - Daily chart:                 /api/costs/daily — one bar per day,
+ *                                  split into machine time and disk
+ *   - By cloud:                    /api/costs/monthly
+ * Costs are the app's hourly ESTIMATES (the hourly cost job records each
+ * machine's price while running, and its disk while it exists), not your
+ * cloud bill. Data streamed to you isn't included yet.
+ *
+ * Chart colours: orange = machine time, violet = disk. Deliberately NOT the
+ * cloud colours (blue/amber/teal/pink), which mean "which cloud" everywhere
+ * else in the app. Validated for colour-blind separation on this surface.
+ * ============================================================================
+ */
 
-interface CostBreakdown {
-  provider: string;
-  compute: number;
-  egress: number;
-  storage: number;
-  total: number;
-}
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { apiFetch } from '@/lib/auth';
+import { useAuth } from '@/components/AuthProvider';
+
+interface Day { date: string; compute: string | number; egress: string | number; storage: string | number; total: string | number }
+interface Forecast { totalSoFar: number; dailyAverage: number; projectedTotal: number; daysElapsed: number; daysInMonth: number }
+interface Monthly { total: number; breakdown: Array<{ provider: string; compute: string; egress: string; storage: string }> }
+interface Inventory { totals: { runningMachines: number; hourly: number; monthlyStanding: number; orphans: number; orphanMonthly: number } }
+
+const SERIES = { compute: { label: 'Machine time', color: '#d95926' }, storage: { label: 'Disk', color: '#9085e9' } };
+const CLOUD: Record<string, { label: string; color: string }> = {
+  gcp: { label: 'Google Cloud', color: '#3987e5' }, aws: { label: 'AWS', color: '#c98500' },
+  azure: { label: 'Azure', color: '#199e70' }, oracle: { label: 'Oracle', color: '#d55181' },
+};
+const money = (n: number) => `$${(Number(n) || 0).toFixed(2)}`;
+const n = (v: string | number) => Number(v) || 0;
 
 export default function CostsPage() {
-  const [dailyData] = useState([
-    { date: '2026-09-20', cost: 12.5 },
-    { date: '2026-09-21', cost: 15.2 },
-    { date: '2026-09-22', cost: 14.8 },
-    { date: '2026-09-23', cost: 16.3 },
-    { date: '2026-09-24', cost: 13.9 },
-    { date: '2026-09-25', cost: 17.1 },
-    { date: '2026-09-26', cost: 14.6 },
-  ]);
+  const { user, loading: authLoading } = useAuth();
+  const [days, setDays] = useState<Day[] | null>(null);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [monthly, setMonthly] = useState<Monthly | null>(null);
+  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [breakdown] = useState<CostBreakdown[]>([
-    { provider: 'AWS', compute: 65.4, egress: 28.3, storage: 5.2, total: 98.9 },
-    { provider: 'Azure', compute: 35.2, egress: 12.5, storage: 2.1, total: 49.8 },
-    { provider: 'Oracle', compute: 12.1, egress: 0, storage: 0.5, total: 12.6 },
-  ]);
+  const load = useCallback(() => {
+    apiFetch<{ history: Day[] }>('/costs/daily?days=30').then((r) => setDays(r.history)).catch((e) => { setDays([]); setError(e?.message || 'Couldn’t load costs.'); });
+    apiFetch<Forecast>('/costs/forecast').then(setForecast).catch(() => setForecast(null));
+    apiFetch<Monthly>('/costs/monthly').then(setMonthly).catch(() => setMonthly(null));
+    apiFetch<Inventory>('/inventory').then(setInventory).catch(() => setInventory(null));
+  }, []);
 
-  const totalSpend = breakdown.reduce((sum, item) => sum + item.total, 0);
-  const avgDailySpend = dailyData.reduce((sum, day) => sum + day.cost, 0) / dailyData.length;
-  const projectedMonthly = avgDailySpend * 30;
+  useEffect(() => { if (user) load(); }, [user, load]);
+
+  if (authLoading) return <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; LOADING…</p>;
+  if (!user) {
+    return (
+      <div className="space-y-3">
+        <h1 className="text-xl font-bold neon-text font-mono">[ COSTS ]</h1>
+        <p className="text-sm text-slate-400"><Link href="/login?next=/costs" className="text-neon-cyan hover:underline">Sign in</Link> to see what your machines cost.</p>
+      </div>
+    );
+  }
+
+  const t = inventory?.totals;
+  const chart = (days || []).map((d) => ({
+    day: new Date(d.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+    compute: Math.round(n(d.compute) * 100) / 100,
+    storage: Math.round(n(d.storage) * 100) / 100,
+    total: n(d.total),
+  }));
+  const byCloud = (monthly?.breakdown || []).map((b) => ({
+    provider: b.provider, compute: n(b.compute), storage: n(b.storage), egress: n(b.egress),
+    total: n(b.compute) + n(b.storage) + n(b.egress),
+  })).sort((a, b) => b.total - a.total);
+  const empty = days !== null && chart.length === 0;
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-xl font-bold neon-text mb-2 font-mono">[ COST_ANALYTICS ]</h1>
-        <p className="font-mono text-neon-lime text-sm">
-          {'> monitor_spending_across_providers'.toUpperCase()}
-        </p>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold neon-text mb-1 font-mono">[ COSTS ]</h1>
+          <p className="text-sm text-slate-400 max-w-2xl short:hidden">What your machines have cost, from hourly estimates. Your cloud’s own billing page is the final word.</p>
+        </div>
+        <button type="button" onClick={load} className="btn-neon text-xs">↻ Refresh</button>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan/30">
-          <p className="text-xs text-neon-cyan/70 mb-2 font-mono font-bold">TOTAL_SPEND_MONTH</p>
-          <p className="text-xl font-bold text-neon-cyan font-mono">${totalSpend.toFixed(2)}</p>
-          <p className="text-xs text-neon-cyan/50 mt-2 font-mono">thru_sept_26</p>
-        </div>
-        <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta/30">
-          <p className="text-xs text-neon-magenta/70 mb-2 font-mono font-bold">DAILY_AVERAGE</p>
-          <p className="text-xl font-bold text-neon-magenta font-mono">${avgDailySpend.toFixed(2)}</p>
-          <p className="text-xs text-neon-magenta/50 mt-2 font-mono">last_7_days</p>
-        </div>
-        <div className="neon-card-lime rounded-lg p-6 border border-neon-lime/30">
-          <p className="text-xs text-neon-lime/70 mb-2 font-mono font-bold">PROJ_MONTHLY</p>
-          <p className="text-xl font-bold text-neon-lime font-mono">${projectedMonthly.toFixed(2)}</p>
-          <p className="text-xs text-neon-lime/50 mt-2 font-mono">if_trend_continues</p>
-        </div>
-        <div className="neon-card rounded-lg p-6 border border-neon-cyan/30">
-          <p className="text-xs text-neon-cyan/70 mb-2 font-mono font-bold">TOP_COST</p>
-          <p className="text-xl font-bold text-neon-pink font-mono">AWS</p>
-          <p className="text-xs text-neon-cyan/50 mt-2 font-mono">${breakdown[0].total.toFixed(2)} ({(breakdown[0].total / totalSpend * 100).toFixed(0)}%)</p>
-        </div>
+      {error && <p className="text-sm text-neon-amber">⚠ {error}</p>}
+
+      {/* ---- Headline numbers ---- */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+        <Tile label="This month so far" value={forecast ? money(forecast.totalSoFar) : '—'} sub={forecast ? `${forecast.daysElapsed} of ${forecast.daysInMonth} days` : 'estimated'} />
+        <Tile label="Month projection" value={forecast ? money(forecast.projectedTotal) : '—'} sub={forecast ? `at ${money(forecast.dailyAverage)}/day so far` : 'at this month’s pace'} />
+        <Tile label="Running now" value={t ? `${money(t.hourly)}/h` : '—'} sub={t ? `${t.runningMachines} machine${t.runningMachines === 1 ? '' : 's'} running` : 'live from your clouds'} />
+        <Tile label="Standing cost" value={t ? `${money(t.monthlyStanding)}/mo` : '—'} sub="disks, snapshots, IPs — billed even when stopped" />
       </div>
+      {t && t.orphans > 0 && (
+        <p className="text-xs text-neon-pink">⚠ {t.orphans} leftover resource{t.orphans === 1 ? '' : 's'} costing ≈{money(t.orphanMonthly)}/mo — see the <Link href="/map" className="underline">Map</Link>.</p>
+      )}
 
-      {/* Daily Trend */}
-      <div className="neon-card rounded-lg p-6 mb-8 border border-neon-cyan/30">
-        <h2 className="text-sm tracking-label font-bold neon-text mb-4 font-mono">[ DAILY_TREND ]</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={dailyData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(95, 215, 224, 0.1)" />
-            <XAxis dataKey="date" stroke="rgba(95, 215, 224, 0.3)" />
-            <YAxis stroke="rgba(95, 215, 224, 0.3)" />
-            <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} contentStyle={{ backgroundColor: '#0c1018', border: '1px solid #5fd7e0' }} />
-            <Legend />
-            <Line
-              type="monotone"
-              dataKey="cost"
-              stroke="#5fd7e0"
-              name="Daily_Cost"
-              dot={{ fill: '#5fd7e0', r: 4 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Provider Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="neon-card rounded-lg p-6 border border-neon-magenta/30">
-          <h2 className="text-sm tracking-label font-bold neon-accent mb-4 font-mono">[ COST_BY_PROVIDER ]</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={breakdown}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 135, 232, 0.1)" />
-              <XAxis dataKey="provider" stroke="rgba(212, 135, 232, 0.3)" />
-              <YAxis stroke="rgba(212, 135, 232, 0.3)" />
-              <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} contentStyle={{ backgroundColor: '#0c1018', border: '1px solid #d487e8' }} />
-              <Legend />
-              <Bar dataKey="compute" stackId="a" fill="#5fd7e0" name="Compute" />
-              <Bar dataKey="egress" stackId="a" fill="#8fd694" name="Egress" />
-              <Bar dataKey="storage" stackId="a" fill="#d487e8" name="Storage" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="neon-card-lime rounded-lg p-6 border border-neon-lime/30">
-          <h2 className="text-sm tracking-label font-bold neon-success mb-4 font-mono">[ BREAKDOWN ]</h2>
-          <div className="space-y-4">
-            {breakdown.map((item) => (
-              <div key={item.provider} className="border-l-4 border-neon-cyan/30 pl-4 py-2">
-                <h3 className="font-bold text-neon-cyan font-mono">{item.provider}</h3>
-                <div className="grid grid-cols-4 gap-2 mt-2 text-xs font-mono">
-                  <div className="text-neon-lime">
-                    <p className="text-neon-cyan/70">Compute</p>
-                    <p className="font-bold">${item.compute.toFixed(2)}</p>
-                  </div>
-                  <div className="text-neon-lime">
-                    <p className="text-neon-cyan/70">Egress</p>
-                    <p className="font-bold">${item.egress.toFixed(2)}</p>
-                  </div>
-                  <div className="text-neon-lime">
-                    <p className="text-neon-cyan/70">Storage</p>
-                    <p className="font-bold">${item.storage.toFixed(2)}</p>
-                  </div>
-                  <div className="text-neon-magenta">
-                    <p className="text-neon-cyan/70">Total</p>
-                    <p className="font-bold text-lg">${item.total.toFixed(2)}</p>
-                  </div>
-                </div>
-              </div>
+      {/* ---- Daily spend (single measure, stacked by what it's for) ---- */}
+      <section className="rounded-lg border border-white/10 bg-white/[0.02] p-3 sm:p-4 space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm text-slate-200">Daily spend · last 30 days</h2>
+          <div className="flex gap-3 text-xs text-slate-300" aria-label="Legend">
+            {Object.values(SERIES).map((s) => (
+              <span key={s.label} className="inline-flex items-center gap-1.5"><span aria-hidden className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.label}</span>
             ))}
           </div>
         </div>
-      </div>
+        {days === null ? (
+          <p className="text-xs text-slate-500 py-10 text-center">Loading…</p>
+        ) : empty ? (
+          <p className="text-xs text-slate-500 py-10 text-center">No costs recorded yet — the first appear within an hour of a machine running.</p>
+        ) : (
+          <div className="h-56 sm:h-64 -ml-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="20%">
+                <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.06)" />
+                <XAxis dataKey="day" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={{ stroke: 'rgba(255,255,255,0.12)' }} minTickGap={12} />
+                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `$${v}`} />
+                <Tooltip
+                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  contentStyle={{ background: '#0c1018', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, fontSize: 12 }}
+                  labelStyle={{ color: '#e2e8f0' }} itemStyle={{ color: '#cbd5e1' }}
+                  formatter={(value: number, name: string) => [money(value), name]}
+                />
+                {/* 2px surface-coloured stroke = the gap between stacked segments */}
+                <Bar dataKey="storage" name={SERIES.storage.label} stackId="c" fill={SERIES.storage.color} stroke="#0c1018" strokeWidth={2} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="compute" name={SERIES.compute.label} stackId="c" fill={SERIES.compute.color} stroke="#0c1018" strokeWidth={2} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        {!empty && days && (
+          <details>
+            <summary className="text-xs text-slate-400 cursor-pointer">Show as a table</summary>
+            <div className="mt-2 max-h-64 overflow-auto">
+              <table className="w-full text-xs tabular-nums">
+                <thead><tr className="text-left text-slate-500"><th className="py-1 pr-3 font-normal">Day</th><th className="py-1 pr-3 font-normal text-right">Machine time</th><th className="py-1 pr-3 font-normal text-right">Disk</th><th className="py-1 font-normal text-right">Total</th></tr></thead>
+                <tbody className="text-slate-300">
+                  {[...chart].reverse().map((d) => (
+                    <tr key={d.day} className="border-t border-white/5"><td className="py-1 pr-3">{d.day}</td><td className="py-1 pr-3 text-right">{money(d.compute)}</td><td className="py-1 pr-3 text-right">{money(d.storage)}</td><td className="py-1 text-right text-slate-100">{money(d.total)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        )}
+      </section>
 
-      {/* Budget Settings */}
-      <div className="neon-card rounded-lg border border-neon-magenta/30 p-6 mt-8">
-        <h2 className="text-sm tracking-label font-bold neon-accent mb-4 font-mono">[ BUDGET_SETTINGS ]</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">MONTHLY_CAP</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                placeholder="1000"
-                className="input-neon flex-1 px-4 py-2 rounded font-mono text-sm"
-              />
-              <button className="btn-neon-magenta">SET</button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">ALERT_THRESHOLD_%</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                placeholder="80"
-                className="input-neon flex-1 px-4 py-2 rounded font-mono text-sm"
-              />
-              <button className="btn-neon-lime">SET</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ---- This month by cloud ---- */}
+      <section className="space-y-2">
+        <h2 className="label">This month by cloud</h2>
+        {byCloud.length === 0 ? (
+          <p className="text-xs text-slate-500">Nothing recorded this month yet.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {byCloud.map((c) => {
+              const cl = CLOUD[c.provider] || { label: c.provider, color: '#94a3b8' };
+              return (
+                <li key={c.provider} className="flex items-center gap-3 rounded border border-white/10 px-3 py-2 text-sm">
+                  <span aria-hidden className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: cl.color }} />
+                  <span className="text-slate-200 flex-1 min-w-0 truncate">{cl.label}</span>
+                  <span className="text-xs text-slate-500 tabular-nums hidden xs:inline">{money(c.compute)} machine · {money(c.storage)} disk</span>
+                  <span className="text-slate-100 tabular-nums">{money(c.total)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <p className="text-[0.68rem] text-slate-500">
+        Estimates from each machine’s hourly price (live spot price where the cloud publishes one) and its disk size; recorded every hour. Data streamed to you (egress, roughly $0.1/GB on most clouds) isn’t counted yet. For exact figures, see your cloud’s billing page.
+      </p>
+    </div>
+  );
+}
+
+function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="rounded border border-white/10 bg-white/[0.02] px-3 py-2.5">
+      <p className="label">{label}</p>
+      <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
+      <p className="text-[0.68rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
     </div>
   );
 }

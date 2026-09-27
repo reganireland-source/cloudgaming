@@ -48,13 +48,12 @@ import { collectPerformanceMetricsJob } from './CollectPerformance';
 export function initializeJobs() {
   console.log('Initializing background jobs...');
 
-  // Sync costs every hour (⚠️ currently writes mock data)
+  // Record each machine's estimated cost every hour (compute + disk)
   cron.schedule('0 * * * *', () => {
     syncCostsJob().catch(err => console.error('Sync costs job error:', err));
   });
 
-  // Check idle machines every 5 minutes (⚠️ see warning above)
-  // The 15 = minutes a machine may run before being considered "idle".
+  // Every 5 minutes: re-check each machine's real status/IP with its cloud
   cron.schedule('*/5 * * * *', () => {
     checkIdleJob(15).catch(err => console.error('Idle check job error:', err));
   });
@@ -64,7 +63,6 @@ export function initializeJobs() {
     budgetAlertJob().catch(err => console.error('Budget alert job error:', err));
   });
 
-  // Collect performance metrics every minute (⚠️ currently writes mock data)
   // Performance metrics: disabled — collectPerformanceMetricsJob only makes
   // up random numbers (see src/jobs/CollectPerformance.ts).
   void collectPerformanceMetricsJob;
