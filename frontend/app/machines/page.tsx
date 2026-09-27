@@ -58,73 +58,83 @@ export default function MachinesPage() {
   };
 
   if (loading) {
-    return <div className="text-center py-12">Loading machines...</div>;
+    return (
+      <div className="text-center py-12">
+        <p className="font-mono text-neon-cyan text-lg">
+          > SCANNING_INSTANCES...
+        </p>
+      </div>
+    );
   }
 
   return (
     <div>
-      <div className="mb-8 flex justify-between items-center">
+      <div className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Machines</h1>
-          <p className="text-gray-600">Manage your gaming infrastructure across cloud providers</p>
+          <h1 className="text-4xl font-bold neon-text mb-2 font-mono">
+            [ INSTANCE_MANAGER ]
+          </h1>
+          <p className="font-mono text-sm text-neon-lime">
+            {'> manage_gaming_infrastructure_across_providers'.toUpperCase()}
+          </p>
         </div>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium">
-          Launch Machine
+        <button className="btn-neon-magenta font-mono whitespace-nowrap">
+          [ LAUNCH_VM ]
         </button>
       </div>
 
       {machines.length > 0 ? (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="min-w-full">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Instance</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Provider</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Region</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Status</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Cost/Hour</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">IP Address</th>
-                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">Actions</th>
+        <div className="neon-card rounded-lg border-2 border-neon-cyan overflow-hidden">
+          <table className="min-w-full font-mono text-sm">
+            <thead className="border-b-2 border-neon-cyan">
+              <tr className="bg-cyan-950/20">
+                <th className="px-6 py-4 text-left text-neon-cyan font-bold">[INSTANCE]</th>
+                <th className="px-6 py-4 text-left text-neon-magenta font-bold">[PROVIDER]</th>
+                <th className="px-6 py-4 text-left text-neon-lime font-bold">[REGION]</th>
+                <th className="px-6 py-4 text-left text-neon-pink font-bold">[STATUS]</th>
+                <th className="px-6 py-4 text-left text-neon-cyan font-bold">[COST/HR]</th>
+                <th className="px-6 py-4 text-left text-neon-lime font-bold">[IP]</th>
+                <th className="px-6 py-4 text-right text-neon-magenta font-bold">[ACTIONS]</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-neon-cyan/20">
               {machines.map((machine) => (
-                <tr key={machine.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{machine.instance_type}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{machine.provider.toUpperCase()}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{machine.region}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                <tr key={machine.id} className="hover:bg-cyan-950/10 transition-colors">
+                  <td className="px-6 py-4 text-neon-cyan font-bold">{machine.instance_type}</td>
+                  <td className="px-6 py-4 text-neon-magenta">{machine.provider.toUpperCase()}</td>
+                  <td className="px-6 py-4 text-neon-lime">{machine.region}</td>
+                  <td className="px-6 py-4">
+                    <span className={`px-3 py-1 rounded text-xs font-bold border ${
                       machine.status === 'running'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-gray-100 text-gray-800'
+                        ? 'border-neon-lime text-neon-lime bg-green-950/20'
+                        : 'border-neon-cyan/50 text-neon-cyan/70 bg-cyan-950/10'
                     }`}>
-                      {machine.status}
+                      [{machine.status.toUpperCase()}]
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">${machine.cost_per_hour.toFixed(3)}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{machine.ip_address || '-'}</td>
-                  <td className="px-6 py-4 text-sm text-right space-x-2">
+                  <td className="px-6 py-4 text-neon-pink font-bold">${machine.cost_per_hour.toFixed(3)}</td>
+                  <td className="px-6 py-4 text-neon-lime text-xs">{machine.ip_address || '—'}</td>
+                  <td className="px-6 py-4 text-right space-x-2 flex justify-end">
                     {machine.status === 'running' ? (
                       <button
                         onClick={() => handleStop(machine.id)}
-                        className="text-orange-600 hover:text-orange-700 font-medium"
+                        className="btn-neon-pink text-xs py-1 px-3"
                       >
-                        Stop
+                        STOP
                       </button>
                     ) : (
                       <button
                         onClick={() => handleStart(machine.id)}
-                        className="text-green-600 hover:text-green-700 font-medium"
+                        className="btn-neon-lime text-xs py-1 px-3"
                       >
-                        Start
+                        RUN
                       </button>
                     )}
                     <button
                       onClick={() => handleDelete(machine.id)}
-                      className="text-red-600 hover:text-red-700 font-medium"
+                      className="border border-red-600/50 text-red-500 hover:text-red-400 hover:border-red-500 rounded px-3 py-1 text-xs font-bold transition-all"
                     >
-                      Delete
+                      DEL
                     </button>
                   </td>
                 </tr>
@@ -133,10 +143,12 @@ export default function MachinesPage() {
           </table>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <p className="text-gray-600 mb-4">No machines yet</p>
-          <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium">
-            Launch your first machine
+        <div className="neon-card rounded-lg p-12 text-center border-2 border-neon-cyan">
+          <p className="font-mono text-neon-lime mb-6">
+            > NO_INSTANCES_DETECTED
+          </p>
+          <button className="btn-neon-magenta">
+            [ DEPLOY_FIRST_MACHINE ]
           </button>
         </div>
       )}

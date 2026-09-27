@@ -87,23 +87,25 @@ export default function SettingsPage() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Settings</h1>
-        <p className="text-gray-600">Manage your cloud provider credentials and account settings</p>
+        <h1 className="text-4xl font-bold neon-text mb-2 font-mono">[ CONFIGURATION ]</h1>
+        <p className="font-mono text-neon-lime text-sm">
+          {'> manage_cloud_provider_credentials_and_settings'.toUpperCase()}
+        </p>
       </div>
 
       {message && (
-        <div className={`mb-6 p-4 rounded-lg ${
+        <div className={`mb-6 p-4 rounded-lg font-mono text-sm border-l-4 ${
           message.type === 'success'
-            ? 'bg-green-50 border border-green-200 text-green-800'
-            : 'bg-red-50 border border-red-200 text-red-800'
+            ? 'border-neon-lime bg-green-950/30 text-neon-lime'
+            : 'border-neon-pink bg-red-950/30 text-neon-pink'
         }`}>
-          {message.text}
+          {message.type === 'success' ? '✓' : '✗'} {message.text}
         </div>
       )}
 
       {/* Cloud Provider Credentials Section */}
-      <div className="bg-white rounded-lg shadow p-6 mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Cloud Provider Credentials</h2>
+      <div className="neon-card rounded-lg p-6 mb-8 border-2 border-neon-cyan">
+        <h2 className="text-2xl font-bold neon-text mb-6 font-mono">[ CLOUD_PROVIDERS ]</h2>
 
         {/* Provider Selection Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -111,17 +113,17 @@ export default function SettingsPage() {
             <button
               key={p.name}
               onClick={() => setSelectedProvider(p.name)}
-              className={`p-4 rounded-lg border-2 transition ${
+              className={`p-4 rounded-lg border-2 transition font-mono text-sm ${
                 selectedProvider === p.name
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-300 hover:border-gray-400'
+                  ? 'neon-card-magenta border-neon-magenta'
+                  : 'neon-card border-neon-cyan hover:border-neon-magenta hover:neon-card-magenta'
               }`}
             >
               <div className="text-4xl mb-2">{p.icon}</div>
-              <h3 className="font-semibold text-gray-900 text-sm mb-2">{p.label}</h3>
+              <h3 className="font-bold text-neon-cyan text-xs mb-2">{p.label}</h3>
               {savedProviders.has(p.name) && (
-                <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded inline-block">
-                  ✓ Configured
+                <div className="text-xs border border-neon-lime text-neon-lime px-2 py-1 rounded inline-block bg-green-950/20">
+                  ✓ READY
                 </div>
               )}
             </button>
@@ -130,15 +132,15 @@ export default function SettingsPage() {
 
         {/* Credential Entry Form */}
         {selectedProvider && provider && (
-          <div className="border-t pt-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">{provider.label}</h3>
-            <p className="text-gray-600 mb-6 text-sm">{provider.description}</p>
+          <div className="border-t-2 border-neon-cyan pt-6">
+            <h3 className="text-xl font-bold neon-accent mb-2 font-mono">{provider.label}</h3>
+            <p className="text-neon-lime mb-6 text-xs font-mono">{provider.description}</p>
 
             <div className="space-y-4 mb-6">
               {provider.requiredFields.map((field) => (
                 <div key={field}>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {field.replace(/([A-Z])/g, ' $1').trim()}
+                  <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">
+                    {field.toUpperCase()}
                   </label>
                   {field.includes('Key') || field.includes('Secret') ? (
                     <div className="relative">
@@ -146,15 +148,15 @@ export default function SettingsPage() {
                         type={showKey ? 'text' : 'password'}
                         value={credentials[field] || ''}
                         onChange={(e) => handleInputChange(field, e.target.value)}
-                        placeholder={`Enter your ${field}`}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+                        placeholder={`[${field}]`}
+                        className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
                       />
                       <button
                         type="button"
                         onClick={() => setShowKey(!showKey)}
-                        className="absolute right-3 top-2.5 text-gray-500 hover:text-gray-700"
+                        className="absolute right-3 top-2.5 text-neon-lime hover:text-neon-cyan transition-colors"
                       >
-                        {showKey ? '👁️' : '👁️‍🗨️'}
+                        {showKey ? '▓' : '▒'}
                       </button>
                     </div>
                   ) : (
@@ -162,52 +164,51 @@ export default function SettingsPage() {
                       type="text"
                       value={credentials[field] || ''}
                       onChange={(e) => handleInputChange(field, e.target.value)}
-                      placeholder={`Enter your ${field}`}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder={`[${field}]`}
+                      className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
                     />
                   )}
                 </div>
               ))}
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-800">
-                <strong>🔒 Security:</strong> Credentials are encrypted with AES-256 and stored securely in our database.
-                They're never logged, shared, or displayed after saving. Only used to access your cloud resources on your behalf.
+            <div className="bg-cyan-950/30 border border-neon-cyan rounded-lg p-4 mb-6 font-mono text-xs text-neon-cyan">
+              <p>
+                <strong className="text-neon-magenta">🔒 SECURE:</strong> AES-256 encryption. Never logged, shared, or displayed.
               </p>
             </div>
 
             <button
               onClick={handleSaveCredentials}
               disabled={loading || Object.keys(credentials).length === 0}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-medium"
+              className="btn-neon-cyan disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Saving...' : 'Save Credentials'}
+              {loading ? '[ SAVING... ]' : '[ SAVE_CREDENTIALS ]'}
             </button>
           </div>
         )}
 
         {/* Saved Credentials Summary */}
         {savedProviders.size > 0 && (
-          <div className="mt-8 border-t pt-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Connected Providers</h3>
+          <div className="mt-8 border-t-2 border-neon-magenta pt-6">
+            <h3 className="text-lg font-bold neon-accent mb-4 font-mono">[ CONNECTED_PROVIDERS ]</h3>
             <div className="space-y-3">
               {providers.map((p) => {
                 if (!savedProviders.has(p.name)) return null;
                 return (
-                  <div key={p.name} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div key={p.name} className="flex items-center justify-between p-4 neon-card-magenta rounded-lg border border-neon-magenta">
                     <div className="flex items-center gap-3">
                       <span className="text-3xl">{p.icon}</span>
-                      <div>
-                        <p className="font-semibold text-gray-900">{p.label}</p>
-                        <p className="text-sm text-gray-600">Credentials configured</p>
+                      <div className="font-mono">
+                        <p className="font-bold text-neon-magenta text-sm">{p.label}</p>
+                        <p className="text-xs text-neon-cyan/70">ready_to_use</p>
                       </div>
                     </div>
                     <button
                       onClick={() => handleDeleteCredentials(p.name)}
-                      className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg font-medium transition"
+                      className="px-4 py-2 text-neon-pink hover:bg-red-950/30 rounded-lg font-bold transition border border-neon-pink/50 hover:border-neon-pink font-mono text-sm"
                     >
-                      Remove
+                      REVOKE
                     </button>
                   </div>
                 );
@@ -218,189 +219,189 @@ export default function SettingsPage() {
       </div>
 
       {/* How to Get Credentials with Direct Links */}
-      <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 mb-8">
-        <h3 className="text-2xl font-semibold text-gray-900 mb-6">How to Get Credentials</h3>
+      <div className="neon-card rounded-lg border-2 border-neon-cyan p-6 mb-8">
+        <h3 className="text-2xl font-bold neon-text mb-6 font-mono">[ CREDENTIAL_SETUP ]</h3>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* AWS */}
-          <div className="bg-white rounded-lg p-6 border border-gray-200">
-            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
-              <span>☁️</span> Amazon Web Services (AWS)
+          <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan">
+            <h4 className="font-bold text-neon-cyan mb-4 flex items-center gap-2 text-lg font-mono">
+              <span>☁️</span> AMAZON_WEB_SERVICES
             </h4>
-            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+            <ol className="text-xs text-neon-cyan space-y-3 mb-4 font-mono">
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">1.</span>
-                <span>Open <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">AWS IAM Console → Users</a></span>
+                <span className="font-bold text-neon-cyan">[1]</span>
+                <span className="text-neon-lime">Open <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline font-medium">AWS_IAM_CONSOLE</a></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">2.</span>
-                <span>Click your username</span>
+                <span className="font-bold text-neon-cyan">[2]</span>
+                <span className="text-neon-lime">Click_your_username</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">3.</span>
-                <span>Scroll to <strong>Access keys</strong> → <strong>Create access key</strong></span>
+                <span className="font-bold text-neon-cyan">[3]</span>
+                <span className="text-neon-lime">Access_keys → <strong>Create</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">4.</span>
-                <span>Select <strong>Application running outside AWS</strong></span>
+                <span className="font-bold text-neon-cyan">[4]</span>
+                <span className="text-neon-lime">Select <strong>Application_Outside_AWS</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">5.</span>
-                <span>Copy <strong>Access Key ID</strong> and <strong>Secret Access Key</strong> immediately</span>
+                <span className="font-bold text-neon-cyan">[5]</span>
+                <span className="text-neon-lime">Copy <strong>KEY_ID</strong> + <strong>SECRET_KEY</strong> now</span>
               </li>
             </ol>
-            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800 mb-3">
-              <strong>⚠️ Important:</strong> Secret key shown only once. Save it immediately or regenerate.
+            <div className="bg-yellow-950/30 border border-neon-pink rounded p-3 text-xs text-neon-pink mb-3 font-mono">
+              <strong className="text-neon-magenta">⚠ CRITICAL:</strong> Secret shown only once!
             </div>
-            <div className="text-xs text-gray-600 mb-3">
-              <strong>Region examples:</strong> us-east-1, us-west-2, eu-west-1, ap-southeast-1
+            <div className="text-xs text-neon-cyan/70 mb-3 font-mono">
+              <strong>REGIONS:</strong> us-east-1 / us-west-2 / eu-west-1 / ap-se-1
             </div>
-            <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
-              Open AWS IAM Console →
+            <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-cyan">
+              [ OPEN_IAM_CONSOLE ]
             </a>
           </div>
 
           {/* Azure */}
-          <div className="bg-white rounded-lg p-6 border border-gray-200">
-            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
-              <span>🔵</span> Microsoft Azure
+          <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta">
+            <h4 className="font-bold text-neon-magenta mb-4 flex items-center gap-2 text-lg font-mono">
+              <span>🔵</span> MICROSOFT_AZURE
             </h4>
-            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+            <ol className="text-xs text-neon-magenta space-y-3 mb-4 font-mono">
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">1.</span>
-                <span>Open <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">Azure Portal → App registrations</a></span>
+                <span className="font-bold text-neon-magenta">[1]</span>
+                <span className="text-neon-cyan">Open <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="text-neon-magenta hover:underline font-medium">AZURE_PORTAL</a></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">2.</span>
-                <span>Click <strong>+ New registration</strong></span>
+                <span className="font-bold text-neon-magenta">[2]</span>
+                <span className="text-neon-cyan">Click <strong>+_New_Registration</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">3.</span>
-                <span>Name: "CloudGaming" → Register</span>
+                <span className="font-bold text-neon-magenta">[3]</span>
+                <span className="text-neon-cyan">Name: "CloudGaming" → Register</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">4.</span>
-                <span>Copy <strong>Application ID</strong> and <strong>Tenant ID</strong></span>
+                <span className="font-bold text-neon-magenta">[4]</span>
+                <span className="text-neon-cyan">Copy <strong>APP_ID</strong> + <strong>TENANT_ID</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">5.</span>
-                <span>Go to <strong>Certificates & secrets</strong> → <strong>+ New client secret</strong></span>
+                <span className="font-bold text-neon-magenta">[5]</span>
+                <span className="text-neon-cyan">Certificates → <strong>+_New_Secret</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">6.</span>
-                <span>Copy the secret <strong>Value</strong></span>
+                <span className="font-bold text-neon-magenta">[6]</span>
+                <span className="text-neon-cyan">Copy secret <strong>Value</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">7.</span>
-                <span>Get Subscription ID from <a href="https://portal.azure.com/#blade/Microsoft_Azure_Billing/SubscriptionsBlade" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Subscriptions blade</a></span>
+                <span className="font-bold text-neon-magenta">[7]</span>
+                <span className="text-neon-cyan">Get Subscription_ID from <a href="https://portal.azure.com/#blade/Microsoft_Azure_Billing/SubscriptionsBlade" target="_blank" rel="noopener noreferrer" className="text-neon-magenta hover:underline">Billing_Blade</a></span>
               </li>
             </ol>
-            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800 mb-3">
-              <strong>⚠️ Permissions:</strong> Assign app "Contributor" role on your subscription
+            <div className="bg-yellow-950/30 border border-neon-pink rounded p-3 text-xs text-neon-pink mb-3 font-mono">
+              <strong className="text-neon-magenta">⚠ REQUIRED:</strong> Assign "Contributor" role!
             </div>
-            <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
-              Open App Registrations →
+            <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-magenta">
+              [ OPEN_APP_REGISTRATIONS ]
             </a>
           </div>
 
           {/* GCP */}
-          <div className="bg-white rounded-lg p-6 border border-gray-200">
-            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
-              <span>🟠</span> Google Cloud Platform (GCP)
+          <div className="neon-card-lime rounded-lg p-6 border border-neon-lime">
+            <h4 className="font-bold text-neon-lime mb-4 flex items-center gap-2 text-lg font-mono">
+              <span>🟠</span> GOOGLE_CLOUD_PLATFORM
             </h4>
-            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+            <ol className="text-xs text-neon-lime space-y-3 mb-4 font-mono">
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">1.</span>
-                <span>Open <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">GCP Console → Service Accounts</a></span>
+                <span className="font-bold text-neon-lime">[1]</span>
+                <span className="text-neon-magenta">Open <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="text-neon-lime hover:underline font-medium">GCP_CONSOLE</a></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">2.</span>
-                <span>Click <strong>+ Create Service Account</strong></span>
+                <span className="font-bold text-neon-lime">[2]</span>
+                <span className="text-neon-magenta">Click <strong>+_Create_Service_Account</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">3.</span>
-                <span>Name: "cloudgaming" → Create</span>
+                <span className="font-bold text-neon-lime">[3]</span>
+                <span className="text-neon-magenta">Name: "cloudgaming" → Create</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">4.</span>
-                <span>Grant role: <strong>Compute Admin</strong> → Continue</span>
+                <span className="font-bold text-neon-lime">[4]</span>
+                <span className="text-neon-magenta">Grant: <strong>Compute_Admin</strong> → Continue</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">5.</span>
-                <span>Click created service account → <strong>Keys tab</strong></span>
+                <span className="font-bold text-neon-lime">[5]</span>
+                <span className="text-neon-magenta">Service Account → <strong>Keys_Tab</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">6.</span>
-                <span><strong>+ Add Key</strong> → Create new → JSON</span>
+                <span className="font-bold text-neon-lime">[6]</span>
+                <span className="text-neon-magenta"><strong>+_Add_Key</strong> → JSON</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">7.</span>
-                <span>Open downloaded JSON → Copy entire content</span>
+                <span className="font-bold text-neon-lime">[7]</span>
+                <span className="text-neon-magenta">Copy entire JSON content</span>
               </li>
             </ol>
-            <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800 mb-3">
-              <strong>📝 Project ID:</strong> Get from GCP Console header (looks like "my-project-123456")
+            <div className="bg-cyan-950/30 border border-neon-cyan rounded p-3 text-xs text-neon-cyan mb-3 font-mono">
+              <strong className="text-neon-magenta">📝 PROJECT_ID:</strong> From console header (my-project-XXXXXX)
             </div>
-            <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
-              Open Service Accounts →
+            <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-lime">
+              [ OPEN_SERVICE_ACCOUNTS ]
             </a>
           </div>
 
           {/* Oracle */}
-          <div className="bg-white rounded-lg p-6 border border-gray-200">
-            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2 text-lg">
-              <span>🔴</span> Oracle Cloud Infrastructure (OCI)
+          <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta">
+            <h4 className="font-bold text-neon-magenta mb-4 flex items-center gap-2 text-lg font-mono">
+              <span>🔴</span> ORACLE_CLOUD_INFRA
             </h4>
-            <ol className="text-sm text-gray-700 space-y-3 mb-4">
+            <ol className="text-xs text-neon-magenta space-y-3 mb-4 font-mono">
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">1.</span>
-                <span>Open <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">OCI Console → Identity → Users</a></span>
+                <span className="font-bold text-neon-magenta">[1]</span>
+                <span className="text-neon-cyan">Open <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="text-neon-magenta hover:underline font-medium">OCI_CONSOLE</a></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">2.</span>
-                <span>Click your username at the top right</span>
+                <span className="font-bold text-neon-magenta">[2]</span>
+                <span className="text-neon-cyan">Click your username (top right)</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">3.</span>
-                <span>Scroll to <strong>API Keys</strong> → <strong>Add API Key</strong></span>
+                <span className="font-bold text-neon-magenta">[3]</span>
+                <span className="text-neon-cyan">API_Keys → <strong>Add_API_Key</strong></span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">4.</span>
-                <span><strong>Generate API Key Pair</strong> → Download private key</span>
+                <span className="font-bold text-neon-magenta">[4]</span>
+                <span className="text-neon-cyan"><strong>Generate_Key_Pair</strong> → Download</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">5.</span>
-                <span>Copy the <strong>Fingerprint</strong> shown on screen</span>
+                <span className="font-bold text-neon-magenta">[5]</span>
+                <span className="text-neon-cyan">Copy <strong>Fingerprint</strong> value</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">6.</span>
-                <span>Get User OCID from current page (starts with "ocid1.user")</span>
+                <span className="font-bold text-neon-magenta">[6]</span>
+                <span className="text-neon-cyan">Get User_OCID (ocid1.user.*)</span>
               </li>
               <li className="flex gap-3">
-                <span className="font-bold text-blue-600">7.</span>
-                <span>Get Tenancy OCID: profile menu → Tenancy info</span>
+                <span className="font-bold text-neon-magenta">[7]</span>
+                <span className="text-neon-cyan">Get Tenancy_OCID from profile menu</span>
               </li>
             </ol>
-            <div className="bg-green-50 border border-green-200 rounded p-3 text-xs text-green-800 mb-3">
-              <strong>💰 Oracle Advantage:</strong> <strong>FREE egress</strong> in Singapore region = huge cost savings!
+            <div className="bg-green-950/30 border border-neon-lime rounded p-3 text-xs text-neon-lime mb-3 font-mono">
+              <strong className="text-neon-magenta">💰 ORACLE_ADVANTAGE:</strong> FREE_EGRESS in Singapore = Huge_Savings!
             </div>
-            <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">
-              Open Users Page →
+            <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-magenta">
+              [ OPEN_USERS_PAGE ]
             </a>
           </div>
         </div>
       </div>
 
       {/* Troubleshooting */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-2xl font-semibold text-gray-900 mb-6">❓ Troubleshooting</h3>
+      <div className="neon-card rounded-lg border-2 border-neon-cyan p-6">
+        <h3 className="text-2xl font-bold neon-text mb-6 font-mono">[ TROUBLESHOOTING ]</h3>
         <div className="space-y-3">
-          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
-            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
-              <span>AWS: "InvalidClientTokenId" or "SignatureDoesNotMatch" error</span>
+          <details className="group neon-card-cyan rounded-lg p-4 border border-neon-cyan">
+            <summary className="cursor-pointer font-bold text-neon-cyan hover:text-neon-magenta flex justify-between items-center font-mono text-sm">
+              <span>AWS: InvalidClientTokenId error</span>
               <span className="group-open:rotate-180 transition">▼</span>
             </summary>
-            <p className="text-sm text-gray-700 mt-3">
+            <p className="text-xs text-neon-lime mt-3 font-mono">
               Check that you copied the Access Key ID and Secret Access Key exactly from IAM Console. Any space or character difference causes this error. Delete the key and create a new one if needed.
             </p>
           </details>
