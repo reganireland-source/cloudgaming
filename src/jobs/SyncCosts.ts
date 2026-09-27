@@ -1,29 +1,26 @@
 /**
  * ============================================================================
- * src/jobs/SyncCosts.ts — HOURLY COSTS, IDLE SHUTDOWN, BUDGET ALERTS
+ * src/jobs/SyncCosts.ts — HOURLY COST ESTIMATES, STATE RECONCILE, BUDGET ALERTS
  * ============================================================================
  *
  * Three background jobs (scheduled in src/jobs/index.ts):
- *   syncCostsJob    hourly   — record what running machines cost
- *   checkIdleJob    5 min    — "auto-stop" machines considered idle
+ *   syncCostsJob    hourly   — record ESTIMATED costs of running machines
+ *   checkIdleJob    5 min    — (name kept) reconcile machine states with the clouds
  *   budgetAlertJob  daily    — warn users near their budget cap
  *
- * ⚠️⚠️  READ BEFORE DEPLOYING  ⚠️⚠️
- * 1. checkIdleJob ONLY CHANGES OUR DATABASE. It sets status = 'stopped' but
- *    never calls the cloud provider, so the real VM keeps running and
- *    billing while the dashboard says it's off. And "idle" here means
- *    "started more than 15 minutes ago" (or never recorded as started —
- *    which is every newly launched machine, since launch doesn't set
- *    last_started), NOT "nobody is using it". Net effect: every machine is
- *    shown as stopped within ~15–20 minutes while still costing money.
- * 2. syncCostsJob records RANDOM numbers (Math.random), not real costs, and
- *    adds a new row every hour, labelled as that whole day's cost.
+ * NOTES
+ * 1. The old idle job marked machines 'stopped' in our database without
+ *    stopping them at the cloud (so they kept billing). It has been replaced
+ *    by a reconcile job that only ever REPORTS the cloud's real state.
+ * 2. Costs are estimates from the launch catalog, not billing data (see
+ *    syncCostsForUserProvider). Each hourly row is one hour's estimate.
  * 3. budgetAlertJob only writes a log line — no email is sent (TODO).
  * ============================================================================
  */
 
 import { query } from '../config/database';
-import { getProvider } from '../providers'; // imported for the future real implementation; unused now
+import { providerFor } from '../services/CredentialService';
+import { CATALOGS, isProviderName } from '../providers/registry';
 import { CostService } from '../services/CostService';
 
 /**
@@ -77,89 +74,86 @@ export async function syncCostsJob() {
 }
 
 /**
- * Record costs for one user's running machines on one cloud.
- * Not exported — only used by syncCostsJob above.
- * ⚠️ The "costs" are random mock values (see file header). The real version
- * would call cloudProvider.queryCosts(...) (e.g. AWS Cost Explorer).
+ * Record ESTIMATED costs for one user's running machines on one cloud, for
+ * the last hour. Not exported — only used by syncCostsJob above.
+ *
+ * Real spend can only be read from each cloud's billing system (AWS Cost
+ * Explorer, a GCP BigQuery billing export...), which isn't connected yet. So
+ * instead of the old random numbers, we record honest estimates:
+ *   compute = the machine's estimated $/hour (from the launch catalog)
+ *   storage = its disk size × the catalog's $/GB/month ÷ 730 hours
+ *   egress  = 0 (we don't yet know how many hours were actually streamed)
  */
 async function syncCostsForUserProvider(userId: string, provider: string) {
-  // Get cloud credentials
-  const credsResult = await query(
-    'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
-    [userId, provider]
-  );
+  if (!isProviderName(provider)) return;
+  const catalog = CATALOGS[provider];
 
-  if (credsResult.rows.length === 0) {
-    console.warn(`No credentials for ${userId}/${provider}`);
-    return;
-  }
-
-  // Get user's machines for this provider
   const machinesResult = await query(
-    `SELECT id, instance_id FROM machines WHERE user_id = $1 AND provider = $2 AND status = 'running'`,
+    `SELECT id, cost_per_hour, disk_size_gb FROM machines WHERE user_id = $1 AND provider = $2 AND status = 'running'`,
     [userId, provider]
   );
 
-  // For each machine, generate realistic mock costs
   for (const machine of machinesResult.rows) {
-    // In production, query cloud provider API
-    // For MVP, use mock data based on machine type
-
-    // Simulate: compute cost varies by instance type
-    const computeCostPerHour = Math.random() * 1.5; // $0-1.50/hr
-    const egressCostPerHour = Math.random() * 0.5; // $0-0.50/hr (depends on quality)
-    const storageCostPerDay = Math.random() * 0.2; // $0-0.20/day
-
     await CostService.recordCosts(userId, {
       machineId: machine.id,
       provider,
-      computeCost: computeCostPerHour,
-      egressCost: egressCostPerHour,
-      storageCost: storageCostPerDay / 24, // Convert to hourly
+      computeCost: Number(machine.cost_per_hour) || 0,
+      egressCost: 0,
+      storageCost: ((Number(machine.disk_size_gb) || catalog.defaultDiskGb) * catalog.diskPerGbMonth) / 730,
     });
   }
 }
 
 /**
- * Background job: Check for idle machines and auto-shutdown
+ * Background job: keep our records in step with the clouds (every 5 min).
  *
- * INTENT: stop machines nobody is using, to save money.
- * ACTUAL BEHAVIOUR (⚠️ see file header, point 1): marks machines as
- * 'stopped' in our database only — the cloud VM is NOT stopped — and uses
- * "time since last start" as a stand-in for "idle".
- * A real version would check activity (e.g. no streaming client connected
- * for N minutes) and call cloudProvider.stopInstance(...) via
- * MachineService.stopMachine.
+ * WHY THIS REPLACED THE OLD "IDLE AUTO-STOP" JOB
+ * ---------------------------------------------
+ * The old job marked any machine running for 15+ minutes as 'stopped' in
+ * OUR database only — the real machine kept running and billing, while the
+ * app claimed it was off. That's the worst kind of bug for a cost tool, so
+ * it's gone. (Real idle detection needs "is anyone streaming?" data from
+ * Sunshine, which we don't collect yet.)
+ *
+ * Instead, this asks each cloud for the REAL state of every machine that
+ * isn't mid-action, and updates status and IP. So if a spot machine is
+ * reclaimed, or someone stops a machine in the cloud console, the app shows
+ * the truth within 5 minutes. Each user's own (encrypted) keys are used.
+ *
+ * The parameter is kept for compatibility with jobs/index.ts and ignored.
  */
-export async function checkIdleJob(idleThresholdMinutes: number = 15) {
-  console.log(`[Job] Checking for idle machines (>${idleThresholdMinutes} min)...`);
-
+export async function checkIdleJob(_idleThresholdMinutes: number = 15) {
   try {
-    const idleThreshold = new Date(Date.now() - idleThresholdMinutes * 60 * 1000);
-
-    // Find machines idle for too long
-    const idleResult = await query(
-      `SELECT id, user_id FROM machines
-       WHERE status = 'running' AND (last_started IS NULL OR last_started < $1)`,
-      [idleThreshold]
+    const machines = await query(
+      `SELECT m.id, m.user_id, m.provider, m.instance_id, m.status, m.ip_address
+       FROM machines m
+       WHERE m.status IN ('running', 'stopped', 'unknown', 'missing')
+         AND m.instance_id NOT LIKE 'pending:%'
+         AND NOT EXISTS (SELECT 1 FROM cloud_operations o WHERE o.machine_id = m.id AND o.status = 'running')`
     );
-
-    console.log(`[Job] Found ${idleResult.rows.length} idle machines`);
-
-    // Auto-shutdown (optional: could email user first)
-    for (const machine of idleResult.rows) {
+    // One provider object per user+cloud (building one decrypts their keys).
+    const providers = new Map<string, any>();
+    let changed = 0;
+    for (const m of machines.rows) {
       try {
-        await query(
-          `UPDATE machines SET status = 'stopped' WHERE id = $1`,
-          [machine.id]
-        );
-        console.log(`[Job] Auto-stopped machine ${machine.id}`);
+        const key = `${m.user_id}:${m.provider}`;
+        if (!providers.has(key)) providers.set(key, await providerFor(m.user_id, m.provider));
+        const status = await providers.get(key).getInstanceStatus(m.instance_id);
+        const newStatus = status.status === 'terminated' ? 'missing' : status.status;
+        const newIp = status.ipAddress || m.ip_address;
+        if (newStatus !== m.status || newIp !== m.ip_address) {
+          changed++;
+          console.log(`[Job] Machine ${m.id}: ${m.status} -> ${newStatus} (reported by ${m.provider})`);
+        }
+        await query('UPDATE machines SET status = $1, ip_address = $2, last_synced_at = NOW() WHERE id = $3', [newStatus, newIp, m.id]);
       } catch (error) {
-        console.error(`[Job] Failed to stop machine ${machine.id}:`, error);
+        // Missing/undecryptable keys or a cloud hiccup: leave the record as is.
+        console.error(`[Job] Couldn't check machine ${m.id}:`, (error as Error).message);
       }
     }
+    if (machines.rows.length) console.log(`[Job] Reconciled ${machines.rows.length} machines, ${changed} changed`);
   } catch (error) {
-    console.error('[Job] Idle check failed:', error);
+    console.error('[Job] Reconcile failed:', error);
   }
 }
 

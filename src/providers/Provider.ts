@@ -33,6 +33,8 @@
  */
 
 import { Machine, RegionData, Snapshot } from '../types';
+import type { Reporter, EventLevel } from '../services/OperationLog';
+import type { SetupStage } from './shared/types';
 
 /** Where and what to launch. */
 export interface ProviderConfig {
@@ -46,6 +48,10 @@ export interface LaunchOptions {
   keyName: string;         // name of the SSH key pair allowed to log in
   securityGroupId: string; // firewall rules: which ports are open to the internet
   spotInstance?: boolean;  // true = use cheap "spare capacity" pricing (can be interrupted)
+  // Used by providers that set the machine up themselves (GCP); others ignore them.
+  diskSizeGb?: number;     // size of the machine's disk
+  sunshineUsername?: string; // login for the streaming server's admin page
+  sunshinePassword?: string;
 }
 
 /** Basic facts about an existing snapshot. */
@@ -58,6 +64,37 @@ export interface SnapshotInfo {
 export abstract class CloudProvider {
   /** Which cloud this is. Each subclass sets it, e.g. name = 'aws'. */
   abstract name: 'aws' | 'azure' | 'gcp' | 'oracle';
+
+  /**
+   * true = the provider installs the streaming software itself (e.g. GCP
+   * via a startup script), so MachineService must NOT run the SSH-based
+   * CloudyPad setup after launching.
+   */
+  readonly selfConfiguring: boolean = false;
+
+  // ---- Progress commentary ---------------------------------------------
+  // A provider can narrate what it's doing ("Trying zone -b…") into the
+  // operation log the frontend shows live. Callers hand in a reporter with
+  // setReporter(op.reporter); without one, report() is a silent no-op.
+  protected reporter?: Reporter;
+
+  setReporter(reporter: Reporter | undefined): this {
+    this.reporter = reporter;
+    return this; // returning `this` allows getProvider(...).setReporter(r).launchInstance(...)
+  }
+
+  protected async report(level: EventLevel, message: string, detail?: string): Promise<void> {
+    if (this.reporter) await this.reporter(level, message, detail);
+  }
+
+  /**
+   * Progress of the on-machine setup script (shared/setupScript.ts), read
+   * from the machine's serial console via the cloud's API. Providers that
+   * can read it override this; the default says "unknown" ([]).
+   */
+  async getSetupProgress(_instanceId: string): Promise<SetupStage[]> {
+    return [];
+  }
 
   /**
    * Create and boot a brand-new virtual machine.
@@ -89,7 +126,8 @@ export abstract class CloudProvider {
    * Ask the cloud what state a machine is in right now, and its IP address.
    */
   abstract getInstanceStatus(instanceId: string): Promise<{
-    status: 'running' | 'stopped' | 'terminated' | 'unknown';
+    // 'starting' / 'stopping' = in between; the cloud is still working on it.
+    status: 'starting' | 'running' | 'stopping' | 'stopped' | 'terminated' | 'unknown';
     ipAddress?: string;
   }>;
 

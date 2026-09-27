@@ -16,26 +16,22 @@
  *       "gcp": { ... } }
  * JSONB is Postgres's "store a JSON object in a column" type.
  *
- * ⚠️  KNOWN BUGS (real — fix before using snapshots)
- * -------------------------------------------------
- * 1. JSON.parse on an already-parsed value: the `pg` database driver
- *    automatically converts JSONB columns into JavaScript objects. Calling
- *    JSON.parse() on an object turns it into the text "[object Object]" and
- *    throws a SyntaxError. Because snapshot_data defaults to '{}', EVERY
- *    snapshot row hits this — so getSnapshotMetadata, listSnapshots,
- *    replicateSnapshot and deleteSnapshot all fail as soon as any snapshot
- *    exists. Fix: use `snapshot.snapshot_data || {}` without JSON.parse.
+ * FIXED: snapshot_data is JSONB, which the `pg` driver already returns as
+ * a JavaScript object — the old code called JSON.parse() on it and crashed
+ * on every read. Credentials are now loaded (and decrypted) through
+ * CredentialService, which gives a clear error if they're missing, and the
+ * new snapshot's id is written to machines.snapshot_id.
+ *
+ * ⚠️  KNOWN LIMITATIONS
+ * --------------------
  * 2. Copies are keyed by PROVIDER name, so there can only be one "aws" entry.
  *    Copying an AWS snapshot to a second AWS region overwrites the record of
  *    the original. Keying by "provider:region" would fix it.
- * 3. createSnapshot doesn't write the new snapshot's id to
- *    machines.snapshot_id, which MachineService.migrateMachine relies on.
- * 4. credsResult.rows[0] is used without checking it exists.
  * ============================================================================
  */
 
 import { query } from '../config/database';
-import { getProvider } from '../providers';
+import { providerFor } from './CredentialService';
 import { v4 as uuidv4 } from 'uuid';
 
 /** Inputs for createSnapshot. `?` = optional. */
@@ -93,13 +89,8 @@ export class SnapshotService {
       const machine = machineResult.rows[0];
 
       // 2. Credentials for the machine's cloud.
-      const credsResult = await query(
-        'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
-        [userId, machine.provider]
-      );
-
-      const credentials = JSON.parse(credsResult.rows[0].encrypted_data);
-      const cloudProvider = getProvider(machine.provider, credentials);
+      //    (loaded and decrypted by CredentialService; a friendly error if missing)
+      const cloudProvider = await providerFor(userId, machine.provider);
 
       // 3. Ask the cloud to take the snapshot. `paths.join(',')` turns
       //    ['/mnt/games'] into the text '/mnt/games'.
@@ -138,6 +129,9 @@ export class SnapshotService {
           JSON.stringify(snapshots),
         ]
       );
+
+      // Remember it as the machine's latest snapshot (used when restoring).
+      await query('UPDATE machines SET snapshot_id = $1 WHERE id = $2', [snapshotId, machineId]);
 
       console.log(`[SnapshotService] Snapshot created: ${snapshotId}`);
 
@@ -183,10 +177,8 @@ export class SnapshotService {
       }
 
       const snapshot = snapshotResult.rows[0];
-      // ⚠️ Known Bug 1: snapshot_data is already an object — this throws.
-      const snapshots = snapshot.snapshot_data
-        ? JSON.parse(snapshot.snapshot_data)
-        : {};
+      // snapshot_data is JSONB, which `pg` already returns as an object.
+      const snapshots = snapshot.snapshot_data || {}; // pg already parses JSONB into an object
 
       // 2. Nothing to do if that exact copy already exists.
       if (snapshots[targetProvider]?.region === targetRegion) {
@@ -198,22 +190,11 @@ export class SnapshotService {
 
       // 3. Credentials for the source cloud (where the snapshot is) and the
       //    target cloud (where the copy will go).
-      const sourceCredsResult = await query(
-        'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
-        [userId, snapshot.provider]
-      );
-
-      const targetCredsResult = await query(
-        'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
-        [userId, targetProvider]
-      );
-
-      const sourceCredentials = JSON.parse(sourceCredsResult.rows[0].encrypted_data);
-      const targetCredentials = JSON.parse(targetCredsResult.rows[0].encrypted_data);
-
+      //    Both are loaded and decrypted by CredentialService.
       // sourceProvider is created but not used; the TARGET provider does the copy.
-      const sourceProvider = getProvider(snapshot.provider, sourceCredentials);
-      const targetCloudProvider = getProvider(targetProvider, targetCredentials);
+      // (Loading it still proves the user has working keys for the source.)
+      const sourceProvider = await providerFor(userId, snapshot.provider);
+      const targetCloudProvider = await providerFor(userId, targetProvider);
 
       // 4. Ask the target cloud to pull in a copy.
       console.log(
@@ -269,10 +250,8 @@ export class SnapshotService {
       }
 
       const snapshot = result.rows[0];
-      // ⚠️ Known Bug 1.
-      const snapshots = snapshot.snapshot_data
-        ? JSON.parse(snapshot.snapshot_data)
-        : {};
+      // (JSONB: already an object.)
+      const snapshots = snapshot.snapshot_data || {}; // pg already parses JSONB into an object
 
       // Add up size and cost across every copy. Object.entries turns
       // { aws: {...}, gcp: {...} } into [['aws', {...}], ['gcp', {...}]], and
@@ -317,10 +296,8 @@ export class SnapshotService {
       const snapshots: SnapshotMeta[] = [];
 
       for (const snapshot of result.rows) {
-        // ⚠️ Known Bug 1.
-        const snapshotData = snapshot.snapshot_data
-          ? JSON.parse(snapshot.snapshot_data)
-          : {};
+        // (JSONB: already an object.)
+        const snapshotData = snapshot.snapshot_data || {}; // pg already parses JSONB into an object
 
         let totalSizeGb = 0;
         let totalMonthlyCost = 0;
@@ -366,26 +343,16 @@ export class SnapshotService {
       }
 
       const snapshot = snapshotResult.rows[0];
-      // ⚠️ Known Bug 1.
-      const snapshots = snapshot.snapshot_data
-        ? JSON.parse(snapshot.snapshot_data)
-        : {};
+      // (JSONB: already an object.)
+      const snapshots = snapshot.snapshot_data || {}; // pg already parses JSONB into an object
 
       // Each copy is deleted in its own try/catch, so one failure doesn't
       // stop the others from being deleted. Failures are only logged.
       for (const [provider, data] of Object.entries(snapshots)) {
         try {
-          const credsResult = await query(
-            'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
-            [userId, provider]
-          );
-
-          if (credsResult.rows.length > 0) {
-            const credentials = JSON.parse(credsResult.rows[0].encrypted_data);
-            const cloudProvider = getProvider(provider, credentials);
-            await cloudProvider.deleteSnapshot((data as any).id);
-            console.log(`[SnapshotService] Deleted snapshot from ${provider}`);
-          }
+          const cloudProvider = await providerFor(userId, provider);
+          await cloudProvider.deleteSnapshot((data as any).id);
+          console.log(`[SnapshotService] Deleted snapshot from ${provider}`);
         } catch (error) {
           console.error(`Failed to delete snapshot from ${provider}:`, error);
         }

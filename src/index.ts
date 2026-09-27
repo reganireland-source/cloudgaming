@@ -83,6 +83,9 @@ import setupStatusRoutes from './api/routes/setup-status';  // progress of the a
 import snapshotRoutes from './api/routes/snapshots';        // disk backups that can move between clouds
 import costAnalysisRoutes from './api/routes/cost-analysis'; // compare prices across AWS/Azure/GCP
 import statusRoutes from './api/routes/status';             // health lights + build/version info
+import credentialRoutes from './api/routes/credentials';    // add/check/remove your cloud keys (encrypted)
+import operationRoutes from './api/routes/operations';      // live progress of cloud actions
+import { failOrphanedOperations } from './services/OperationLog';
 
 // Middleware that checks the user's login token (a "JWT") and rejects the
 // request if it's missing or invalid. See src/api/middleware/auth.ts.
@@ -90,6 +93,10 @@ import { authMiddleware } from './api/middleware/auth';
 
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
+
+// Railway puts a proxy in front of us. "Trust" one proxy hop so req.ip is the
+// real visitor's address (used by the login brute-force limiter), not the proxy's.
+app.set('trust proxy', 1);
 
 // ---------------------------------------------------------------------------
 // GLOBAL MIDDLEWARE — runs on EVERY request, in the order written here.
@@ -100,9 +107,16 @@ const app: Express = express();
 app.use(helmet());
 
 // Allow browsers on other domains (our frontend) to call this API.
-// Called with no options, it allows ANY origin. That's convenient while
-// setting things up; a stricter setup would list only the Vercel domain.
-app.use(cors());
+// If FRONTEND_URL is set, only that website (plus local development) may
+// call this API from a browser. Unset = allow any origin (fine while
+// setting up; tokens are still required for anything private).
+app.use(
+  cors(
+    env.FRONTEND_URL
+      ? { origin: [env.FRONTEND_URL, 'http://localhost:3000'] }
+      : undefined
+  )
+);
 
 // "Body parsing": when the frontend sends data (e.g. a form as JSON), it
 // arrives as raw text. These two lines turn it into a JavaScript object and
@@ -161,6 +175,8 @@ app.get('/health', async (req: Request, res: Response) => {
 app.use('/api/status', statusRoutes);          // PUBLIC: status lights must work before anyone logs in
 app.use('/api/auth', authRoutes);              // PUBLIC: you can't require login on the login page
 app.use('/api/machines', authMiddleware, machineRoutes);
+app.use('/api/credentials', authMiddleware, credentialRoutes);  // your encrypted cloud keys
+app.use('/api/operations', authMiddleware, operationRoutes);    // live progress of cloud actions
 app.use('/api/costs', authMiddleware, costRoutes);
 app.use('/api/regions', authMiddleware, regionRoutes);
 app.use('/api/performance', authMiddleware, performanceRoutes);
@@ -205,6 +221,10 @@ const PORT = env.PORT;
 
 // Kick off the timed background jobs (they run independently of requests).
 initializeJobs();
+
+// Operations left "running" by a previous server process can never finish;
+// mark them failed with an explanation (see services/OperationLog.ts).
+failOrphanedOperations();
 
 // Begin accepting connections. The callback runs once the server is ready;
 // these log lines are the first thing to look for in Railway's logs to

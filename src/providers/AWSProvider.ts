@@ -1,348 +1,754 @@
 /**
  * ============================================================================
- * src/providers/AWSProvider.ts — TALKING TO AMAZON WEB SERVICES (AWS)
+ * src/providers/AWSProvider.ts — AMAZON WEB SERVICES (AWS)
  * ============================================================================
  *
- * The one fully-built cloud provider. It fills in every operation required
- * by the CloudProvider contract (Provider.ts) using AWS's official
- * JavaScript library, the "AWS SDK".
+ * The AWS version of the CloudProvider contract (Provider.ts). It creates,
+ * starts, stops, deletes and snapshots GPU virtual machines in the USER'S
+ * OWN AWS account, using the access key they added on the Config page
+ * (stored encrypted — see CredentialService.ts). It mirrors GCPProvider.ts:
+ * same steps, same chatty progress messages, AWS words.
  *
  * AWS VOCABULARY USED BELOW
  * -------------------------
- *   EC2            AWS's virtual-machine service ("Elastic Compute Cloud")
- *   instance       one virtual machine
- *   AMI            a disk template that new instances boot from
- *   EBS volume     a virtual hard disk attached to an instance
- *   snapshot       a point-in-time backup of an EBS volume
- *   region         a geographic location, e.g. ap-southeast-1 = Singapore
- *   availability zone (AZ)  one data centre inside a region, e.g. ap-southeast-1a
- *   spot instance  spare capacity sold cheaply; AWS can reclaim it at short notice
- *   Cost Explorer  AWS's billing/reporting API
+ *   EC2              AWS's virtual-machine service ("Elastic Compute Cloud")
+ *   instance         one virtual machine; its type (g4dn.xlarge...) fixes CPU, RAM and GPU
+ *   AMI              "Amazon Machine Image" — the disk template a machine boots from
+ *   EBS volume       a virtual hard disk; the "root volume" is the one it boots from
+ *   snapshot         a point-in-time backup of an EBS volume
+ *   region / AZ      a city (ap-southeast-1 = Singapore) / one data centre in it (ap-southeast-1a)
+ *   VPC / subnet     the private network machines live on; every account has a
+ *                    ready-made "default VPC" per region with one subnet per AZ
+ *   security group   a firewall attached to a machine
+ *   user data        a script EC2 hands to the machine to run on first boot
+ *   spot instance    spare capacity sold cheaply; AWS can take it back at short notice
+ *
+ * KEY IDEAS
+ * ---------
+ * - REGIONS: everything in EC2 belongs to one region, so we keep one API
+ *   client per region (see ec2For()).
+ * - OUR INSTANCE ID is "region/instance-id", e.g. "ap-southeast-1/i-0abc123…",
+ *   because every later call (stop, start...) needs to know the region too.
+ *   Snapshot ids work the same way: "ap-southeast-1/snap-0abc…". Bare
+ *   "i-…"/"snap-…" ids (from older records) are assumed to be in the
+ *   default region.
+ * - AVAILABILITY ZONES: GPUs sell out per zone, so launching tries each zone
+ *   of the region in turn (via the default VPC's subnet in that zone) until
+ *   one works.
+ * - WAITING: AWS calls return straight away and the work finishes later.
+ *   The SDK's `waitFor('instanceRunning', ...)` polls until the machine
+ *   reaches that state (or gives up and throws).
+ * - NO SSH: the machine configures itself with the shared setup script
+ *   (shared/setupScript.ts), passed as EC2 "user data". We watch its
+ *   progress through the machine's serial console (GetConsoleOutput).
+ * - CHATTY: every step calls this.report(...), which (when a reporter is
+ *   attached) writes a line into the operation log the frontend shows live.
  *
  * HOW AWS SDK v2 CALLS LOOK
  * -------------------------
- *   await this.ec2.stopInstances({ InstanceIds: [id] }).promise();
+ *   await ec2.stopInstances({ InstanceIds: [id] }).promise();
  * You call a method with a parameters object, then `.promise()` turns the
- * request into a Promise so you can `await` the result. (SDK v2 is now
- * end-of-life — AWS recommends v3 — but it still works.)
+ * request into a Promise you can `await`. (SDK v2 is in maintenance mode —
+ * AWS recommends v3 — but it's what's installed and it works fine.)
  *
- * ⚠️  KNOWN GAPS
- * -------------
- * - restoreFromSnapshot creates a disk from the snapshot but never attaches
- *   it (see the TODO), and launches with an empty image id, which AWS will
- *   reject. Restoring doesn't work end-to-end yet.
- * - replicateSnapshot creates its own EC2 client WITHOUT the user's access
- *   keys, so it relies on whatever AWS credentials the server itself has.
+ * CREDENTIALS SHAPE
+ * -----------------
+ *   { accessKeyId: 'AKIA…', secretAccessKey: '…', region?: 'ap-southeast-1' }
+ * The region is optional: each call gets its region from the machine's id
+ * or from the launch form. The secret is never logged or returned.
  * ============================================================================
  */
 
+import crypto from 'crypto';
 import AWS from 'aws-sdk';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
 import { RegionData } from '../types';
+import { AWS_CONSOLE, FriendlyCloudError, isAwsCapacityError, toFriendlyError } from './aws/errors';
+import {
+  AWS_REGIONS,
+  AWS_SHAPES,
+  DEFAULT_REGION,
+  UBUNTU_NAME_PATTERN,
+  UBUNTU_OWNER,
+  estimateHourly,
+  findRegion,
+  findShape,
+} from './aws/catalog';
+import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
+import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+
+/** The parsed, checked credentials. */
+export interface AwsCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  region?: string;
+}
+
+/** Our status words (see Provider.ts). */
+type Status = 'starting' | 'running' | 'stopping' | 'stopped' | 'terminated' | 'unknown';
+
+/** Is this a "does not exist" error from AWS? */
+function isNotFound(error: any): boolean {
+  return /\.NotFound$|NotFound|does not exist/i.test(String(error?.code)) ||
+    /does not exist|not found/i.test(String(error?.message));
+}
+
+/** AWS "tags" for everything we create: a Name plus our app label. */
+function tags(name: string, extra: Record<string, string> = {}): AWS.EC2.TagList {
+  return [
+    { Key: 'Name', Value: name },
+    { Key: RESOURCE_TAG.key, Value: RESOURCE_TAG.value },
+    ...Object.entries(extra).map(([Key, Value]) => ({ Key, Value })),
+  ];
+}
 
 export class AWSProvider extends CloudProvider {
-  // `as const` makes the type the exact text 'aws' rather than any string,
-  // which is what the CloudProvider contract requires.
+  // `as const` makes the type the exact text 'aws' rather than any string.
   name = 'aws' as const;
+  // We install Sunshine ourselves via user data — MachineService must not SSH in.
+  readonly selfConfiguring = true;
 
-  // `private` = only usable inside this class. These are the SDK "clients"
-  // (objects that send requests to one AWS service each).
-  private ec2: AWS.EC2;                  // virtual machines, disks, snapshots
-  private pricing: AWS.Pricing;          // official price list
-  private costExplorer: AWS.CostExplorer; // what you've actually been billed
-  private region: string;
+  /** Region used when an id doesn't say (old records) and for account-wide calls. */
+  readonly defaultRegion: string;
+
+  private readonly creds: AwsCredentials;
+  // One EC2 client per region, created on first use (see ec2For()).
+  private readonly ec2Clients = new Map<string, AWS.EC2>();
+
+  /**
+   * Turn whatever was stored into checked credentials, or throw a friendly
+   * error explaining exactly what's missing.
+   */
+  static parseCredentials(raw: any): AwsCredentials {
+    // .trim() removes spaces/newlines that sneak in when copying from a browser.
+    const accessKeyId = String(raw?.accessKeyId ?? '').trim();
+    const secretAccessKey = String(raw?.secretAccessKey ?? '').trim();
+    if (!accessKeyId || !secretAccessKey) {
+      throw new FriendlyCloudError({
+        code: 'AWS_KEY_MISSING',
+        title: 'AWS access key ID or secret is missing',
+        explanation: 'Both halves of an AWS access key are needed: the access key ID (starts with "AKIA") and its secret access key.',
+        fixes: [
+          'In the AWS console open IAM → Users → your user → "Security credentials" → "Create access key".',
+          'Choose "Application running outside AWS", then copy BOTH values (the secret is shown only once).',
+          'On the Config page here, add the AWS credentials again with both values.',
+        ],
+        consoleUrl: AWS_CONSOLE.iamUsers,
+        consoleLabel: 'Open IAM users',
+      });
+    }
+    const region = raw?.region ? String(raw.region).trim() : undefined;
+    return { accessKeyId, secretAccessKey, region };
+  }
 
   /**
    * @param credentials this user's AWS details: { accessKeyId, secretAccessKey, region? }
-   *   (loaded from the cloud_credentials table by the service layer)
+   *   (loaded and decrypted by the service layer)
    */
   constructor(credentials: any) {
     super(); // must call the parent class's constructor first
-    // Initialize AWS services
-    // Credentials are decrypted in the service layer and passed here
-    // (Note: no decryption actually happens yet — they're stored as plain JSON.)
-    this.region = credentials.region || 'ap-southeast-1';
+    this.creds = AWSProvider.parseCredentials(credentials);
+    this.defaultRegion = this.creds.region || DEFAULT_REGION;
+  }
 
-    // Settings shared by the clients: which region, and whose account.
-    const awsConfig = {
-      region: this.region,
-      accessKeyId: credentials.accessKeyId,
-      secretAccessKey: credentials.secretAccessKey,
+  // ==========================================================================
+  // Helpers
+  // ==========================================================================
+
+  /** Settings shared by every AWS client: whose account, which region. */
+  private clientConfig(region: string): AWS.EC2.ClientConfiguration {
+    return {
+      region,
+      accessKeyId: this.creds.accessKeyId,
+      secretAccessKey: this.creds.secretAccessKey,
+      maxRetries: 3, // the SDK retries throttling/network blips itself
     };
-
-    this.ec2 = new AWS.EC2(awsConfig);
-    // The Pricing API only exists in a couple of US regions, whatever region
-    // you're asking about — hence the hard-coded us-east-1.
-    this.pricing = new AWS.Pricing({ region: 'us-east-1' }); // Pricing API only in US
-    this.costExplorer = new AWS.CostExplorer(awsConfig);
   }
 
-  /**
-   * Create and start a new gaming VM.
-   */
-  async launchInstance(config: ProviderConfig, options: LaunchOptions) {
-    try {
-      // Describe the machine we want. The type annotation
-      // `AWS.EC2.RunInstancesRequest` lets TypeScript check every field name.
-      const params: AWS.EC2.RunInstancesRequest = {
-        ImageId: options.imageId,              // which AMI to boot (our Packer-built gaming image)
-        InstanceType: config.instanceType as any, // e.g. 'g4dn.xlarge' (4 CPUs + NVIDIA T4 GPU)
-        MinCount: 1,                           // create exactly one machine
-        MaxCount: 1,
-        KeyName: options.keyName,              // SSH key pair allowed to log in
-        SecurityGroupIds: [options.securityGroupId], // firewall rules
-        // Spot pricing only if requested; otherwise leave the field out
-        // (undefined) to get normal on-demand pricing.
-        InstanceMarketOptions: options.spotInstance ? {
-          MarketType: 'spot',
-          SpotOptions: {
-            MaxPrice: '0.50', // the most we'll pay per hour; Will be overridden with actual spot price
-            SpotInstanceType: 'persistent', // keep the request alive if AWS reclaims the machine
-          },
-        } : undefined,
-        // Tags are labels shown in the AWS console; they make it obvious
-        // which machines this app created.
-        TagSpecifications: [
-          {
-            ResourceType: 'instance',
-            Tags: [
-              { Key: 'Name', Value: `cloudgaming-${Date.now()}` },
-              { Key: 'ManagedBy', Value: 'CloudGamingHub' },
-            ],
-          },
-        ],
-      };
-
-      const result = await this.ec2.runInstances(params).promise();
-
-      // `?.[0]` = "the first item, if the list exists" — avoids a crash if
-      // AWS returned no Instances list at all.
-      const instance = result.Instances?.[0];
-
-      if (!instance) {
-        throw new Error('Failed to create instance');
-      }
-
-      // Look up the hourly price so we can show and track costs.
-      const costPerHour = await this.getInstanceCost(config.region, config.instanceType, false);
-
-      return {
-        // `!` asserts "this is definitely set" — a new instance always has an id.
-        instanceId: instance.InstanceId!,
-        // A brand-new instance often has no public IP yet, hence the fallbacks.
-        ipAddress: instance.PublicIpAddress || instance.PrivateIpAddress || '',
-        costPerHour: costPerHour.onDemandPrice,
-      };
-    } catch (error) {
-      console.error('AWS launch error:', error);
-      // Re-throw with context so the caller's error message says what failed.
-      throw new Error(`Failed to launch AWS instance: ${error}`);
+  /** The EC2 client for one region (created once, then reused). */
+  private ec2For(region: string): AWS.EC2 {
+    let client = this.ec2Clients.get(region);
+    if (!client) {
+      client = new AWS.EC2(this.clientConfig(region));
+      this.ec2Clients.set(region, client);
     }
+    return client;
   }
 
-  /** Power off (the disk is kept). */
-  async stopInstance(instanceId: string): Promise<void> {
-    try {
-      await this.ec2.stopInstances({ InstanceIds: [instanceId] }).promise();
-    } catch (error) {
-      console.error('AWS stop error:', error);
-      throw new Error(`Failed to stop instance: ${error}`);
-    }
+  /** "ap-southeast-1/i-0abc" -> { region: 'ap-southeast-1', id: 'i-0abc' } */
+  private splitId(fullId: string): { region: string; id: string } {
+    const slash = fullId.indexOf('/');
+    if (slash === -1) return { region: this.defaultRegion, id: fullId }; // older bare ids
+    const region = fullId.slice(0, slash);
+    const id = fullId.slice(slash + 1);
+    if (!region || !id) throw new Error(`Not an AWS id (expected "region/id"): ${fullId}`);
+    return { region, id };
   }
 
-  /** Power back on. */
-  async startInstance(instanceId: string): Promise<void> {
+  /** Look up one instance, or undefined if AWS says it doesn't exist. */
+  private async describeInstance(region: string, instanceId: string): Promise<AWS.EC2.Instance | undefined> {
     try {
-      await this.ec2.startInstances({ InstanceIds: [instanceId] }).promise();
-    } catch (error) {
-      console.error('AWS start error:', error);
-      throw new Error(`Failed to start instance: ${error}`);
-    }
-  }
-
-  /** Destroy permanently. */
-  async terminateInstance(instanceId: string): Promise<void> {
-    try {
-      await this.ec2.terminateInstances({ InstanceIds: [instanceId] }).promise();
-    } catch (error) {
-      console.error('AWS terminate error:', error);
-      throw new Error(`Failed to terminate instance: ${error}`);
-    }
-  }
-
-  /**
-   * Current state + IP address. Never throws: on any problem it answers
-   * 'unknown' so callers don't have to handle errors for a status check.
-   */
-  async getInstanceStatus(instanceId: string) {
-    try {
-      const result = await this.ec2.describeInstances({ InstanceIds: [instanceId] }).promise();
+      const result = await this.ec2For(region).describeInstances({ InstanceIds: [instanceId] }).promise();
       // AWS groups instances into "reservations" (the request that launched
       // them), so the instance is nested one level deep.
-      const instance = result.Reservations?.[0]?.Instances?.[0];
-
-      if (!instance) {
-        return { status: 'unknown' as const };
-      }
-
-      // AWS has more states (pending, stopping, shutting-down...). We map the
-      // three we care about; anything else becomes 'unknown'.
-      const stateMap: Record<string, 'running' | 'stopped' | 'terminated' | 'unknown'> = {
-        'running': 'running',
-        'stopped': 'stopped',
-        'terminated': 'terminated',
-      };
-
-      return {
-        status: stateMap[instance.State?.Name || 'unknown'] || 'unknown',
-        ipAddress: instance.PublicIpAddress || instance.PrivateIpAddress,
-      };
+      return result.Reservations?.[0]?.Instances?.[0];
     } catch (error) {
-      console.error('AWS status error:', error);
-      return { status: 'unknown' as const };
+      if (isNotFound(error)) return undefined;
+      throw error;
     }
   }
 
   /**
-   * Back up a machine's disk.
-   * Steps: find the instance -> find its disk (EBS volume) -> read the disk's
-   * size -> ask AWS to snapshot that disk.
-   * Note: `diskPath` is accepted to match the contract but unused — AWS
-   * snapshots a whole volume, not a folder.
+   * Find the region's DEFAULT VPC and its default subnets (one per
+   * availability zone). Throws a friendly "how to create one" error if the
+   * user deleted it.
    */
-  async createSnapshot(instanceId: string, diskPath: string) {
-    try {
-      // Get the EBS volume attached to the instance
-      const instanceDesc = await this.ec2.describeInstances({ InstanceIds: [instanceId] }).promise();
-      const instance = instanceDesc.Reservations?.[0]?.Instances?.[0];
-
-      if (!instance?.BlockDeviceMappings?.[0]) {
-        throw new Error('No EBS volume found');
-      }
-
-      // BlockDeviceMappings = the disks attached to the machine. We take the
-      // first one (the boot disk, where the games are installed).
-      const volumeId = instance.BlockDeviceMappings[0].Ebs?.VolumeId;
-      if (!volumeId) {
-        throw new Error('Failed to get volume ID');
-      }
-
-      // Read the disk's size (for cost estimates).
-      const volumeDesc = await this.ec2.describeVolumes({ VolumeIds: [volumeId] }).promise();
-      const sizeGb = volumeDesc.Volumes?.[0]?.Size || 0;
-
-      // Start the snapshot. AWS returns immediately with an id; the copy
-      // itself completes in the background (can take minutes for large disks).
-      const snapshot = await this.ec2.createSnapshot({
-        VolumeId: volumeId,
-        Description: `Snapshot for ${instanceId}`,
-        TagSpecifications: [
-          {
-            ResourceType: 'snapshot',
-            Tags: [
-              { Key: 'ManagedBy', Value: 'CloudGamingHub' },
-              { Key: 'SourceInstance', Value: instanceId },
-            ],
-          },
+  private async getDefaultVpc(region: string): Promise<{ vpcId: string; subnets: Array<{ subnetId: string; zone: string }> }> {
+    const ec2 = this.ec2For(region);
+    const vpcs = await ec2.describeVpcs({ Filters: [{ Name: 'is-default', Values: ['true'] }] }).promise();
+    const vpcId = vpcs.Vpcs?.[0]?.VpcId;
+    if (!vpcId) {
+      throw new FriendlyCloudError({
+        code: 'AWS_NO_DEFAULT_VPC',
+        title: `No default VPC (network) in ${region}`,
+        explanation:
+          'Machines are created in the region\'s "default VPC" — the ready-made network every AWS account gets. It has been deleted in this region.',
+        fixes: [
+          `In the AWS console, switch the region (top right) to ${region}, open VPC → "Your VPCs" → Actions → "Create default VPC".`,
+          `Or with the AWS CLI: aws ec2 create-default-vpc --region ${region}`,
+          'Then try again.',
         ],
-      }).promise();
-
-      return {
-        snapshotId: snapshot.SnapshotId!,
-        sizeGb,
-      };
-    } catch (error) {
-      console.error('AWS snapshot error:', error);
-      throw new Error(`Failed to create snapshot: ${error}`);
-    }
-  }
-
-  /** Look up one snapshot's size and state. */
-  async getSnapshot(snapshotId: string): Promise<SnapshotInfo> {
-    try {
-      const result = await this.ec2.describeSnapshots({ SnapshotIds: [snapshotId] }).promise();
-      const snapshot = result.Snapshots?.[0];
-
-      if (!snapshot) {
-        throw new Error('Snapshot not found');
-      }
-
-      return {
-        id: snapshot.SnapshotId!,
-        sizeGb: snapshot.VolumeSize || 0,
-        state: snapshot.State || 'unknown',
-      };
-    } catch (error) {
-      console.error('AWS get snapshot error:', error);
-      throw new Error(`Failed to get snapshot: ${error}`);
-    }
-  }
-
-  /** Permanently delete a snapshot. */
-  async deleteSnapshot(snapshotId: string): Promise<void> {
-    try {
-      await this.ec2.deleteSnapshot({ SnapshotId: snapshotId }).promise();
-    } catch (error) {
-      console.error('AWS delete snapshot error:', error);
-      throw new Error(`Failed to delete snapshot: ${error}`);
-    }
-  }
-
-  /**
-   * Bring a machine back from a snapshot.
-   * ⚠️ INCOMPLETE — see KNOWN GAPS at the top of this file.
-   * The intended sequence: make a disk from the snapshot -> wait for it ->
-   * launch a machine -> attach the disk. The last step isn't written yet.
-   */
-  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig) {
-    try {
-      // Confirms the snapshot exists (throws if not). The result isn't used further.
-      const snapshot = await this.getSnapshot(snapshotId);
-
-      // Create a new disk whose contents are the snapshot.
-      const volume = await this.ec2.createVolume({
-        SnapshotId: snapshotId,
-        AvailabilityZone: `${this.region}a`, // Assume first AZ (a disk lives in ONE data centre)
-        TagSpecifications: [
-          {
-            ResourceType: 'volume',
-            Tags: [
-              { Key: 'ManagedBy', Value: 'CloudGamingHub' },
-              { Key: 'RestoredFrom', Value: snapshotId },
-            ],
-          },
-        ],
-      }).promise();
-
-      // `waitFor` polls AWS until the disk reaches the 'available' state.
-      await this.ec2.waitFor('volumeAvailable', { VolumeIds: [volume.VolumeId!] }).promise();
-
-      // Launch instance
-      const launchResult = await this.launchInstance(config, {
-        imageId: '', // Will be ignored; we'll attach the volume instead (actually: AWS rejects an empty image id)
-        keyName: '',
-        securityGroupId: '',
+        consoleUrl: `https://${region}.console.aws.amazon.com/vpcconsole/home?region=${region}#vpcs:`,
+        consoleLabel: 'Open VPCs',
       });
+    }
+    const subnets = await ec2.describeSubnets({
+      Filters: [
+        { Name: 'vpc-id', Values: [vpcId] },
+        { Name: 'default-for-az', Values: ['true'] },
+      ],
+    }).promise();
+    const list = (subnets.Subnets || [])
+      .filter((s) => s.SubnetId && s.AvailabilityZone)
+      .map((s) => ({ subnetId: s.SubnetId!, zone: s.AvailabilityZone! }))
+      .sort((a, b) => a.zone.localeCompare(b.zone)); // try zones a, b, c… in order
+    if (!list.length) {
+      throw new FriendlyCloudError({
+        code: 'AWS_NO_DEFAULT_SUBNET',
+        title: `The default VPC in ${region} has no subnets`,
+        explanation: 'The default network exists but its per-zone subnets were deleted, so there is nowhere to put a machine.',
+        fixes: [`With the AWS CLI, recreate one per zone: aws ec2 create-default-subnet --availability-zone ${region}a --region ${region} (repeat for b, c).`],
+        consoleUrl: `https://${region}.console.aws.amazon.com/vpcconsole/home?region=${region}#subnets:`,
+        consoleLabel: 'Open subnets',
+      });
+    }
+    return { vpcId, subnets: list };
+  }
 
-      // TODO: Attach the restored volume to the instance
-      // This is a multi-step process that requires careful handling
+  /**
+   * Make sure the security group (firewall) that opens the streaming ports
+   * exists in this VPC, and return its id. Created once per region.
+   */
+  private async ensureSecurityGroup(region: string, vpcId: string): Promise<string> {
+    const ec2 = this.ec2For(region);
+    const existing = await ec2.describeSecurityGroups({
+      Filters: [
+        { Name: 'group-name', Values: [STREAMING_FIREWALL_NAME] },
+        { Name: 'vpc-id', Values: [vpcId] },
+      ],
+    }).promise();
+    const found = existing.SecurityGroups?.[0]?.GroupId;
+    if (found) {
+      await this.report('info', `Security group "${STREAMING_FIREWALL_NAME}" already exists (${found}) — streaming ports are open.`);
+      return found;
+    }
 
-      return {
-        instanceId: launchResult.instanceId,
-        ipAddress: launchResult.ipAddress,
+    const portText = SUNSHINE_PORT_RANGES
+      .map((p) => `${p.protocol.toUpperCase()} ${p.from === p.to ? p.from : `${p.from}-${p.to}`}`)
+      .join(', ');
+    await this.report('info', `Creating security group "${STREAMING_FIREWALL_NAME}" to open the streaming ports (one-time per region)…`, portText);
+    const created = await ec2.createSecurityGroup({
+      GroupName: STREAMING_FIREWALL_NAME,
+      Description: 'CloudGaming Hub: Sunshine/Moonlight streaming ports',
+      VpcId: vpcId,
+      TagSpecifications: [{ ResourceType: 'security-group', Tags: tags(STREAMING_FIREWALL_NAME) }],
+    }).promise();
+    const groupId = created.GroupId!;
+
+    // One "ingress" (incoming) rule per port range, open to the whole
+    // internet (0.0.0.0/0) — you play from wherever you are. Sunshine's admin
+    // page (47990) is password-protected. Outgoing traffic is allowed by default.
+    await ec2.authorizeSecurityGroupIngress({
+      GroupId: groupId,
+      IpPermissions: SUNSHINE_PORT_RANGES.map((p) => ({
+        IpProtocol: p.protocol,
+        FromPort: p.from,
+        ToPort: p.to,
+        IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'Sunshine / Moonlight' }],
+      })),
+    }).promise();
+    await this.report('success', `Security group created (${groupId}).`);
+    return groupId;
+  }
+
+  /**
+   * The newest official Ubuntu 22.04 image in this region. AMI ids are
+   * different in every region and change with each Ubuntu update, so we
+   * search by Canonical's account id + the image name pattern.
+   */
+  async findUbuntuAmi(region: string): Promise<{ imageId: string; name: string; rootDeviceName: string }> {
+    const result = await this.ec2For(region).describeImages({
+      Owners: [UBUNTU_OWNER],
+      Filters: [
+        { Name: 'name', Values: [UBUNTU_NAME_PATTERN] },
+        { Name: 'architecture', Values: ['x86_64'] },
+        { Name: 'state', Values: ['available'] },
+      ],
+    }).promise();
+    // CreationDate is ISO text ("2026-08-14T10:22:31.000Z"), so sorting the
+    // text newest-first also sorts by date.
+    const images = (result.Images || []).sort((a, b) => String(b.CreationDate).localeCompare(String(a.CreationDate)));
+    const newest = images[0];
+    if (!newest?.ImageId) {
+      throw new FriendlyCloudError({
+        code: 'AWS_NO_UBUNTU_IMAGE',
+        title: `Couldn't find the Ubuntu 22.04 image in ${region}`,
+        explanation: 'Canonical publishes Ubuntu images in every standard AWS region, so this usually means the region isn\'t enabled for your account.',
+        fixes: ['Pick a different region, or enable this one under your AWS account settings → AWS Regions.'],
+        consoleUrl: AWS_CONSOLE.accountRegions,
+        consoleLabel: 'Open account settings',
+      });
+    }
+    return { imageId: newest.ImageId, name: newest.Name || newest.ImageId, rootDeviceName: newest.RootDeviceName || '/dev/sda1' };
+  }
+
+  /**
+   * Which availability zones of the region actually offer this instance
+   * type? Saves trying zones that can never work. Returns undefined if the
+   * lookup itself fails (then we just try every zone).
+   */
+  private async zonesOffering(region: string, instanceType: string): Promise<Set<string> | undefined> {
+    try {
+      const result = await this.ec2For(region).describeInstanceTypeOfferings({
+        LocationType: 'availability-zone',
+        Filters: [{ Name: 'instance-type', Values: [instanceType] }],
+      }).promise();
+      return new Set((result.InstanceTypeOfferings || []).map((o) => String(o.Location)));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Check the shape and region are ones we support; throw friendly errors if not. */
+  private checkShapeAndRegion(config: ProviderConfig) {
+    const shape = findShape(config.instanceType);
+    if (!shape) {
+      throw new FriendlyCloudError({
+        code: 'UNKNOWN_SHAPE',
+        title: `Unknown machine type "${config.instanceType}"`,
+        explanation: 'This machine type isn\'t one CloudGaming Hub knows how to launch on AWS.',
+        fixes: [`Choose one of: ${AWS_SHAPES.map((s) => `${s.id} (${s.label})`).join(', ')}.`],
+      });
+    }
+    const region = findRegion(config.region);
+    if (!region) {
+      throw new FriendlyCloudError({
+        code: 'UNKNOWN_REGION',
+        title: `Unsupported region "${config.region}"`,
+        explanation: 'We only launch in AWS regions that offer NVIDIA T4 (g4dn) or A10G (g5) machines.',
+        fixes: [`Choose one of: ${AWS_REGIONS.map((r) => `${r.name} (${r.id})`).join(', ')}.`],
+      });
+    }
+    if (!region.gpus.includes(shape.gpuModel)) {
+      throw new FriendlyCloudError({
+        code: 'GPU_NOT_IN_REGION',
+        title: `${shape.gpuModel} GPUs aren't offered in ${region.name}`,
+        explanation: `AWS doesn't sell ${shape.id} machines in ${region.id}.`,
+        fixes: [`Pick a ${region.gpus.join(' or ')} machine, or another region.`],
+      });
+    }
+    return { shape, region };
+  }
+
+  /**
+   * Create one machine, trying each availability zone of the region until
+   * one works. Shared by launchInstance (fresh Ubuntu disk) and
+   * restoreFromSnapshot (boots from a temporary image made from a snapshot).
+   */
+  private async createMachine(
+    config: ProviderConfig,
+    options: {
+      spot: boolean;
+      diskSizeGb: number;
+      sunshineUsername: string;
+      sunshinePassword: string;
+      /** Boot from this image instead of the newest Ubuntu (used by restore). */
+      image?: { imageId: string; rootDeviceName: string; label: string };
+    }
+  ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
+    const { shape, region } = this.checkShapeAndRegion(config);
+    const ec2 = this.ec2For(region.id);
+
+    await this.report('info', `${shape.id} (${shape.label}) · ${region.name} (${region.id}) · ${options.diskSizeGb} GB disk` +
+      `${options.spot ? ' · SPOT (cheaper, can be interrupted)' : ''}`);
+
+    // 1. Network + firewall.
+    await this.report('info', `Looking up the default network (VPC) in ${region.id}…`);
+    const vpc = await this.getDefaultVpc(region.id);
+    const groupId = await this.ensureSecurityGroup(region.id, vpc.vpcId);
+
+    // 2. Which disk image to boot.
+    let image = options.image;
+    if (!image) {
+      await this.report('info', 'Finding the newest official Ubuntu 22.04 image…');
+      const ubuntu = await this.findUbuntuAmi(region.id);
+      image = { imageId: ubuntu.imageId, rootDeviceName: ubuntu.rootDeviceName, label: ubuntu.name };
+      await this.report('info', `Using ${ubuntu.imageId} (${ubuntu.name}).`);
+    }
+
+    // 3. Which zones to try: only those that offer this machine type.
+    const offering = await this.zonesOffering(region.id, shape.id);
+    let subnets = vpc.subnets;
+    if (offering) {
+      subnets = vpc.subnets.filter((s) => offering.has(s.zone));
+      if (!subnets.length) {
+        throw new FriendlyCloudError({
+          code: 'AWS_TYPE_NOT_IN_REGION',
+          title: `${shape.id} isn't offered in any zone of ${region.name} for your account`,
+          explanation: 'AWS lists no availability zone in this region that sells this machine type.',
+          fixes: ['Pick a different machine type (g4dn is the most widely available), or another region.'],
+        });
+      }
+      await this.report('info', `${shape.id} is offered in: ${subnets.map((s) => s.zone).join(', ')}.`);
+    }
+
+    // 4. The setup script, handed over as "user data". EC2 wants it base64-encoded.
+    const userData = Buffer.from(buildSetupScript({
+      sunshineUsername: options.sunshineUsername,
+      sunshinePassword: options.sunshinePassword,
+    })).toString('base64');
+
+    // A short unique name, shown in the AWS console's Name column.
+    const name = `cg-${crypto.randomBytes(4).toString('hex')}`;
+    const zoneErrors: string[] = [];
+
+    for (const subnet of subnets) {
+      await this.report('info', `Trying zone ${subnet.zone}…`);
+
+      const params: AWS.EC2.RunInstancesRequest = {
+        ImageId: image.imageId,
+        InstanceType: shape.id,
+        MinCount: 1, // exactly one machine
+        MaxCount: 1,
+        UserData: userData,
+        // The network card: in this zone's subnet, behind our security
+        // group, WITH a public IP (needed to stream to you).
+        NetworkInterfaces: [{
+          DeviceIndex: 0,
+          SubnetId: subnet.subnetId,
+          Groups: [groupId],
+          AssociatePublicIpAddress: true,
+          DeleteOnTermination: true,
+        }],
+        // The boot disk: gp3 SSD of the requested size, deleted with the
+        // machine, encrypted with your account's default AWS key.
+        BlockDeviceMappings: [{
+          DeviceName: image.rootDeviceName,
+          Ebs: {
+            VolumeSize: options.diskSizeGb,
+            VolumeType: 'gp3',
+            DeleteOnTermination: true,
+            ...(options.image ? {} : { Encrypted: true }), // a snapshot image keeps its own encryption setting
+          },
+        }],
+        // "shutdown" from inside the machine just stops it (keeps the disk).
+        InstanceInitiatedShutdownBehavior: 'stop',
+        // Require the safer "IMDSv2" for the machine's metadata service.
+        MetadataOptions: { HttpTokens: 'required', HttpEndpoint: 'enabled' },
+        TagSpecifications: [
+          { ResourceType: 'instance', Tags: tags(name) },
+          { ResourceType: 'volume', Tags: tags(name) },
+        ],
+        // Spot: 'persistent' + 'stop' means that if AWS takes the capacity
+        // back, the machine is STOPPED (disk kept) rather than deleted, and
+        // can be started again later — the same settings CloudyPad uses.
+        ...(options.spot
+          ? {
+              InstanceMarketOptions: {
+                MarketType: 'spot',
+                SpotOptions: { SpotInstanceType: 'persistent', InstanceInterruptionBehavior: 'stop' },
+              },
+            }
+          : {}),
       };
+
+      let instanceId: string | undefined;
+      try {
+        const result = await ec2.runInstances(params).promise();
+        instanceId = result.Instances?.[0]?.InstanceId;
+        if (!instanceId) throw new Error('AWS accepted the request but returned no instance id');
+        await this.report('info', `AWS accepted the request — ${instanceId} is booting in ${subnet.zone} (usually 20–90 s)…`);
+      } catch (error: any) {
+        if (isAwsCapacityError(error)) {
+          const friendly = toFriendlyError(error, 'aws');
+          zoneErrors.push(`${subnet.zone}: ${error.code || ''} ${error.message}`);
+          await this.report('warn', `${subnet.zone}: ${friendly.code === 'AWS_NO_CAPACITY' ? 'no spare GPUs right now' : friendly.title} — trying the next zone.`, error.message);
+          continue;
+        }
+        // Quota, permission, credentials... would fail in every zone: stop now.
+        throw error;
+      }
+
+      // Wait for "running". Checks every 5 s for up to 5 minutes.
+      try {
+        await ec2.waitFor('instanceRunning', { InstanceIds: [instanceId], $waiter: { delay: 5, maxAttempts: 60 } }).promise();
+      } catch (waitError: any) {
+        // The machine didn't reach "running". Spot/capacity problems can show
+        // up here (the instance is created, then immediately terminated) — in
+        // that case try the next zone; anything else is a real failure.
+        const instance = await this.describeInstance(region.id, instanceId).catch(() => undefined);
+        const reason = instance?.StateReason?.Message || waitError?.message || 'unknown reason';
+        if (isAwsCapacityError(reason)) {
+          zoneErrors.push(`${subnet.zone}: ${reason}`);
+          await this.report('warn', `${subnet.zone}: AWS couldn't place the machine (${reason}) — trying the next zone.`);
+          await ec2.terminateInstances({ InstanceIds: [instanceId] }).promise().catch(() => undefined);
+          continue;
+        }
+        throw new Error(`Machine ${instanceId} did not start: ${reason}`);
+      }
+
+      const instance = await this.describeInstance(region.id, instanceId);
+      const ipAddress = instance?.PublicIpAddress || '';
+      await this.report('success', `Machine ${name} (${instanceId}) is running in ${subnet.zone}${ipAddress ? ` with public IP ${ipAddress}` : ''}.`);
+      await this.report('info', 'It now installs the NVIDIA driver, desktop, Sunshine and Steam by itself (about 10–15 minutes, with one reboot).');
+      return {
+        instanceId: `${region.id}/${instanceId}`,
+        ipAddress,
+        costPerHour: estimateHourly(shape.id, region.id, options.spot),
+      };
+    }
+
+    // Every zone failed with a zone-specific problem.
+    throw new Error(`InsufficientInstanceCapacity in all zones of ${region.id}: ${zoneErrors.join(' | ')}`);
+  }
+
+  // ==========================================================================
+  // The CloudProvider contract
+  // ==========================================================================
+
+  async launchInstance(
+    config: ProviderConfig,
+    options: LaunchOptions
+  ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
+    // options.imageId / keyName / securityGroupId are legacy fields: we pick
+    // the image and firewall ourselves, and there's no SSH key (no SSH).
+    return this.createMachine(config, {
+      spot: !!options.spotInstance,
+      diskSizeGb: options.diskSizeGb || 150,
+      sunshineUsername: options.sunshineUsername || 'gamer',
+      sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
+    });
+  }
+
+  async stopInstance(instanceId: string): Promise<void> {
+    const { region, id } = this.splitId(instanceId);
+    const ec2 = this.ec2For(region);
+    await this.report('info', `Asking AWS to stop ${id} (compute billing stops; the disk is kept)…`);
+    await ec2.stopInstances({ InstanceIds: [id] }).promise();
+    await this.report('info', 'Waiting for it to finish shutting down (usually under a minute)…');
+    await ec2.waitFor('instanceStopped', { InstanceIds: [id] }).promise();
+    await this.report('success', `${id} is stopped.`);
+  }
+
+  async startInstance(instanceId: string): Promise<void> {
+    const { region, id } = this.splitId(instanceId);
+    const ec2 = this.ec2For(region);
+    await this.report('info', `Asking AWS to start ${id}…`);
+    await ec2.startInstances({ InstanceIds: [id] }).promise();
+    await ec2.waitFor('instanceRunning', { InstanceIds: [id] }).promise();
+    await this.report('success', `${id} is running. (Its public IP has probably changed — we'll read the new one.)`);
+  }
+
+  async terminateInstance(instanceId: string): Promise<void> {
+    const { region, id } = this.splitId(instanceId);
+    const ec2 = this.ec2For(region);
+
+    const instance = await this.describeInstance(region, id);
+    if (!instance || instance.State?.Name === 'terminated') {
+      await this.report('warn', `${id} was already gone at AWS (deleted elsewhere?). Cleaning up our record.`);
+      return;
+    }
+
+    // A PERSISTENT spot request would launch a replacement machine after we
+    // delete this one, so cancel the request first.
+    if (instance.SpotInstanceRequestId) {
+      await this.report('info', `Cancelling spot request ${instance.SpotInstanceRequestId} so AWS doesn't relaunch the machine…`);
+      try {
+        await ec2.cancelSpotInstanceRequests({ SpotInstanceRequestIds: [instance.SpotInstanceRequestId] }).promise();
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+      }
+    }
+
+    await this.report('info', `Asking AWS to terminate ${id} and delete its disk…`);
+    try {
+      await ec2.terminateInstances({ InstanceIds: [id] }).promise();
+      await ec2.waitFor('instanceTerminated', { InstanceIds: [id] }).promise();
+      await this.report('success', `${id} terminated — it no longer costs anything.`);
     } catch (error) {
-      console.error('AWS restore error:', error);
-      throw new Error(`Failed to restore from snapshot: ${error}`);
+      if (isNotFound(error)) {
+        await this.report('warn', `${id} was already gone at AWS. Cleaning up our record.`);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async getInstanceStatus(instanceId: string): Promise<{ status: Status; ipAddress?: string }> {
+    const { region, id } = this.splitId(instanceId);
+    const instance = await this.describeInstance(region, id);
+    if (!instance) return { status: 'terminated' };
+    // AWS's states -> ours.
+    const map: Record<string, Status> = {
+      pending: 'starting',
+      running: 'running',
+      stopping: 'stopping',
+      'shutting-down': 'stopping', // on its way to terminated
+      stopped: 'stopped',
+      terminated: 'terminated',
+    };
+    return {
+      status: map[String(instance.State?.Name)] || 'unknown',
+      ipAddress: instance.PublicIpAddress || undefined,
+    };
+  }
+
+  async createSnapshot(instanceId: string, _diskPath: string): Promise<{ snapshotId: string; sizeGb: number }> {
+    // AWS snapshots a whole disk, not a folder, so diskPath isn't used. Our
+    // machines have one disk — the root (boot) volume — and we snapshot it.
+    const { region, id } = this.splitId(instanceId);
+    const ec2 = this.ec2For(region);
+    const instance = await this.describeInstance(region, id);
+    if (!instance) throw new Error(`InvalidInstanceID.NotFound: ${id} doesn't exist in ${region}`);
+
+    const rootMapping = (instance.BlockDeviceMappings || []).find((m) => m.DeviceName === instance.RootDeviceName)
+      || instance.BlockDeviceMappings?.[0];
+    const volumeId = rootMapping?.Ebs?.VolumeId;
+    if (!volumeId) throw new Error(`Couldn't find the disk of ${id}`);
+
+    const volumes = await ec2.describeVolumes({ VolumeIds: [volumeId] }).promise();
+    const sizeGb = volumes.Volumes?.[0]?.Size || 0;
+
+    await this.report('info', `Snapshotting the ${sizeGb} GB disk of ${id} (games and settings included)…`,
+      'Stopping the machine first gives the most reliable snapshot.');
+    const snap = await ec2.createSnapshot({
+      VolumeId: volumeId,
+      Description: `CloudGaming Hub snapshot of ${id}`,
+      TagSpecifications: [{ ResourceType: 'snapshot', Tags: tags(`cg-snap-${id}`, { SourceInstance: id }) }],
+    }).promise();
+    const snapshotId = snap.SnapshotId!;
+
+    // The first snapshot of a disk copies everything and can take a while;
+    // wait up to ~20 minutes (checking every 15 s), then carry on regardless.
+    await this.report('info', `Snapshot ${snapshotId} started — waiting for AWS to finish copying (first snapshots of big disks can take 10+ minutes)…`);
+    try {
+      await ec2.waitFor('snapshotCompleted', { SnapshotIds: [snapshotId], $waiter: { delay: 15, maxAttempts: 80 } }).promise();
+      await this.report('success', `Snapshot ${snapshotId} is complete.`);
+    } catch {
+      await this.report('warn', `Snapshot ${snapshotId} is still in progress at AWS. It will finish on its own — check its state later.`);
+    }
+    return { snapshotId: `${region}/${snapshotId}`, sizeGb };
+  }
+
+  async getSnapshot(snapshotId: string): Promise<SnapshotInfo> {
+    const { region, id } = this.splitId(snapshotId);
+    const result = await this.ec2For(region).describeSnapshots({ SnapshotIds: [id] }).promise();
+    const snap = result.Snapshots?.[0];
+    if (!snap) throw new Error(`InvalidSnapshot.NotFound: ${id} doesn't exist in ${region}`);
+    const state = String(snap.State);
+    return {
+      id: snapshotId,
+      sizeGb: snap.VolumeSize || 0,
+      state: state === 'completed' ? 'completed' : state === 'error' ? 'failed' : 'pending',
+    };
+  }
+
+  async deleteSnapshot(snapshotId: string): Promise<void> {
+    const { region, id } = this.splitId(snapshotId);
+    await this.report('info', `Deleting snapshot ${id} in ${region}…`);
+    try {
+      await this.ec2For(region).deleteSnapshot({ SnapshotId: id }).promise();
+      await this.report('success', `Snapshot ${id} deleted.`);
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      await this.report('warn', `Snapshot ${id} was already gone at AWS.`);
     }
   }
 
   /**
-   * Copy a snapshot to another AWS region (e.g. Singapore -> Tokyo) so a
-   * machine can later be restored closer to the player.
-   * Only AWS -> AWS is supported; converting another cloud's disk format
-   * into an AWS snapshot is not built.
+   * Create a new machine whose disk starts as a copy of a snapshot.
+   *
+   * AWS won't let you swap the root disk's snapshot when launching from an
+   * ordinary image, so we: (1) register a temporary private image (AMI)
+   * whose root disk IS the snapshot, (2) launch from it, (3) delete the
+   * temporary image again (the snapshot itself is kept). If the snapshot is
+   * in another region we first copy it there.
    */
+  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig): Promise<{ instanceId: string; ipAddress: string }> {
+    let { region: snapRegion, id: snapId } = this.splitId(snapshotId);
+    const region = config.region || snapRegion;
+
+    if (snapRegion !== region) {
+      await this.report('info', `The snapshot is in ${snapRegion}; copying it to ${region} first…`);
+      const copy = await this.replicateSnapshot(snapshotId, 'aws', snapRegion, region);
+      snapId = this.splitId(copy.snapshotId).id;
+      snapRegion = region;
+    }
+
+    const ec2 = this.ec2For(region);
+    await this.report('info', `Checking snapshot ${snapId} is ready…`);
+    await ec2.waitFor('snapshotCompleted', { SnapshotIds: [snapId], $waiter: { delay: 15, maxAttempts: 120 } }).promise();
+    const snaps = await ec2.describeSnapshots({ SnapshotIds: [snapId] }).promise();
+    const sizeGb = snaps.Snapshots?.[0]?.VolumeSize || 150;
+
+    // 1. Temporary image whose root disk is the snapshot.
+    const rootDeviceName = '/dev/sda1'; // what Ubuntu images use
+    await this.report('info', `Registering a temporary machine image from snapshot ${snapId}…`);
+    const registered = await ec2.registerImage({
+      Name: `cg-restore-${snapId}-${Date.now()}`,
+      Description: 'CloudGaming Hub temporary restore image (safe to delete)',
+      Architecture: 'x86_64',
+      VirtualizationType: 'hvm',
+      EnaSupport: true, // g4dn/g5 need the ENA network driver flag
+      RootDeviceName: rootDeviceName,
+      BlockDeviceMappings: [{
+        DeviceName: rootDeviceName,
+        Ebs: { SnapshotId: snapId, VolumeType: 'gp3', DeleteOnTermination: true },
+      }],
+    }).promise();
+    const imageId = registered.ImageId!;
+
+    try {
+      await ec2.waitFor('imageAvailable', { ImageIds: [imageId] }).promise();
+      // 2. Launch from it. A fresh Sunshine login is generated; the setup
+      //    script runs again (cloud-init runs user data for every NEW
+      //    machine), skips what's already installed, and sets the new login.
+      const { instanceId, ipAddress } = await this.createMachine({ ...config, region }, {
+        spot: false,
+        diskSizeGb: sizeGb,
+        sunshineUsername: 'gamer',
+        sunshinePassword: crypto.randomBytes(12).toString('base64url'),
+        image: { imageId, rootDeviceName, label: `restore of ${snapId}` },
+      });
+      return { instanceId, ipAddress };
+    } finally {
+      // 3. The running machine no longer needs the image.
+      await ec2.deregisterImage({ ImageId: imageId }).promise()
+        .then(() => this.report('info', `Removed the temporary image ${imageId} (your snapshot is kept).`))
+        .catch(() => this.report('warn', `Couldn't remove temporary image ${imageId} — delete it under EC2 → AMIs if you like (it costs nothing extra).`));
+    }
+  }
+
   async replicateSnapshot(
     sourceSnapshotId: string,
     sourceProvider: string,
@@ -350,225 +756,214 @@ export class AWSProvider extends CloudProvider {
     targetRegion: string
   ): Promise<{ snapshotId: string }> {
     if (sourceProvider !== 'aws') {
-      throw new Error(
-        `Cross-cloud snapshot import from ${sourceProvider} is not implemented yet`
-      );
-    }
-
-    try {
-      // CopySnapshot is called against the destination region's endpoint
-      // (the copy is "pulled" into the target region). ⚠️ This client is
-      // created without the user's access keys — see KNOWN GAPS.
-      const destEc2 = new AWS.EC2({ region: targetRegion });
-      const result = await destEc2.copySnapshot({
-        SourceRegion: sourceRegion,
-        SourceSnapshotId: sourceSnapshotId,
-        DestinationRegion: targetRegion,
-        Description: `Replicated from ${sourceRegion}`,
-      }).promise();
-
-      if (!result.SnapshotId) {
-        throw new Error('Copy snapshot did not return a snapshot ID');
-      }
-
-      return { snapshotId: result.SnapshotId };
-    } catch (error) {
-      console.error('AWS replicate snapshot error:', error);
-      throw new Error(`Failed to replicate snapshot: ${error}`);
-    }
-  }
-
-  /**
-   * List all AWS regions. Location and prices are placeholders (zeros) —
-   * AWS's region list doesn't include them.
-   */
-  async getRegions(): Promise<RegionData[]> {
-    try {
-      const result = await this.ec2.describeRegions().promise();
-
-      // `.map` converts each AWS region record into our RegionData shape.
-      // `|| []` handles AWS returning no list at all.
-      const regions: RegionData[] = result.Regions?.map(r => ({
-        provider: 'aws',
-        name: r.RegionName || '',
-        region: r.RegionName || '',
-        lat: 0, // TODO: Add region coordinates
-        lng: 0,
-        spotPrice: 0, // Will be queried separately
-        onDemandPrice: 0,
-        egressCostPerGb: this.getEgressCostByRegion(r.RegionName || ''),
-      })) || [];
-
-      return regions;
-    } catch (error) {
-      console.error('AWS regions error:', error);
-      throw new Error(`Failed to list regions: ${error}`);
-    }
-  }
-
-  /**
-   * Hourly price for a machine type, from AWS's official Pricing API.
-   * Filters for Windows pricing, since the gaming machines run Windows
-   * (Windows machines cost more than Linux ones — the licence is included).
-   * If the lookup fails, returns $0.50/hour as a safe estimate instead of
-   * failing the whole launch.
-   */
-  async getInstanceCost(
-    region: string,
-    instanceType: string,
-    spot?: boolean
-  ): Promise<{ onDemandPrice: number; spotPrice?: number }> {
-    try {
-      // The Pricing API wants a location NAME ("Asia Pacific (Singapore)"),
-      // not a region code, hence regionToLocation().
-      const pricingResult = await this.pricing.getProducts({
-        ServiceCode: 'AmazonEC2',
-        Filters: [
-          {
-            Field: 'location',
-            Value: this.regionToLocation(region),
-            Type: 'TERM_MATCH',
-          },
-          {
-            Field: 'instanceType',
-            Value: instanceType,
-            Type: 'TERM_MATCH',
-          },
-          {
-            Field: 'operatingSystem',
-            Value: 'Windows',
-            Type: 'TERM_MATCH',
-          },
-        ],
-      }).promise();
-
-      let onDemandPrice = 0;
-
-      // AWS returns each price as a deeply nested JSON TEXT blob. We parse it
-      // and dig down: terms -> OnDemand -> (first term) -> priceDimensions ->
-      // (first dimension) -> pricePerUnit -> USD. Object.values(...)[0] grabs
-      // the first entry of an object whose keys are unpredictable ids.
-      if (pricingResult.PriceList && pricingResult.PriceList.length > 0) {
-        const pricing = JSON.parse(pricingResult.PriceList[0]);
-        const terms = pricing.terms?.OnDemand || {};
-        const term = Object.values(terms)[0] as any;
-        const priceDimensions = term?.priceDimensions || {};
-        const priceDim = Object.values(priceDimensions)[0] as any;
-        onDemandPrice = parseFloat(priceDim?.pricePerUnit?.USD || '0');
-      }
-
-      // TODO: Query spot price from EC2
-      // For now, estimate spot at 30% of the on-demand price.
-      const spotPrice = spot ? onDemandPrice * 0.3 : undefined;
-
-      return { onDemandPrice, spotPrice };
-    } catch (error) {
-      console.error('AWS pricing error:', error);
-      // Return fallback pricing
-      return { onDemandPrice: 0.5 };
-    }
-  }
-
-  /** Price per GB of data sent out to the internet in this region. */
-  async getEgressCostPerGb(region: string): Promise<number> {
-    // AWS egress costs vary by region
-    return this.getEgressCostByRegion(region);
-  }
-
-  /**
-   * What was actually spent, from AWS Cost Explorer. Groups charges by AWS
-   * service and sorts them into compute vs data-transfer. Returns zeros on
-   * failure rather than throwing.
-   * Note: this reports costs for the whole AWS ACCOUNT; `userId` is unused.
-   */
-  async queryCosts(userId: string, startDate: Date, endDate: Date) {
-    try {
-      const result = await this.costExplorer.getCostAndUsage({
-        TimePeriod: {
-          // Cost Explorer wants plain dates ("2026-09-27"). toISOString()
-          // gives "2026-09-27T06:07:34.777Z"; split('T')[0] keeps the date part.
-          Start: startDate.toISOString().split('T')[0],
-          End: endDate.toISOString().split('T')[0],
-        },
-        Granularity: 'DAILY',
-        Metrics: ['UnblendedCost'],             // the actual cost, before discounts are shared out
-        GroupBy: [
-          { Type: 'DIMENSION', Key: 'SERVICE' }, // one line per AWS service
-        ],
-      }).promise();
-
-      let computeCost = 0;
-      let egressCost = 0;
-
-      // Walk every day, and every service line within each day, adding the
-      // cost to the right bucket.
-      result.ResultsByTime?.forEach(timeResult => {
-        timeResult.Groups?.forEach(group => {
-          const service = group.Keys?.[0];
-          const cost = parseFloat(group.Metrics?.UnblendedCost?.Amount || '0');
-
-          if (service === 'Amazon Elastic Compute Cloud - Compute') {
-            computeCost += cost;
-          } else if (service?.includes('Data Transfer') || service?.includes('CloudFront')) {
-            egressCost += cost;
-          }
-        });
+      throw new FriendlyCloudError({
+        code: 'CROSS_CLOUD_UNSUPPORTED',
+        title: 'Copying snapshots from another cloud into AWS isn\'t supported yet',
+        explanation: 'Each cloud stores disks in its own format; converting between them isn\'t built yet.',
+        fixes: ['Launch a fresh machine on AWS instead.'],
       });
-
-      return {
-        computeCost,
-        egressCost,
-        storageCost: 0, // AWS includes this in compute for simplified reporting
-      };
-    } catch (error) {
-      console.error('AWS cost query error:', error);
-      return { computeCost: 0, egressCost: 0, storageCost: 0 };
     }
+    // The region inside our id wins; sourceRegion is the fallback for bare ids.
+    const parsed = this.splitId(sourceSnapshotId);
+    const fromRegion = sourceSnapshotId.includes('/') ? parsed.region : (sourceRegion || parsed.region);
+    if (fromRegion === targetRegion) return { snapshotId: `${fromRegion}/${parsed.id}` };
+
+    // CopySnapshot is sent to the DESTINATION region, which pulls the copy in.
+    // (The SDK signs the cross-region "presigned URL" part automatically.)
+    await this.report('info', `Copying snapshot ${parsed.id} from ${fromRegion} to ${targetRegion} (billed as data transfer between regions)…`);
+    const result = await this.ec2For(targetRegion).copySnapshot({
+      SourceRegion: fromRegion,
+      SourceSnapshotId: parsed.id,
+      Description: `CloudGaming Hub copy of ${parsed.id} from ${fromRegion}`,
+      TagSpecifications: [{ ResourceType: 'snapshot', Tags: tags(`cg-copy-${parsed.id}`, { SourceSnapshot: parsed.id, SourceRegion: fromRegion }) }],
+    }).promise();
+    if (!result.SnapshotId) throw new Error('AWS accepted the copy but returned no snapshot id');
+    await this.report('success', `Copy ${result.SnapshotId} started in ${targetRegion}; it becomes usable once AWS finishes copying.`);
+    return { snapshotId: `${targetRegion}/${result.SnapshotId}` };
+  }
+
+  async getRegions(): Promise<RegionData[]> {
+    return AWS_REGIONS.map((r) => ({
+      provider: 'aws',
+      name: r.name,
+      region: r.id,
+      lat: r.lat,
+      lng: r.lng,
+      onDemandPrice: estimateHourly('g4dn.xlarge', r.id),
+      spotPrice: estimateHourly('g4dn.xlarge', r.id, true),
+      egressCostPerGb: r.egressPerGb,
+    }));
+  }
+
+  async getInstanceCost(region: string, instanceType: string, spot?: boolean): Promise<{ onDemandPrice: number; spotPrice?: number }> {
+    return {
+      onDemandPrice: estimateHourly(instanceType, region),
+      spotPrice: spot ? estimateHourly(instanceType, region, true) : undefined,
+    };
+  }
+
+  async getEgressCostPerGb(region: string): Promise<number> {
+    return findRegion(region)?.egressPerGb ?? 0.12;
   }
 
   /**
-   * Do these credentials work? Makes the cheapest possible read-only call
-   * (list at most 1 instance). Success = valid; any error = invalid.
+   * What was actually spent, from AWS Cost Explorer, split into compute,
+   * data-out and storage by "usage type". Notes:
+   * - It covers the whole AWS ACCOUNT, not just our machines (userId is unused).
+   * - AWS charges $0.01 per Cost Explorer request, and data lags ~24 hours.
+   * - Cost Explorer must have been opened once in the console to switch it on.
    */
+  async queryCosts(_userId: string, startDate: Date, endDate: Date): Promise<{ computeCost: number; egressCost: number; storageCost: number }> {
+    // Cost Explorer only lives in us-east-1, whatever region you use.
+    const ce = new AWS.CostExplorer(this.clientConfig('us-east-1'));
+    const day = (d: Date) => d.toISOString().slice(0, 10); // "2026-09-27"
+    const start = day(startDate);
+    let end = day(endDate);
+    if (end <= start) end = day(new Date(startDate.getTime() + 24 * 3600 * 1000)); // End is exclusive and must be later
+
+    let computeCost = 0;
+    let egressCost = 0;
+    let storageCost = 0;
+    try {
+      let token: string | undefined;
+      do {
+        const result = await ce.getCostAndUsage({
+          TimePeriod: { Start: start, End: end },
+          Granularity: 'MONTHLY',
+          Metrics: ['UnblendedCost'],
+          GroupBy: [{ Type: 'DIMENSION', Key: 'USAGE_TYPE' }],
+          NextPageToken: token,
+        }).promise();
+        for (const period of result.ResultsByTime || []) {
+          for (const group of period.Groups || []) {
+            // Usage types look like "APS1-BoxUsage:g4dn.xlarge",
+            // "APS1-SpotUsage:g5.xlarge", "APS1-DataTransfer-Out-Bytes",
+            // "APS1-EBS:VolumeUsage.gp3", "APS1-EBS:SnapshotUsage".
+            const usage = String(group.Keys?.[0] || '');
+            const cost = parseFloat(group.Metrics?.UnblendedCost?.Amount || '0') || 0;
+            if (/BoxUsage|SpotUsage|DedicatedUsage/.test(usage)) computeCost += cost;
+            else if (/DataTransfer-Out|DataTransfer-Regional|AWS-Out-Bytes/.test(usage)) egressCost += cost;
+            else if (/EBS:/.test(usage)) storageCost += cost;
+          }
+        }
+        token = result.NextPageToken;
+      } while (token);
+    } catch (error: any) {
+      if (/DataUnavailable|not enabled|opt.?in/i.test(`${error?.code} ${error?.message}`)) {
+        throw new FriendlyCloudError({
+          code: 'AWS_COSTS_UNAVAILABLE',
+          title: 'AWS Cost Explorer isn\'t switched on yet',
+          explanation: 'Real spend comes from AWS Cost Explorer, which has to be opened once in the console before its data is available (up to 24 hours later).',
+          fixes: ['Open Cost Explorer in the AWS console once (button below), then try again tomorrow.', 'Until then, costs shown here are estimates from running time.'],
+          consoleUrl: AWS_CONSOLE.costExplorer,
+          consoleLabel: 'Open Cost Explorer',
+        });
+      }
+      throw error; // e.g. AccessDenied -> the AWS_PERMISSION card names ce:GetCostAndUsage
+    }
+    const round = (n: number) => Math.round(n * 100) / 100;
+    return { computeCost: round(computeCost), egressCost: round(egressCost), storageCost: round(storageCost) };
+  }
+
   async validateCredentials(): Promise<boolean> {
     try {
-      await this.ec2.describeInstances({ MaxResults: 1 }).promise();
+      await this.getCallerIdentity();
       return true;
-    } catch (error) {
-      console.error('AWS credential validation error:', error);
+    } catch (error: any) {
+      // Log only the error code/message — never the key itself.
+      console.error('[AWS] credential check failed:', error?.code || '', error?.message);
       return false;
     }
   }
 
-  // ---------------------------------------------------------------------
-  // Helper methods — `private`, only used inside this class.
-  // ---------------------------------------------------------------------
-
-  /** Region code -> the location name the Pricing API expects. */
-  private regionToLocation(region: string): string {
-    const locationMap: Record<string, string> = {
-      'ap-southeast-1': 'Asia Pacific (Singapore)',
-      'ap-northeast-1': 'Asia Pacific (Tokyo)',
-      'ap-southeast-2': 'Asia Pacific (Sydney)',
-      'us-east-1': 'US East (N. Virginia)',
-      'us-west-2': 'US West (Oregon)',
-      'eu-west-1': 'EU (Ireland)',
-    };
-    // Unknown region: pass the code through unchanged (the lookup will
-    // probably find nothing, and the $0.50 fallback kicks in).
-    return locationMap[region] || region;
+  /**
+   * Read the machine's serial console and extract the setup stages printed
+   * by the setup script. Returns [] if nothing is available yet (AWS may
+   * take a minute or two to start collecting console output).
+   */
+  async getSetupProgress(instanceId: string): Promise<SetupStage[]> {
+    try {
+      const { region, id } = this.splitId(instanceId);
+      // Latest: true = the most recent output (supported on Nitro machines like g4dn/g5).
+      const result = await this.ec2For(region).getConsoleOutput({ InstanceId: id, Latest: true }).promise();
+      const text = Buffer.from(result.Output || '', 'base64').toString('utf8');
+      return parseSetupStages(text);
+    } catch {
+      return [];
+    }
   }
 
-  /** Approximate egress price ($ per GB) by region; $0.12 if not listed. */
-  private getEgressCostByRegion(region: string): number {
-    const egressRates: Record<string, number> = {
-      'ap-southeast-1': 0.12,
-      'ap-northeast-1': 0.12,
-      'ap-southeast-2': 0.12,
-      'us-east-1': 0.09,
-      'us-west-2': 0.12,
-      'eu-west-1': 0.09,
+  // ==========================================================================
+  // AWS-specific extras (used by the credential checks and machine pages)
+  // ==========================================================================
+
+  /** Who does this key belong to? Throws if AWS rejects the key. */
+  async getCallerIdentity(): Promise<{ accountId: string; arn: string }> {
+    const sts = new AWS.STS(this.clientConfig(this.defaultRegion));
+    const who = await sts.getCallerIdentity({}).promise();
+    return { accountId: String(who.Account || ''), arn: String(who.Arn || '') };
+  }
+
+  /**
+   * Ask EC2 "WOULD this launch be allowed?" without launching anything
+   * (DryRun). AWS answers with an error either way: "DryRunOperation" means
+   * yes, "UnauthorizedOperation" means the key lacks permission.
+   * Returns 'allowed', or throws the real error.
+   */
+  async dryRunLaunch(region: string, instanceType = 'g4dn.xlarge'): Promise<'allowed'> {
+    const ami = await this.findUbuntuAmi(region);
+    try {
+      await this.ec2For(region).runInstances({
+        DryRun: true,
+        ImageId: ami.imageId,
+        InstanceType: instanceType,
+        MinCount: 1,
+        MaxCount: 1,
+      }).promise();
+      return 'allowed'; // (not expected: DryRun always "fails" one way or the other)
+    } catch (error: any) {
+      if (error?.code === 'DryRunOperation') return 'allowed';
+      throw error;
+    }
+  }
+
+  /** A Service Quotas value for EC2 in a region (e.g. 'L-DB2E81BA' = on-demand G and VT vCPUs). */
+  async getEc2Quota(region: string, quotaCode: string): Promise<number> {
+    const sq = new AWS.ServiceQuotas(this.clientConfig(region));
+    try {
+      const result = await sq.getServiceQuota({ ServiceCode: 'ec2', QuotaCode: quotaCode }).promise();
+      return Number(result.Quota?.Value) || 0;
+    } catch (error) {
+      // An account that never changed a quota may only have the AWS default.
+      if (/NoSuchResource/i.test(String((error as any)?.code))) {
+        const fallback = await sq.getAWSDefaultServiceQuota({ ServiceCode: 'ec2', QuotaCode: quotaCode }).promise();
+        return Number(fallback.Quota?.Value) || 0;
+      }
+      throw error;
+    }
+  }
+
+  /** Does this region have a default VPC to launch into? */
+  async hasDefaultVpc(region: string): Promise<boolean> {
+    const vpcs = await this.ec2For(region).describeVpcs({ Filters: [{ Name: 'is-default', Values: ['true'] }] }).promise();
+    return !!vpcs.Vpcs?.length;
+  }
+
+  /**
+   * The Sunshine admin login baked into the machine's user data, plus its
+   * IP. (User data is only readable with the user's own AWS key.)
+   */
+  async getConnectionInfo(instanceId: string): Promise<{ ipAddress: string; username?: string; password?: string; status: string }> {
+    const { region, id } = this.splitId(instanceId);
+    const ec2 = this.ec2For(region);
+    const instance = await this.describeInstance(region, id);
+    const attr = await ec2.describeInstanceAttribute({ InstanceId: id, Attribute: 'userData' }).promise();
+    const script = Buffer.from(attr.UserData?.Value || '', 'base64').toString('utf8');
+    return {
+      ipAddress: instance?.PublicIpAddress || '',
+      username: script.match(/^SUN_USER='([^']*)'/m)?.[1],
+      password: script.match(/^SUN_PASS='([^']*)'/m)?.[1],
+      status: String(instance?.State?.Name || 'terminated'),
     };
-    return egressRates[region] || 0.12;
   }
 }

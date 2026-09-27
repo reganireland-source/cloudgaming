@@ -1,0 +1,167 @@
+/**
+ * ============================================================================
+ * src/providers/gcp/catalog.ts — WHAT CAN BE LAUNCHED ON GOOGLE CLOUD, AND ~COST
+ * ============================================================================
+ *
+ * The launch form's choices come from here (via GET /api/machines/options):
+ *   - REGIONS: where Google offers T4 and/or L4 GPUs, with approximate
+ *     location (for "nearest to you") and price adjustments.
+ *   - SHAPES:  the machine sizes we offer. A "shape" = a Google machine type
+ *     plus (for N1 machines) an attached GPU.
+ *
+ * ABOUT THE PRICES
+ * ----------------
+ * These are ESTIMATES in US dollars per hour, based on Google's published
+ * us-central1 on-demand list prices, scaled by a per-region factor. Real
+ * prices vary by region, change over time, and exclude tax/discounts. Spot
+ * prices move daily; we assume ~40% of on-demand. The UI labels them "≈".
+ * For exact numbers use https://cloud.google.com/products/calculator.
+ * (Reading live prices needs the Cloud Billing Catalog API — a possible
+ * future improvement.)
+ * ============================================================================
+ */
+
+export interface GcpShape {
+  id: string;               // our id, stored in machines.instance_type
+  label: string;            // shown in the launch form
+  machineType: string;      // Google's machine type name
+  gpuType?: string;         // accelerator to attach (N1 only; G2 has its GPU built in)
+  gpuModel: 'T4' | 'L4';
+  gpuQuotaMetric: string;   // the regional quota that must be ≥ 1
+  vcpus: number;
+  memoryGb: number;
+  usCentralOnDemand: number; // $/hour, machine + GPU, us-central1
+  bestFor: string;
+}
+
+export const GCP_SHAPES: GcpShape[] = [
+  {
+    id: 'n1-standard-4+t4',
+    label: 'T4 · 4 vCPU · 15 GB RAM',
+    machineType: 'n1-standard-4',
+    gpuType: 'nvidia-tesla-t4',
+    gpuModel: 'T4',
+    gpuQuotaMetric: 'NVIDIA_T4_GPUS',
+    vcpus: 4,
+    memoryGb: 15,
+    usCentralOnDemand: 0.19 + 0.35,
+    bestFor: 'Indie, esports and older AAA games at 1080p60. Cheapest option.',
+  },
+  {
+    id: 'n1-standard-8+t4',
+    label: 'T4 · 8 vCPU · 30 GB RAM',
+    machineType: 'n1-standard-8',
+    gpuType: 'nvidia-tesla-t4',
+    gpuModel: 'T4',
+    gpuQuotaMetric: 'NVIDIA_T4_GPUS',
+    vcpus: 8,
+    memoryGb: 30,
+    usCentralOnDemand: 0.38 + 0.35,
+    bestFor: 'CPU-heavy games (strategy, simulators) at 1080p60.',
+  },
+  {
+    id: 'g2-standard-4',
+    label: 'L4 · 4 vCPU · 16 GB RAM',
+    machineType: 'g2-standard-4',
+    gpuModel: 'L4',
+    gpuQuotaMetric: 'NVIDIA_L4_GPUS',
+    vcpus: 4,
+    memoryGb: 16,
+    usCentralOnDemand: 0.71,
+    bestFor: 'Modern AAA games at 1440p60. About 2–3× a T4\'s gaming performance.',
+  },
+  {
+    id: 'g2-standard-8',
+    label: 'L4 · 8 vCPU · 32 GB RAM',
+    machineType: 'g2-standard-8',
+    gpuModel: 'L4',
+    gpuQuotaMetric: 'NVIDIA_L4_GPUS',
+    vcpus: 8,
+    memoryGb: 32,
+    usCentralOnDemand: 0.85,
+    bestFor: 'Demanding AAA games at 1440p–4K60.',
+  },
+];
+
+export interface GcpRegion {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  zones: string[];          // zone letters to try, in order
+  gpus: Array<'T4' | 'L4'>; // GPU models Google offers here
+  priceFactor: number;      // multiplier vs us-central1 (approximate)
+  egressPerGb: number;      // $/GB to the internet, premium tier, first TB (approximate)
+}
+
+export const GCP_REGIONS: GcpRegion[] = [
+  { id: 'asia-southeast1', name: 'Singapore', lat: 1.35, lng: 103.82, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.23, egressPerGb: 0.12 },
+  { id: 'australia-southeast1', name: 'Sydney', lat: -33.87, lng: 151.21, zones: ['a', 'b', 'c'], gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.19 },
+  { id: 'asia-northeast1', name: 'Tokyo', lat: 35.68, lng: 139.69, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.29, egressPerGb: 0.12 },
+  { id: 'asia-south1', name: 'Mumbai', lat: 19.08, lng: 72.88, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'us-central1', name: 'Iowa', lat: 41.26, lng: -95.86, zones: ['a', 'b', 'c', 'f'], gpus: ['T4', 'L4'], priceFactor: 1.0, egressPerGb: 0.12 },
+  { id: 'us-west1', name: 'Oregon', lat: 45.6, lng: -121.18, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.0, egressPerGb: 0.12 },
+  { id: 'us-east4', name: 'N. Virginia', lat: 39.04, lng: -77.49, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.12, egressPerGb: 0.12 },
+  { id: 'europe-west4', name: 'Netherlands', lat: 53.44, lng: 6.84, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.1, egressPerGb: 0.12 },
+  { id: 'europe-west2', name: 'London', lat: 51.51, lng: -0.13, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+];
+
+export const DEFAULT_REGION = 'asia-southeast1';
+
+/** Disk prices, $/GB/month (approximate). */
+export const BALANCED_DISK_PER_GB_MONTH = 0.11;
+export const SNAPSHOT_PER_GB_MONTH = 0.029;
+
+/** Rough spot discount: spot ≈ 40% of on-demand. */
+export const SPOT_FACTOR = 0.4;
+
+/** Boot disk: Ubuntu 22.04 LTS, the OS our setup script is written for. */
+export const BOOT_IMAGE = 'projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts';
+
+/** Firewall rule + network tag that open the streaming ports. */
+export const FIREWALL_RULE_NAME = 'cloudgaming-sunshine';
+export const NETWORK_TAG = 'cloudgaming-sunshine';
+
+/**
+ * Ports used by Sunshine (the streaming server on the machine) and
+ * Moonlight (the app you play on). 47990 is Sunshine's web admin page.
+ */
+export { SUNSHINE_TCP_PORTS, SUNSHINE_UDP_PORTS } from '../shared/streaming';
+
+export function findShape(id: string): GcpShape | undefined {
+  return GCP_SHAPES.find((s) => s.id === id);
+}
+
+export function findRegion(id: string): GcpRegion | undefined {
+  return GCP_REGIONS.find((r) => r.id === id);
+}
+
+/** Estimated $/hour for a shape in a region. */
+export function estimateHourly(shapeId: string, regionId: string, spot = false): number {
+  const shape = findShape(shapeId);
+  const region = findRegion(regionId);
+  if (!shape) return 0;
+  const onDemand = shape.usCentralOnDemand * (region?.priceFactor ?? 1.2);
+  const price = spot ? onDemand * SPOT_FACTOR : onDemand;
+  return Math.round(price * 1000) / 1000; // 3 decimal places
+}
+
+// ---------------------------------------------------------------------------
+// The generic catalog the launch form reads (see shared/types.ts)
+// ---------------------------------------------------------------------------
+import type { ProviderCatalog } from '../shared/types';
+
+export const GCP_CATALOG: ProviderCatalog = {
+  provider: 'gcp',
+  label: 'Google Cloud',
+  supportsSpot: true,
+  spotLabel: 'Spot VM',
+  defaultRegion: DEFAULT_REGION,
+  defaultDiskGb: 150,
+  minDiskGb: 50,
+  regions: GCP_REGIONS.map((r) => ({ id: r.id, name: r.name, lat: r.lat, lng: r.lng, gpus: r.gpus, egressPerGb: r.egressPerGb })),
+  shapes: GCP_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
+  estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
+  diskPerGbMonth: BALANCED_DISK_PER_GB_MONTH,
+  priceNote: 'Estimates from Google\'s list prices (±15%); excludes tax and discounts. Spot prices move daily.',
+};
