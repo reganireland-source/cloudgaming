@@ -306,7 +306,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=1
+APPS_VERSION=2
 APPS_IMAGE="gggh/sunshine-apps:$APPS_VERSION-$(echo "$SUNSHINE_IMAGE" | awk -F: '{print $NF}')"
 
 cat > "$SUN_DIR/project/docker-compose.yml" <<COMPOSE
@@ -387,10 +387,12 @@ RUN apt-get update \
       && chown root:root /opt/Discord/chrome-sandbox && chmod 4755 /opt/Discord/chrome-sandbox \
       || echo "WARNING: Discord skipped" ) \
  && rm -f /tmp/discord.tar.gz && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Battle.net icon for the dock/menu (best-effort; falls back to Lutris's).
+RUN curl -fsL -o /usr/share/pixmaps/battlenet.png https://lutris.net/games/icon/battlenet.png || echo "WARNING: Battle.net icon skipped"
 COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
 COPY add-apps.py /tmp/add-apps.py
 RUN chmod 755 /cloudy/bin/battlenet-start.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
- && chown -R cloudy:cloudy /cloudy/bin /cloudy/conf/sunshine
+ && chown -R cloudy:cloudy /cloudy/bin /cloudy/conf/sunshine /cloudy/conf/xfce4-default
 DOCKERFILE
 
 # Battle.net has no Linux version: it runs through Lutris (Wine). First
@@ -399,16 +401,31 @@ DOCKERFILE
 # prefix live in /home/cloudy/Games, which is kept on the machine's disk.
 cat > "$SUN_DIR/project/battlenet-start.sh" <<'BNET'
 #!/bin/bash
-if lutris --list-games --installed --json 2>/dev/null | grep -Eq '"slug": ?"battlenet"'; then
-  exec lutris lutris:rungame/battlenet
+# Same preparation as CloudyPad's lutris-start.sh: wait for the desktop's
+# X server and join its D-Bus session, or Lutris can't open a window.
+wait-x-availability.sh
+source export-dbus-address.sh
+LUTRIS=/usr/games/lutris
+if "$LUTRIS" --list-games --installed --json 2>/dev/null | grep -Eq '"slug": ?"battlenet"'; then
+  exec "$LUTRIS" lutris:rungame/battlenet
 else
-  exec lutris lutris:battlenet
+  exec "$LUTRIS" lutris:battlenet
 fi
 BNET
 
-# Add Chrome, Discord and Battle.net to the apps Moonlight shows.
+# Add Chrome, Discord and Battle.net to the apps Moonlight shows, to the
+# desktop's dock (next to Lutris) and to the app menu. Runs once, while
+# the image is built.
 cat > "$SUN_DIR/project/add-apps.py" <<'PY'
-import json
+import json, os
+BNET_ICON = "/usr/share/pixmaps/battlenet.png" if os.path.exists("/usr/share/pixmaps/battlenet.png") else "/usr/share/icons/hicolor/128x128/apps/net.lutris.Lutris.png"
+installed = {
+    "Google Chrome": os.path.exists("/usr/bin/google-chrome"),
+    "Discord": os.path.exists("/opt/Discord/Discord"),
+    "Battle.net": True,
+}
+
+# ---- 1. Moonlight's app list (Sunshine apps.json)
 path = "/cloudy/conf/sunshine/apps.json"
 with open(path) as f:
     cfg = json.load(f)
@@ -424,17 +441,58 @@ extra = [
         "sh -c \"google-chrome --start-maximized > /tmp/chrome-start.log 2>&1\""),
     app("Discord", "/opt/Discord/discord.png",
         "sh -c \"discord > /tmp/discord-start.log 2>&1\""),
-    app("Battle.net", "$(XDG_CONFIG_HOME)/sunshine/assets/lutris.png",
+    app("Battle.net", BNET_ICON,
         "sh -c \"battlenet-start.sh > /tmp/battlenet-start.log 2>&1\"",
         undo="sh -c \"lutris-stop.sh > /tmp/lutris-stop.log 2>&1\""),
 ]
-import os
-installed = {"Google Chrome": os.path.exists("/usr/bin/google-chrome"), "Discord": os.path.exists("/opt/Discord/Discord"), "Battle.net": True}
-extra = [a for a in extra if installed.get(a["name"], True)]
-names = {"Google Chrome", "Discord", "Battle.net"}
+extra = [a for a in extra if installed[a["name"]]]
+names = set(installed)
 cfg["apps"] = [a for a in cfg["apps"] if a.get("name") not in names] + extra
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
+
+# ---- 2. Desktop entries (app menu) and dock launchers
+entries = {
+    # plugin id: (name, desktop file name, Exec, Icon, categories)
+    20: ("Battle.net", "battlenet.desktop", "battlenet-start.sh", BNET_ICON, "Game;"),
+    21: ("Discord", "discord.desktop", "discord", "/opt/Discord/discord.png", "Network;InstantMessaging;"),
+    22: ("Google Chrome", "google-chrome.desktop", "google-chrome", "google-chrome", "Network;WebBrowser;"),
+}
+entries = {pid: e for pid, e in entries.items() if installed[e[0]]}
+DEFAULT = "/cloudy/conf/xfce4-default"
+for pid, (name, fname, exe, icon, cats) in entries.items():
+    body = ("[Desktop Entry]\nName=%s\nExec=%s\nIcon=%s\nTerminal=false\nType=Application\nCategories=%s\nStartupNotify=false\n"
+            % (name, exe, icon, cats))
+    if fname != "google-chrome.desktop":          # Chrome's package installs its own menu entry
+        with open("/usr/share/applications/" + fname, "w") as f:
+            f.write(body)
+    d = "%s/panel/launcher-%d" % (DEFAULT, pid)
+    os.makedirs(d, exist_ok=True)
+    with open(d + "/" + fname, "w") as f:
+        f.write(body)
+
+panel = DEFAULT + "/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
+with open(panel) as f:
+    xml = f.read()
+anchor_ids = '<value type="int" value="12"/>'                    # Lutris, in the dock order
+anchor_plugins = '<property name="plugin-98" type="string" value="separator"/>'
+if entries and anchor_ids in xml and anchor_plugins in xml and 'name="plugin-20"' not in xml:
+    ids = "".join('\n        <value type="int" value="%d"/>' % pid for pid in entries)
+    xml = xml.replace(anchor_ids, anchor_ids + ids, 1)
+    plugins = "".join(
+        '<property name="plugin-%d" type="string" value="launcher">\n'
+        '      <property name="items" type="array">\n'
+        '        <value type="string" value="%s"/>\n'
+        '      </property>\n'
+        '    </property>\n    ' % (pid, e[1]) for pid, e in entries.items())
+    xml = xml.replace(anchor_plugins, plugins + anchor_plugins, 1)
+    with open(panel, "w") as f:
+        f.write(xml)
+    print("Dock: added " + ", ".join(e[0] for e in entries.values()))
+elif 'name="plugin-20"' in xml:
+    print("Dock: launchers already present")
+else:
+    print("WARNING: dock layout not recognised - apps are still in Moonlight and the app menu")
 PY
 
 cd "$SUN_DIR/project" || fail 60 "project directory missing"
