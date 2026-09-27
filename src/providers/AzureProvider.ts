@@ -67,12 +67,15 @@ import {
   AZURE_REGIONS,
   AZURE_SHAPES,
   OS_DISK_SKU,
+  PREMIUM_DISK_PER_GB_MONTH,
+  SNAPSHOT_PER_GB_MONTH,
   UBUNTU_IMAGE,
   estimateHourly,
   findRegion,
   findShape,
   resourceGroupFor,
 } from './azure/catalog';
+import type { InventoryItem } from './shared/types';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 
@@ -121,6 +124,83 @@ function partNames(vmName: string) {
 function parseArmId(id: string | undefined): { rg: string; name: string } | undefined {
   const m = String(id || '').match(/\/resourceGroups\/([^/]+)\/providers\/[^/]+\/[^/]+\/([^/]+)$/i);
   return m ? { rg: m[1], name: m[2] } : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Inventory helpers (used by listResources)
+// ---------------------------------------------------------------------------
+
+/** The prefix of every resource group we create (see resourceGroupFor in azure/catalog.ts). */
+const RG_PREFIX = 'cloudgaming-hub-';
+
+/** A link to any resource in the Azure portal, from its full resource id. */
+function portalLink(id: string | undefined): string | undefined {
+  return id ? `https://portal.azure.com/#@/resource${id}` : undefined;
+}
+
+/** Read every page of one of the SDK's "list" results into a plain array. */
+async function collect<T>(pages: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = [];
+  for await (const item of pages) out.push(item);
+  return out;
+}
+
+/**
+ * Azure bills managed disks by SIZE TIER, rounded UP: a 150 GB disk is
+ * billed as the 256 GiB tier. These are the tier sizes (GiB) Azure uses for
+ * Premium SSD (P1…P80), Standard SSD (E1…E80) and Standard HDD (S4…S80).
+ */
+const DISK_TIERS_GB = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32767];
+
+/**
+ * Rough $/month for a managed disk: tier size × a per-GB rate by disk type.
+ * East US list prices, approximately:
+ *   - Premium SSD (Premium_LRS, what we create): ~$0.15/GB of the TIER
+ *     (256 GiB "P15" ≈ $38/month) — PREMIUM_DISK_PER_GB_MONTH in the catalog.
+ *   - Standard SSD: ~$0.075/GB of the tier (256 GiB "E15" ≈ $19).
+ *   - Standard HDD: ~$0.045/GB of the tier (plus per-transaction fees we ignore).
+ *   - Premium SSD v2 / Ultra: billed by the exact GB (plus IOPS/throughput we ignore).
+ *   - Zone-redundant (…_ZRS) copies cost about 1.5× the locally-redundant (…_LRS) ones.
+ * It's an ESTIMATE; the UI shows it with "≈".
+ */
+function estimateDiskMonthly(sizeGb: number, sku: string | undefined): number {
+  if (!sizeGb) return 0;
+  const name = String(sku || OS_DISK_SKU);
+  const tierGb = DISK_TIERS_GB.find((t) => t >= sizeGb) ?? sizeGb;
+  let cost: number;
+  if (/^PremiumV2|^UltraSSD/i.test(name)) cost = sizeGb * 0.12;        // exact size, no tiers
+  else if (/^Premium/i.test(name)) cost = tierGb * PREMIUM_DISK_PER_GB_MONTH;
+  else if (/^StandardSSD/i.test(name)) cost = tierGb * 0.075;
+  else cost = tierGb * 0.045;                                           // Standard_LRS = HDD
+  if (/_ZRS$/i.test(name)) cost *= 1.5;
+  return Math.round(cost * 100) / 100;
+}
+
+/** A Standard (static) public IPv4 address: ~$0.005/hour ≈ $3.65/month, attached or not. */
+const STATIC_IP_PER_MONTH = 3.65;
+
+/**
+ * The VM's power state in plain words, from the "PowerState/…" code in its
+ * instance view. Azure's special case: "stopped" means shut down but still
+ * ALLOCATED — still billed as if running — so we say so.
+ */
+function vmStatusWords(codes: string[], provisioningState?: string): string {
+  const power = codes.find((c) => c.startsWith('powerstate/'))?.split('/')[1];
+  switch (power) {
+    case 'running': return 'running';
+    case 'deallocated': return 'deallocated';
+    case 'deallocating': return 'deallocating';
+    case 'stopped': return 'stopped (still billed)';
+    case 'starting': return 'starting';
+    case 'stopping': return 'stopping';
+    case undefined: break;
+    default: return power;
+  }
+  const provisioning = codes.find((c) => c.startsWith('provisioningstate/'))?.split('/')[1] || String(provisioningState || '').toLowerCase();
+  if (provisioning === 'creating' || provisioning === 'updating') return 'creating';
+  if (provisioning === 'deleting') return 'deleting';
+  if (provisioning === 'failed') return 'failed';
+  return 'unknown';
 }
 
 /**
@@ -954,6 +1034,227 @@ export class AzureProvider extends CloudProvider {
       console.error('[Azure] credential check failed:', (error as Error).message);
       return false;
     }
+  }
+
+  // ==========================================================================
+  // Inventory (the infrastructure map)
+  // ==========================================================================
+
+  /**
+   * Everything we've created in this subscription, for the infrastructure
+   * map. We find our resource groups ("cloudgaming-hub-<location>", or any
+   * group tagged app=cloudgaming-hub) and list what's inside each one — all
+   * groups in parallel, and within a group all resource kinds in parallel:
+   *   - the resource group itself, the virtual network and the firewall (NSG)
+   *     — free;
+   *   - virtual machines, with their live power state and ≈ hourly price;
+   *   - managed disks (≈ monthly, billed even while the VM is deallocated);
+   *   - snapshots (≈ monthly);
+   *   - public IP addresses (a static IP ≈ $3.65/month, even when unused);
+   *   - network cards (free, but a leftover one is clutter).
+   *
+   * "ORPHANS" are leftovers not attached to any machine: a disk whose VM is
+   * gone, a public IP not plugged into anything, a network card without a
+   * VM, a snapshot whose original disk was deleted. They usually come from a
+   * machine deleted in the portal, or a launch that failed half-way.
+   *
+   * Nothing found → []. Login/permission problems are thrown (the caller
+   * explains them).
+   */
+  async listResources(): Promise<InventoryItem[]> {
+    // 1. Our resource groups, plus the live power state of every VM in the
+    //    subscription. "statusOnly" asks Azure for ONLY the power states, in
+    //    one paged call, instead of one call per machine. If that fails
+    //    (it's a nice-to-have) the VMs show as "unknown".
+    const [groups, powerStates] = await Promise.all([
+      collect(this.resources.resourceGroups.list()),
+      collect(this.compute.virtualMachines.listAll({ statusOnly: 'true' }))
+        .then((vms) => new Map(vms.map((vm) => [
+          String(vm.id || '').toLowerCase(),
+          (vm.instanceView?.statuses || []).map((st) => String(st.code || '').toLowerCase()),
+        ])))
+        .catch((error: unknown) => {
+          console.error('[Azure] Couldn\'t read VM power states:', (error as Error).message);
+          return new Map<string, string[]>();
+        }),
+    ]);
+    const ours = groups.filter((g) =>
+      String(g.name || '').toLowerCase().startsWith(RG_PREFIX) || g.tags?.[RESOURCE_TAG.key] === RESOURCE_TAG.value);
+    if (!ours.length) return [];
+
+    // 2. Everything inside each group, all at once. A group deleted while
+    //    we're looking (404) just comes back empty.
+    const perGroup = await Promise.all(ours.map(async (group) => {
+      const rg = String(group.name);
+      try {
+        const [vms, disks, snapshots, ips, nics, vnets, nsgs] = await Promise.all([
+          collect(this.compute.virtualMachines.list(rg)),
+          collect(this.compute.disks.listByResourceGroup(rg)),
+          collect(this.compute.snapshots.listByResourceGroup(rg)),
+          collect(this.network.publicIPAddresses.list(rg)),
+          collect(this.network.networkInterfaces.list(rg)),
+          collect(this.network.virtualNetworks.list(rg)),
+          collect(this.network.networkSecurityGroups.list(rg)),
+        ]);
+        return { group, rg, vms, disks, snapshots, ips, nics, vnets, nsgs };
+      } catch (error) {
+        if (isAzureNotFound(error)) return undefined;
+        throw error;
+      }
+    }));
+    const found = perGroup.filter((g): g is NonNullable<typeof g> => !!g);
+
+    // 3. Lookup tables across ALL groups (a disk's VM, or a snapshot's disk,
+    //    could in principle live in another of our groups).
+    //    Azure ids are case-insensitive — and Azure sometimes returns the
+    //    resource group in CAPITALS inside ids — so keys are lowercased.
+    //    VM full id → our instance id "resourceGroup/vmName" (as stored in machines.instance_id).
+    const vmInstanceIds = new Map<string, string>();
+    for (const g of found) for (const vm of g.vms) vmInstanceIds.set(String(vm.id).toLowerCase(), `${g.rg}/${vm.name}`);
+    const ourInstanceId = (vmId: string | undefined): string | undefined => {
+      if (!vmId) return undefined;
+      const known = vmInstanceIds.get(vmId.toLowerCase());
+      if (known) return known;
+      const ref = parseArmId(vmId); // a VM we didn't list (e.g. outside our groups)
+      return ref ? `${ref.rg.toLowerCase()}/${ref.name}` : undefined;
+    };
+    //    NIC full id → the VM it's plugged into (our format), for public IPs.
+    const nicToVm = new Map<string, string | undefined>();
+    for (const g of found) for (const nic of g.nics) nicToVm.set(String(nic.id).toLowerCase(), ourInstanceId(nic.virtualMachine?.id));
+    //    Every disk id we saw, and which groups we fully listed (for snapshot orphans).
+    const diskIds = new Set<string>();
+    for (const g of found) for (const d of g.disks) diskIds.add(String(d.id).toLowerCase());
+    const listedGroups = new Set(found.map((g) => g.rg.toLowerCase()));
+
+    // 4. Turn it all into map entries.
+    const items: InventoryItem[] = [];
+    const iso = (d: Date | undefined) => (d ? new Date(d).toISOString() : undefined);
+    for (const g of found) {
+      const groupRegion = String(g.group.location || '').toLowerCase() || 'global';
+      const regionOf = (location: string | undefined) => String(location || '').toLowerCase() || groupRegion;
+
+      // The resource group itself (free — just a folder).
+      items.push({
+        provider: 'azure', type: 'resource-group', id: String(g.group.id || g.rg), name: g.rg,
+        region: groupRegion, status: 'active', consoleUrl: portalLink(g.group.id),
+      });
+
+      // Virtual machines.
+      for (const vm of g.vms) {
+        const location = regionOf(vm.location);
+        const size = String(vm.hardwareProfile?.vmSize || '');
+        const codes = powerStates.get(String(vm.id).toLowerCase()) || [];
+        items.push({
+          provider: 'azure', type: 'vm', id: String(vm.id), name: String(vm.name),
+          region: location,
+          zone: vm.zones?.[0],
+          status: vmStatusWords(codes, vm.provisioningState),
+          instanceId: `${g.rg}/${vm.name}`,
+          hourlyCost: estimateHourly(size, location, vm.priority === 'Spot') || undefined,
+          consoleUrl: portalLink(vm.id),
+          createdAt: iso(vm.timeCreated),
+        });
+      }
+
+      // Managed disks. "managedBy" is the full id of the VM using it, if any.
+      for (const disk of g.disks) {
+        const sizeGb = Number(disk.diskSizeGB) || 0;
+        const attachedTo = ourInstanceId(disk.managedBy);
+        const state = String(disk.diskState || '');
+        const unattached = state === 'Unattached';
+        items.push({
+          provider: 'azure', type: 'disk', id: String(disk.id), name: String(disk.name),
+          region: regionOf(disk.location),
+          zone: disk.zones?.[0],
+          status: state ? state.toLowerCase() : 'unknown',   // 'attached', 'unattached', 'reserved' (VM deallocated)…
+          attachedTo,
+          sizeGb: sizeGb || undefined,
+          monthlyCost: estimateDiskMonthly(sizeGb, disk.sku?.name),
+          orphan: unattached || undefined,
+          orphanReason: unattached ? 'Disk not attached to any machine — still billed every month' : undefined,
+          consoleUrl: portalLink(disk.id),
+          createdAt: iso(disk.timeCreated),
+        });
+      }
+
+      // Snapshots. Priced on their full size — an overestimate for
+      // incremental snapshots, which only store the changed blocks.
+      for (const snap of g.snapshots) {
+        const sizeGb = Number(snap.diskSizeGB) || 0;
+        // Orphan if it was taken from a disk in one of OUR groups and that
+        // disk is gone. (Copies of snapshots, or disks elsewhere, can't be
+        // checked cheaply — not flagged.)
+        const source = String(snap.creationData?.sourceResourceId || '');
+        const sourceRef = /\/providers\/Microsoft\.Compute\/disks\//i.test(source) ? parseArmId(source) : undefined;
+        const sourceGone = !!sourceRef && listedGroups.has(sourceRef.rg.toLowerCase()) && !diskIds.has(source.toLowerCase());
+        const provisioning = String(snap.provisioningState || '').toLowerCase();
+        const copying = snap.completionPercent !== undefined && snap.completionPercent !== null && snap.completionPercent < 100;
+        items.push({
+          provider: 'azure', type: 'snapshot', id: String(snap.id), name: String(snap.name),
+          region: regionOf(snap.location),
+          status: provisioning === 'succeeded' ? (copying ? 'copying' : 'ready') : provisioning || 'unknown',
+          sizeGb: sizeGb || undefined,
+          monthlyCost: Math.round(sizeGb * SNAPSHOT_PER_GB_MONTH * 100) / 100,
+          orphan: sourceGone || undefined,
+          orphanReason: sourceGone ? `The disk it was taken from (${sourceRef!.name}) no longer exists` : undefined,
+          consoleUrl: portalLink(snap.id),
+          createdAt: iso(snap.timeCreated),
+        });
+      }
+
+      // Public IP addresses. Static ones (all of ours) are billed whether or
+      // not they're in use. "ipConfiguration" is set while one is plugged
+      // into a network card (…/networkInterfaces/NIC/ipConfigurations/ipconfig1).
+      for (const ip of g.ips) {
+        const configId = String(ip.ipConfiguration?.id || '');
+        const nicId = configId.toLowerCase().split('/ipconfigurations/')[0];
+        const attachedTo = configId ? nicToVm.get(nicId) : undefined;
+        const isStatic = ip.publicIPAllocationMethod === 'Static' || ip.sku?.name === 'Standard';
+        const monthlyCost = isStatic || configId ? STATIC_IP_PER_MONTH : 0; // an unused dynamic (Basic) IP costs nothing
+        const unused = !configId && monthlyCost > 0;
+        items.push({
+          provider: 'azure', type: 'public-ip', id: String(ip.id), name: `${ip.name}${ip.ipAddress ? ` (${ip.ipAddress})` : ''}`,
+          region: regionOf(ip.location),
+          zone: ip.zones?.length === 1 ? ip.zones[0] : undefined,
+          status: configId ? 'in-use' : 'available',
+          attachedTo,
+          monthlyCost,
+          orphan: unused || undefined,
+          orphanReason: unused ? 'Public IP not attached to any machine — still billed (~$3.65/month)' : undefined,
+          consoleUrl: portalLink(ip.id),
+        });
+      }
+
+      // Network cards (free, but a leftover one is clutter — and can keep a
+      // public IP "in use").
+      for (const nic of g.nics) {
+        const attachedTo = ourInstanceId(nic.virtualMachine?.id);
+        items.push({
+          provider: 'azure', type: 'nic', id: String(nic.id), name: String(nic.name),
+          region: regionOf(nic.location),
+          status: attachedTo ? 'in-use' : 'available',
+          attachedTo,
+          orphan: !attachedTo || undefined,
+          orphanReason: attachedTo ? undefined : 'Network card not attached to any machine (free, but a leftover)',
+          consoleUrl: portalLink(nic.id),
+        });
+      }
+
+      // The shared virtual network and firewall for this location (free).
+      for (const vnet of g.vnets) {
+        items.push({
+          provider: 'azure', type: 'network', id: String(vnet.id), name: String(vnet.name),
+          region: regionOf(vnet.location), status: 'active', consoleUrl: portalLink(vnet.id),
+        });
+      }
+      for (const nsg of g.nsgs) {
+        items.push({
+          provider: 'azure', type: 'firewall', id: String(nsg.id), name: String(nsg.name),
+          region: regionOf(nsg.location), status: 'active', consoleUrl: portalLink(nsg.id),
+        });
+      }
+    }
+    return items;
   }
 
   // ==========================================================================

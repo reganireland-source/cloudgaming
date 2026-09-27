@@ -11,6 +11,8 @@
   "dependencies": {
     "axios": "^1.6.0",
     "d3-geo": "^3.1.1",
+    "d3-selection": "^3.0.0",
+    "d3-zoom": "^3.0.0",
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -20,6 +22,8 @@
   },
   "devDependencies": {
     "@types/d3-geo": "^3.1.1",
+    "@types/d3-selection": "^3.0.12",
+    "@types/d3-zoom": "^3.0.8",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/topojson-client": "^3.1.5",

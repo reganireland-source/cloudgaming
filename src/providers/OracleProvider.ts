@@ -57,6 +57,8 @@ import { RegionData } from '../types';
 import { FriendlyCloudError, toFriendlyError } from './errors';
 import { isOracleAdSpecificError, isOracleCapacityError } from './oracle/errors';
 import {
+  BACKUP_PER_GB_MONTH,
+  BOOT_VOLUME_PER_GB_MONTH,
   DEFAULT_REGION,
   DEFAULT_SHAPE,
   IGW_NAME,
@@ -74,6 +76,7 @@ import {
 } from './oracle/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import type { InventoryItem } from './shared/types';
 
 /** The parsed, checked credentials. */
 export interface OracleCredentials {
@@ -1101,6 +1104,227 @@ export class OracleProvider extends CloudProvider {
         'Reading real spend needs Oracle\'s Usage API, which isn\'t connected yet. Costs shown here are estimates from running time.',
       fixes: ['See exact spend in the Oracle console under Billing & Cost Management → Cost Analysis.'],
     });
+  }
+
+  // ==========================================================================
+  // Inventory: everything we've created, for the infrastructure map
+  // ==========================================================================
+
+  /**
+   * Everything CloudGaming Hub has created in this Oracle account, in every
+   * region we might have used: the user's home region plus each catalog
+   * region the tenancy is subscribed to. Regions are read in parallel; a
+   * region that fails (e.g. a subscription still being set up) is skipped,
+   * but if EVERY region fails we throw the first error — that's almost
+   * always a credential or permission problem, which the caller turns into
+   * a friendly message. Finding nothing is not an error: it returns [].
+   */
+  async listResources(): Promise<InventoryItem[]> {
+    // Which regions to look in. The subscription call is the first thing we
+    // ask Oracle, so bad credentials fail right here (which is what we want).
+    const subscribed = await this.listSubscribedRegions();
+    const catalogIds = new Set(ORACLE_REGIONS.map((r) => r.id));
+    const regions = new Set<string>([this.homeRegion]);
+    for (const r of subscribed) {
+      if (catalogIds.has(r.name) && r.status === 'READY') regions.add(r.name);
+    }
+
+    const results = await Promise.allSettled(Array.from(regions).map((region) => this.listRegionResources(region)));
+    const items: InventoryItem[] = [];
+    const errors: unknown[] = [];
+    for (const res of results) {
+      if (res.status === 'fulfilled') items.push(...res.value);
+      else errors.push(res.reason);
+    }
+    if (errors.length && errors.length === results.length) throw errors[0];
+    return items;
+  }
+
+  /**
+   * Everything of ours in ONE region. We make one "list" call per kind of
+   * resource (plus one boot-volume-attachment call per availability domain
+   * that actually holds one of our disks or machines), then match things up
+   * locally. Individual lists may fail (e.g. the API user may be allowed to
+   * read compute but not networking); we keep whatever worked and only throw
+   * if nothing did.
+   */
+  private async listRegionResources(region: string): Promise<InventoryItem[]> {
+    const { compute, network, storage } = this.clients(region);
+    const compartmentId = this.compartmentId;
+    const link = (path: string) => `https://cloud.oracle.com/${path}?region=${region}`;
+    const lower = (s: unknown) => String(s ?? 'unknown').toLowerCase();
+    const iso = (d?: Date | string) => (d ? new Date(d).toISOString() : undefined);
+    const alive = (s?: string) => s !== 'TERMINATED';
+    // "Ours" = carries our freeform tag app=cloudgaming-hub, or follows our
+    // naming: machines are "cg-xxxxxxxx", their disks "cg-xxxxxxxx (Boot
+    // Volume)" or "cg-xxxxxxxx-boot", backups "cg-xxxxxxxx-<date>".
+    const tagged = (tags?: { [key: string]: string }) => tags?.[RESOURCE_TAG.key] === RESOURCE_TAG.value;
+    const ours = (x: { freeformTags?: { [key: string]: string }; displayName?: string }) =>
+      tagged(x.freeformTags) || String(x.displayName || '').startsWith('cg-');
+
+    // All the independent list calls at once.
+    const [instancesRes, volumesRes, backupsRes, vcnsRes, igwsRes, listsRes, subnetsRes, ipsRes] = await Promise.allSettled([
+      this.listAll((page) => compute.listInstances({ compartmentId, page })),
+      this.listAll((page) => storage.listBootVolumes({ compartmentId, page })),
+      this.listAll((page) => storage.listBootVolumeBackups({ compartmentId, page })),
+      this.listAll((page) => network.listVcns({ compartmentId, displayName: VCN_NAME, page })),
+      this.listAll((page) => network.listInternetGateways({ compartmentId, displayName: IGW_NAME, page })),
+      this.listAll((page) => network.listSecurityLists({ compartmentId, displayName: STREAMING_FIREWALL_NAME, page })),
+      this.listAll((page) => network.listSubnets({ compartmentId, displayName: SUBNET_NAME, page })),
+      this.listAll((page) => network.listPublicIps({
+        scope: core.requests.ListPublicIpsRequest.Scope.Region,
+        lifetime: core.requests.ListPublicIpsRequest.Lifetime.Reserved,
+        compartmentId,
+        page,
+      })),
+    ]);
+    const all = [instancesRes, volumesRes, backupsRes, vcnsRes, igwsRes, listsRes, subnetsRes, ipsRes];
+    if (all.every((r) => r.status === 'rejected')) throw (instancesRes as PromiseRejectedResult).reason;
+    const got = <T>(r: PromiseSettledResult<T[]>): T[] => (r.status === 'fulfilled' ? r.value : []);
+
+    const items: InventoryItem[] = [];
+
+    // ---- Machines ----------------------------------------------------------
+    const instances = got(instancesRes).filter((i) => alive(i.lifecycleState) && ours(i));
+    const ourInstanceIds = new Set(instances.map((i) => i.id));
+    for (const i of instances) {
+      // Preemptible ("spot") machines carry a preemptibleInstanceConfig.
+      const preemptible = !!i.preemptibleInstanceConfig;
+      items.push({
+        provider: 'oracle',
+        type: 'vm',
+        id: i.id,
+        name: i.displayName || i.id,
+        region,
+        zone: i.availabilityDomain,
+        status: lower(i.lifecycleState),
+        instanceId: `${region}/${i.id}`,
+        hourlyCost: estimateHourly(i.shape, region, preemptible),
+        consoleUrl: link(`compute/instances/${i.id}`),
+        createdAt: iso(i.timeCreated),
+      });
+    }
+
+    // ---- Disks (boot volumes) ---------------------------------------------
+    // Which machine each disk is plugged into comes from "boot volume
+    // attachments", which Oracle only lists per availability domain. We ask
+    // only in the ADs that hold one of our disks or machines.
+    const allVolumes = got(volumesRes);
+    const attachedTo = new Map<string, string>(); // boot volume OCID -> instance OCID
+    let attachmentsKnown = true;
+    const ads = new Set<string>(instances.map((i) => i.availabilityDomain));
+    for (const v of allVolumes) if (alive(v.lifecycleState) && ours(v)) ads.add(v.availabilityDomain);
+    await Promise.all(Array.from(ads).map(async (availabilityDomain) => {
+      try {
+        const atts = await this.listAll((page) => compute.listBootVolumeAttachments({ availabilityDomain, compartmentId, page }));
+        for (const a of atts) {
+          if (a.lifecycleState === 'ATTACHED' || a.lifecycleState === 'ATTACHING') attachedTo.set(a.bootVolumeId, a.instanceId);
+        }
+      } catch {
+        attachmentsKnown = false; // don't call disks "orphans" if we couldn't check
+      }
+    }));
+    // Our disks: tagged/named ours, or plugged into one of our machines.
+    const volumes = allVolumes.filter((v) => alive(v.lifecycleState) &&
+      (ours(v) || ourInstanceIds.has(attachedTo.get(v.id) || '')));
+    for (const v of volumes) {
+      const owner = attachedTo.get(v.id);
+      const sizeGb = Number(v.sizeInGBs) || 0;
+      const orphan = attachmentsKnown && !owner && v.lifecycleState === 'AVAILABLE';
+      items.push({
+        provider: 'oracle',
+        type: 'disk',
+        id: v.id,
+        name: v.displayName || v.id,
+        region,
+        zone: v.availabilityDomain,
+        status: owner ? 'in-use' : lower(v.lifecycleState),
+        attachedTo: owner ? `${region}/${owner}` : undefined,
+        sizeGb,
+        monthlyCost: Math.round(sizeGb * BOOT_VOLUME_PER_GB_MONTH * 100) / 100,
+        orphan: orphan || undefined,
+        orphanReason: orphan ? 'Disk (boot volume) not attached to any machine — it is still billed' : undefined,
+        consoleUrl: link(`block-storage/boot-volumes/${v.id}`),
+        createdAt: iso(v.timeCreated),
+      });
+    }
+
+    // ---- Snapshots (boot volume backups) ----------------------------------
+    // "Orphan" = the disk it was taken from no longer exists. We can only
+    // judge that if we managed to list this region's boot volumes, and not
+    // for backups COPIED from another region (their source disk lives there).
+    const volumesListed = volumesRes.status === 'fulfilled';
+    const liveVolumeIds = new Set(allVolumes.filter((v) => alive(v.lifecycleState)).map((v) => v.id));
+    for (const b of got(backupsRes)) {
+      if (!alive(b.lifecycleState) || !ours(b)) continue;
+      const sizeGb = Number(b.sizeInGBs) || 0;
+      const copied = !!b.sourceBootVolumeBackupId;
+      const orphan = volumesListed && !copied && !!b.bootVolumeId && !liveVolumeIds.has(b.bootVolumeId);
+      items.push({
+        provider: 'oracle',
+        type: 'snapshot',
+        id: b.id,
+        name: b.displayName || b.id,
+        region,
+        status: lower(b.lifecycleState),
+        sizeGb,
+        monthlyCost: Math.round(sizeGb * BACKUP_PER_GB_MONTH * 100) / 100,
+        orphan: orphan || undefined,
+        orphanReason: orphan ? 'Snapshot of a disk that no longer exists (its machine was deleted) — still billed for storage' : undefined,
+        consoleUrl: link(`block-storage/boot-volume-backups/${b.id}`),
+        createdAt: iso(b.timeCreated),
+      });
+    }
+
+    // ---- Network pieces (free on Oracle) ----------------------------------
+    const net = (
+      type: InventoryItem['type'],
+      x: { id: string; displayName?: string; lifecycleState?: string; timeCreated?: Date },
+      path: string
+    ) => {
+      if (!alive(x.lifecycleState)) return;
+      items.push({
+        provider: 'oracle',
+        type,
+        id: x.id,
+        name: x.displayName || x.id,
+        region,
+        status: lower(x.lifecycleState),
+        consoleUrl: link(path),
+        createdAt: iso(x.timeCreated),
+      });
+    };
+    for (const v of got(vcnsRes)) net('network', v, `networking/vcns/${v.id}`);
+    for (const g of got(igwsRes)) net('gateway', g, `networking/vcns/${g.vcnId}/internet-gateways/${g.id}`);
+    for (const l of got(listsRes)) net('firewall', l, `networking/vcns/${l.vcnId}/security-lists/${l.id}`);
+    for (const s of got(subnetsRes)) net('subnet', s, `networking/vcns/${s.vcnId}/subnets/${s.id}`);
+
+    // ---- Reserved public IPs ----------------------------------------------
+    // We don't create these (our machines get "ephemeral" IPs that vanish
+    // with them), but we list any that carry our tag/name. Oracle doesn't
+    // charge for reserved IPs, so the cost is 0; an unassigned one is still
+    // flagged as a leftover so it can be tidied up. (Tracing an assigned IP
+    // back to its machine would take extra calls per IP, so attachedTo is
+    // left empty.)
+    for (const ip of got(ipsRes)) {
+      if (ip.lifecycleState === 'TERMINATED' || !ip.id || !ours(ip)) continue;
+      const assigned = !!ip.assignedEntityId;
+      items.push({
+        provider: 'oracle',
+        type: 'public-ip',
+        id: ip.id,
+        name: ip.displayName || ip.ipAddress || ip.id,
+        region,
+        status: assigned ? 'in-use' : lower(ip.lifecycleState),
+        monthlyCost: 0,
+        orphan: !assigned || undefined,
+        orphanReason: assigned ? undefined : 'Reserved public IP not assigned to any machine',
+        consoleUrl: link('networking/ip-management/public-ips'),
+        createdAt: iso(ip.timeCreated),
+      });
+    }
+
+    return items;
   }
 
   async validateCredentials(): Promise<boolean> {

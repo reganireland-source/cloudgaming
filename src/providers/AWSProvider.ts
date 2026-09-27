@@ -68,7 +68,9 @@ import { AWS_CONSOLE, FriendlyCloudError, isAwsCapacityError, toFriendlyError } 
 import {
   AWS_REGIONS,
   AWS_SHAPES,
+  AWS_CATALOG,
   DEFAULT_REGION,
+  SNAPSHOT_PER_GB_MONTH,
   UBUNTU_NAME_PATTERNS,
   UBUNTU_OWNER,
   estimateHourly,
@@ -77,6 +79,7 @@ import {
 } from './aws/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import type { InventoryItem } from './shared/types';
 
 /** The parsed, checked credentials. */
 export interface AwsCredentials {
@@ -93,6 +96,40 @@ function isNotFound(error: any): boolean {
   return /\.NotFound$|NotFound|does not exist/i.test(String(error?.code)) ||
     /does not exist|not found/i.test(String(error?.message));
 }
+
+/**
+ * Is this an error that means "this REGION can't be used by this account"
+ * rather than "something is broken"? Regions launched after 2019 (and any
+ * region an administrator disabled) must be switched on ("opted in") per
+ * account; calls to one that isn't answer AuthFailure / OptInRequired /
+ * UnauthorizedOperation. listResources() skips such regions quietly.
+ */
+function isRegionUnavailable(error: any): boolean {
+  return /AuthFailure|OptInRequired|UnauthorizedOperation|InvalidClientTokenId|not subscribed|not enabled|PendingVerification/i
+    .test(`${error?.code} ${error?.message}`);
+}
+
+/** Read one tag's value from an AWS tag list (undefined if it isn't there). */
+function tagValue(list: AWS.EC2.TagList | undefined, key: string): string | undefined {
+  return list?.find((t) => t.Key === key)?.Value;
+}
+
+/** A Date (or nothing) as ISO text for the inventory's createdAt. */
+function iso(date: Date | undefined): string | undefined {
+  return date ? new Date(date).toISOString() : undefined;
+}
+
+/** Round money to cents (monthly) — hourly values come pre-rounded from the catalog. */
+function cents(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Elastic IP price: since February 2024 AWS bills EVERY public IPv4 address
+ * $0.005/hour (≈ $3.65/month), attached or not. An Elastic IP that isn't
+ * attached to a machine is pure waste.
+ */
+const PUBLIC_IPV4_PER_HOUR = 0.005;
 
 /** AWS "tags" for everything we create: a Name plus our app label. */
 function tags(name: string, extra: Record<string, string> = {}): AWS.EC2.TagList {
@@ -898,6 +935,242 @@ export class AWSProvider extends CloudProvider {
     } catch {
       return [];
     }
+  }
+
+  // ==========================================================================
+  // Inventory (the infrastructure map)
+  // ==========================================================================
+
+  /**
+   * Everything CloudGaming Hub has created in this AWS account, in every
+   * region of our catalog: machines, their disks (EBS volumes), snapshots,
+   * the streaming security group and any Elastic IPs — each with an
+   * estimated cost, and "orphans" (things that still cost money but belong
+   * to no machine) flagged with a plain-English reason.
+   *
+   * HOW WE FIND OUR THINGS
+   *   Everything we create carries the tag app=cloudgaming-hub (RESOURCE_TAG)
+   *   plus a Name — see tags() and createMachine(), which tags the machine
+   *   AND its boot disk. As a safety net for disks made before the disk was
+   *   tagged, we also pick up any volume attached to one of our machines.
+   *
+   * SPEED
+   *   All regions are asked at the same time (Promise.allSettled), and inside
+   *   a region the lookups run side by side too: a handful of list calls per
+   *   region, never one call per item.
+   *
+   * ERRORS
+   *   A region that fails (usually one the account hasn't switched on — AWS
+   *   answers "AuthFailure"/"OptInRequired") is skipped so the rest still
+   *   show. If EVERY region fails, it's the key itself (wrong secret, missing
+   *   permission...), so we throw the first error and the caller turns it
+   *   into a friendly card. Finding nothing is not an error: we return [].
+   */
+  async listResources(): Promise<InventoryItem[]> {
+    const results = await Promise.allSettled(AWS_REGIONS.map((r) => this.listRegionResources(r.id)));
+
+    const items: InventoryItem[] = [];
+    const failures: Array<{ region: string; error: any }> = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') items.push(...result.value);
+      else failures.push({ region: AWS_REGIONS[index].id, error: result.reason });
+    });
+
+    // Every single region failed -> the credentials/permissions are the problem.
+    if (failures.length === AWS_REGIONS.length && failures.length > 0) throw failures[0].error;
+
+    for (const { region, error } of failures) {
+      if (isRegionUnavailable(error)) continue; // region not switched on for this account — nothing of ours can be there
+      // Anything else (throttling, a network blip) — note it in the server log
+      // and show the other regions rather than failing the whole map.
+      console.warn(`[AWS] inventory: skipped ${region}:`, error?.code || '', error?.message);
+    }
+    return items;
+  }
+
+  /**
+   * Keep asking an AWS "describe" call for the next page until there are
+   * no more. `call` gets the NextToken of the previous page (undefined first).
+   */
+  private async allPages<R extends { NextToken?: string }>(call: (token?: string) => Promise<R>): Promise<R[]> {
+    const pages: R[] = [];
+    let token: string | undefined;
+    do {
+      const page = await call(token);
+      pages.push(page);
+      token = page.NextToken;
+    } while (token);
+    return pages;
+  }
+
+  /** Everything of ours in ONE region (see listResources). */
+  private async listRegionResources(region: string): Promise<InventoryItem[]> {
+    const ec2 = this.ec2For(region);
+    const ourTag = [{ Name: `tag:${RESOURCE_TAG.key}`, Values: [RESOURCE_TAG.value] }];
+    const consoleBase = `https://${region}.console.aws.amazon.com/ec2/home?region=${region}`;
+
+    // The five list calls, all at once. Filters do the searching at AWS's end.
+    const [instancePages, taggedVolumePages, snapshotPages, groupResult, addressResult] = await Promise.all([
+      // Machines in every state except "terminated" (deleted machines linger
+      // in the list for about an hour, costing nothing).
+      this.allPages((NextToken) => ec2.describeInstances({
+        Filters: [...ourTag, { Name: 'instance-state-name', Values: ['pending', 'running', 'stopping', 'stopped', 'shutting-down'] }],
+        NextToken,
+      }).promise()),
+      this.allPages((NextToken) => ec2.describeVolumes({ Filters: ourTag, NextToken }).promise()),
+      // OwnerIds 'self' = only snapshots this account made (not public ones).
+      this.allPages((NextToken) => ec2.describeSnapshots({ OwnerIds: ['self'], Filters: ourTag, NextToken }).promise()),
+      // The streaming firewall, found by its fixed name.
+      ec2.describeSecurityGroups({ Filters: [{ Name: 'group-name', Values: [STREAMING_FIREWALL_NAME] }] }).promise(),
+      ec2.describeAddresses({ Filters: ourTag }).promise(),
+    ]);
+
+    const items: InventoryItem[] = [];
+
+    // ---- Machines ---------------------------------------------------------
+    // AWS groups instances into "reservations" (the request that launched
+    // them), so they're nested one level deep.
+    const instances = instancePages.flatMap((p) => (p.Reservations || []).flatMap((r) => r.Instances || []));
+    const ourInstanceIds = new Set<string>();
+    for (const instance of instances) {
+      if (!instance.InstanceId) continue;
+      ourInstanceIds.add(instance.InstanceId);
+      const spot = instance.InstanceLifecycle === 'spot';
+      const hourly = estimateHourly(String(instance.InstanceType), region, spot);
+      items.push({
+        provider: 'aws',
+        type: 'vm',
+        id: `${region}/${instance.InstanceId}`,
+        name: tagValue(instance.Tags, 'Name') || instance.InstanceId,
+        region,
+        zone: instance.Placement?.AvailabilityZone,
+        status: String(instance.State?.Name || 'unknown'), // 'running', 'stopped', 'pending'...
+        instanceId: `${region}/${instance.InstanceId}`, // same format as machines.instance_id
+        hourlyCost: hourly || undefined, // 0 = a machine type our catalog doesn't know
+        consoleUrl: `${consoleBase}#InstanceDetails:instanceId=${instance.InstanceId}`,
+        createdAt: iso(instance.LaunchTime),
+      });
+    }
+
+    // ---- Disks (EBS volumes) ----------------------------------------------
+    // Tagged volumes, plus (safety net) untagged ones attached to our
+    // machines. The second lookup is one call for the whole region, and only
+    // if some machine's disk wasn't already in the tagged list.
+    const volumes = taggedVolumePages.flatMap((p) => p.Volumes || []);
+    const seenVolumeIds = new Set(volumes.map((v) => v.VolumeId));
+    const untaggedDiskOwners = instances
+      .filter((i) => (i.BlockDeviceMappings || []).some((m) => m.Ebs?.VolumeId && !seenVolumeIds.has(m.Ebs.VolumeId)))
+      .map((i) => i.InstanceId!);
+    if (untaggedDiskOwners.length) {
+      const extraPages = await this.allPages((NextToken) => ec2.describeVolumes({
+        Filters: [{ Name: 'attachment.instance-id', Values: untaggedDiskOwners }],
+        NextToken,
+      }).promise());
+      for (const volume of extraPages.flatMap((p) => p.Volumes || [])) {
+        if (!seenVolumeIds.has(volume.VolumeId)) {
+          seenVolumeIds.add(volume.VolumeId);
+          volumes.push(volume);
+        }
+      }
+    }
+
+    for (const volume of volumes) {
+      if (!volume.VolumeId) continue;
+      const attachedInstance = volume.Attachments?.find((a) => a.InstanceId)?.InstanceId;
+      const sizeGb = volume.Size || 0;
+      // 'available' = exists but plugged into nothing: still billed per GB.
+      const unattached = volume.State === 'available';
+      items.push({
+        provider: 'aws',
+        type: 'disk',
+        id: `${region}/${volume.VolumeId}`,
+        name: tagValue(volume.Tags, 'Name') || volume.VolumeId,
+        region,
+        zone: volume.AvailabilityZone,
+        status: String(volume.State || 'unknown'), // 'in-use', 'available', 'creating', 'deleting'...
+        attachedTo: attachedInstance ? `${region}/${attachedInstance}` : undefined,
+        sizeGb,
+        // Our catalog's gp3 price; other disk types are close enough for an estimate.
+        monthlyCost: cents(sizeGb * AWS_CATALOG.diskPerGbMonth),
+        orphan: unattached || undefined,
+        orphanReason: unattached ? 'Disk not attached to any machine — still billed monthly' : undefined,
+        consoleUrl: `${consoleBase}#VolumeDetails:volumeId=${volume.VolumeId}`,
+        createdAt: iso(volume.CreateTime),
+      });
+    }
+
+    // ---- Snapshots (backups) ------------------------------------------------
+    // A snapshot is a leftover when the disk it was taken from is gone — i.e.
+    // the machine was deleted but its backup wasn't. (It may still be wanted,
+    // e.g. to restore later — "orphan" here just means "no machine".)
+    for (const snap of snapshotPages.flatMap((p) => p.Snapshots || [])) {
+      if (!snap.SnapshotId) continue;
+      const sizeGb = snap.VolumeSize || 0;
+      const sourceInstance = tagValue(snap.Tags, 'SourceInstance');
+      // Copies made by replicateSnapshot() point at a placeholder volume
+      // ("vol-ffffffff"), so for them only the source instance tells us anything.
+      const sourceDiskExists = !!snap.VolumeId && seenVolumeIds.has(snap.VolumeId);
+      const sourceMachineExists = !!sourceInstance && ourInstanceIds.has(sourceInstance);
+      const isCopy = !!tagValue(snap.Tags, 'SourceSnapshot');
+      const orphan = !sourceDiskExists && !sourceMachineExists && !isCopy;
+      items.push({
+        provider: 'aws',
+        type: 'snapshot',
+        id: `${region}/${snap.SnapshotId}`, // same format as our snapshot records
+        name: tagValue(snap.Tags, 'Name') || snap.SnapshotId,
+        region,
+        status: String(snap.State || 'unknown'), // 'pending', 'completed', 'error'
+        attachedTo: sourceMachineExists ? `${region}/${sourceInstance}` : undefined,
+        sizeGb,
+        // Billed on the data actually stored, which is at most the disk size
+        // (usually less) — so this is an upper-end estimate.
+        monthlyCost: cents(sizeGb * SNAPSHOT_PER_GB_MONTH),
+        orphan: orphan || undefined,
+        orphanReason: orphan ? 'Backup of a deleted machine — still billed monthly' : undefined,
+        consoleUrl: `${consoleBase}#SnapshotDetails:snapshotId=${snap.SnapshotId}`,
+        createdAt: iso(snap.StartTime),
+      });
+    }
+
+    // ---- Firewall (security group) ------------------------------------------
+    // Free; one per region we've launched in. (There's normally only one, in
+    // the default VPC; we list whatever carries the name.)
+    for (const group of groupResult.SecurityGroups || []) {
+      if (!group.GroupId) continue;
+      items.push({
+        provider: 'aws',
+        type: 'firewall',
+        id: `${region}/${group.GroupId}`,
+        name: group.GroupName || STREAMING_FIREWALL_NAME,
+        region,
+        status: 'active',
+        consoleUrl: `${consoleBase}#SecurityGroup:groupId=${group.GroupId}`,
+      });
+    }
+
+    // ---- Elastic IPs ----------------------------------------------------------
+    // We don't create these today (machines get an automatic public IP), but
+    // list any tagged ones: an unattached Elastic IP is billed for nothing.
+    for (const address of addressResult.Addresses || []) {
+      const key = address.AllocationId || address.PublicIp;
+      if (!key) continue;
+      const unattached = !address.AssociationId && !address.InstanceId && !address.NetworkInterfaceId;
+      items.push({
+        provider: 'aws',
+        type: 'public-ip',
+        id: `${region}/${key}`,
+        name: tagValue(address.Tags, 'Name') || address.PublicIp || key,
+        region,
+        status: unattached ? 'available' : 'in-use',
+        attachedTo: address.InstanceId ? `${region}/${address.InstanceId}` : undefined,
+        monthlyCost: cents(PUBLIC_IPV4_PER_HOUR * 730), // ~730 hours in a month
+        orphan: unattached || undefined,
+        orphanReason: unattached ? 'Elastic IP not attached to any machine — still billed hourly' : undefined,
+        consoleUrl: address.AllocationId ? `${consoleBase}#ElasticIpDetails:AllocationId=${address.AllocationId}` : `${consoleBase}#Addresses:`,
+      });
+    }
+
+    return items;
   }
 
   // ==========================================================================

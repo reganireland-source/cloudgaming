@@ -34,7 +34,7 @@
 
 import { Machine, RegionData, Snapshot } from '../types';
 import type { Reporter, EventLevel } from '../services/OperationLog';
-import type { SetupStage } from './shared/types';
+import type { SetupStage, InventoryItem } from './shared/types';
 
 /** Where and what to launch. */
 export interface ProviderConfig {
@@ -95,6 +95,19 @@ export abstract class CloudProvider {
    * can read it override this; the default says "unknown" ([]).
    */
   async getSetupProgress(_instanceId: string): Promise<SetupStage[]> {
+    return [];
+  }
+
+  /**
+   * Everything the app has created in the user's account on this cloud —
+   * machines AND supporting resources (disks, networks, firewalls, public
+   * IPs, snapshots...) — for the infrastructure map. Found by our tag/label
+   * (app=cloudgaming-hub) or our naming conventions. Flags "orphans":
+   * things that still cost money but aren't attached to any machine.
+   * Should not throw for "nothing found"; may throw for credential/API errors.
+   * Default: nothing (providers override it).
+   */
+  async listResources(): Promise<InventoryItem[]> {
     return [];
   }
 

@@ -85,6 +85,7 @@ import costAnalysisRoutes from './api/routes/cost-analysis'; // compare prices a
 import statusRoutes from './api/routes/status';             // health lights + build/version info
 import credentialRoutes from './api/routes/credentials';    // add/check/remove your cloud keys (encrypted)
 import operationRoutes from './api/routes/operations';      // live progress of cloud actions
+import inventoryRoutes from './api/routes/inventory';       // what's deployed where (infrastructure map)
 import { failOrphanedOperations } from './services/OperationLog';
 import { recordRequest } from './services/Metrics';
 
@@ -182,6 +183,7 @@ app.use('/api/auth', authRoutes);              // PUBLIC: you can't require logi
 app.use('/api/machines', authMiddleware, machineRoutes);
 app.use('/api/credentials', authMiddleware, credentialRoutes);  // your encrypted cloud keys
 app.use('/api/operations', authMiddleware, operationRoutes);    // live progress of cloud actions
+app.use('/api/inventory', authMiddleware, inventoryRoutes);     // what's deployed where (map)
 app.use('/api/costs', authMiddleware, costRoutes);
 app.use('/api/regions', authMiddleware, regionRoutes);
 app.use('/api/performance', authMiddleware, performanceRoutes);

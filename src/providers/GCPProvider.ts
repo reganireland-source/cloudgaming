@@ -34,9 +34,12 @@ import crypto from 'crypto';
 import compute from '@google-cloud/compute';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
 import { RegionData } from '../types';
+import type { InventoryItem } from './shared/types';
 import { FriendlyCloudError, isZoneSpecificError, toFriendlyError } from './gcp/errors';
 import {
   BOOT_IMAGE,
+  BALANCED_DISK_PER_GB_MONTH,
+  SNAPSHOT_PER_GB_MONTH,
   DEFAULT_REGION,
   FIREWALL_RULE_NAME,
   NETWORK_NAME,
@@ -365,6 +368,9 @@ export class GCPProvider extends CloudProvider {
             deviceName: name,
             initializeParams: {
               diskName: name,
+              // Label the disk too (not just the machine), so the inventory
+              // map can find it — e.g. if it's ever left behind on its own.
+              labels: { app: 'cloudgaming-hub' },
               diskSizeGb: String(options.diskSizeGb),
               diskType: `zones/${zone}/diskTypes/pd-balanced`,
               ...(options.sourceSnapshot
@@ -663,4 +669,116 @@ export class GCPProvider extends CloudProvider {
       status: String(instance.status),
     };
   }
+
+  // ==========================================================================
+  // Inventory (for the infrastructure map)
+  // ==========================================================================
+
+  /**
+   * Everything CloudGaming Hub created in this project: machines, their
+   * disks, snapshots, our network, subnets and firewall rules — found by our
+   * label (app=cloudgaming-hub) or our "cg-" / "cloudgaming-" names.
+   * Uses "aggregated list" calls, which return every zone in one request.
+   */
+  async listResources(): Promise<InventoryItem[]> {
+    const items: InventoryItem[] = [];
+    const project = this.projectId;
+    const ours = (name?: string | null, labels?: Record<string, string> | null) =>
+      (labels && labels.app === 'cloudgaming-hub') || (name || '').startsWith('cg-');
+    const regionOf = (zone: string) => zone.slice(0, zone.lastIndexOf('-'));
+    const lastPart = (url?: string | null) => (url || '').split('/').pop() || '';
+    const consoleLink = (path: string) => `https://console.cloud.google.com/${path}?project=${project}`;
+
+    // ---- Machines ------------------------------------------------------
+    const vmIdByDiskLink = new Map<string, string>(); // disk selfLink -> our instanceId
+    for await (const [, scoped] of this.instances.aggregatedListAsync({ project })) {
+      for (const vm of (scoped as any).instances || []) {
+        if (!ours(vm.name, vm.labels)) continue;
+        const zone = lastPart(vm.zone);
+        const instanceId = `${zone}/${vm.name}`;
+        const machineType = lastPart(vm.machineType);
+        const gpu = lastPart(vm.guestAccelerators?.[0]?.acceleratorType);
+        const shapeId = machineType.startsWith('g2-') ? machineType : gpu.includes('t4') ? `${machineType}+t4` : machineType;
+        const spot = String(vm.scheduling?.provisioningModel) === 'SPOT';
+        for (const d of vm.disks || []) if (d.source) vmIdByDiskLink.set(d.source, instanceId);
+        const raw = String(vm.status);
+        items.push({
+          provider: 'gcp', type: 'vm', id: instanceId, name: vm.name, region: regionOf(zone), zone,
+          status: raw === 'TERMINATED' ? 'stopped' : raw.toLowerCase(),
+          instanceId,
+          hourlyCost: estimateHourly(shapeId, regionOf(zone), spot),
+          consoleUrl: consoleLink(`compute/instancesDetail/zones/${zone}/instances/${vm.name}`),
+          createdAt: vm.creationTimestamp || undefined,
+        });
+      }
+    }
+
+    // ---- Disks -----------------------------------------------------------
+    const diskLinks = new Set<string>();
+    for await (const [, scoped] of this.disks.aggregatedListAsync({ project })) {
+      for (const d of (scoped as any).disks || []) {
+        if (!ours(d.name, d.labels)) continue;
+        diskLinks.add(d.selfLink);
+        const zone = lastPart(d.zone);
+        const users: string[] = d.users || [];
+        const sizeGb = Number(d.sizeGb) || 0;
+        items.push({
+          provider: 'gcp', type: 'disk', id: `${zone}/${d.name}`, name: d.name, region: regionOf(zone), zone,
+          status: users.length ? 'in-use' : 'available',
+          attachedTo: users.length ? (vmIdByDiskLink.get(d.selfLink) || `${zone}/${lastPart(users[0])}`) : undefined,
+          sizeGb,
+          monthlyCost: Math.round(sizeGb * BALANCED_DISK_PER_GB_MONTH * 100) / 100,
+          orphan: users.length === 0,
+          orphanReason: users.length === 0 ? 'Disk not attached to any machine — still billed every month' : undefined,
+          consoleUrl: consoleLink(`compute/disksDetail/zones/${zone}/disks/${d.name}`),
+          createdAt: d.creationTimestamp || undefined,
+        });
+      }
+    }
+
+    // ---- Snapshots (global) ------------------------------------------------
+    for await (const snap of this.snapshots.listAsync({ project })) {
+      if (!ours(snap.name, snap.labels)) continue;
+      const gb = Number(snap.storageBytes) ? Number(snap.storageBytes) / 1e9 : Number(snap.diskSizeGb) || 0;
+      const sourceGone = !!snap.sourceDisk && !diskLinks.has(snap.sourceDisk);
+      const zone = String(snap.sourceDisk || '').match(/zones\/([^/]+)/)?.[1];
+      items.push({
+        provider: 'gcp', type: 'snapshot', id: snap.name, name: snap.name,
+        region: zone ? regionOf(zone) : 'global',
+        status: String(snap.status).toLowerCase(),
+        sizeGb: Math.round(gb * 10) / 10,
+        monthlyCost: Math.round(gb * SNAPSHOT_PER_GB_MONTH * 100) / 100,
+        orphan: sourceGone,
+        orphanReason: sourceGone ? 'Backup of a machine that no longer exists — still billed every month' : undefined,
+        consoleUrl: consoleLink(`compute/snapshotsDetail/projects/${project}/global/snapshots/${snap.name}`),
+        createdAt: snap.creationTimestamp || undefined,
+      });
+    }
+
+    // ---- Network, subnets, firewall rules ------------------------------------
+    try {
+      await this.networks.get({ project, network: NETWORK_NAME });
+      items.push({ provider: 'gcp', type: 'network', id: NETWORK_NAME, name: NETWORK_NAME, region: 'global', status: 'active',
+        consoleUrl: consoleLink(`networking/networks/details/${NETWORK_NAME}`) });
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+    for await (const [, scoped] of this.subnetworks.aggregatedListAsync({ project })) {
+      for (const sn of (scoped as any).subnetworks || []) {
+        if (!String(sn.name).startsWith('cloudgaming-')) continue;
+        const region = lastPart(sn.region);
+        items.push({ provider: 'gcp', type: 'subnet', id: `${region}/${sn.name}`, name: `${sn.name} (${sn.ipCidrRange})`, region, status: 'active',
+          consoleUrl: consoleLink(`networking/subnetworks/details/${region}/${sn.name}`) });
+      }
+    }
+    for await (const fw of this.firewalls.listAsync({ project })) {
+      if (!String(fw.name).startsWith('cloudgaming-')) continue;
+      items.push({ provider: 'gcp', type: 'firewall', id: fw.name, name: `${fw.name}${lastPart(fw.network) !== NETWORK_NAME ? ' (older version, on default network)' : ''}`,
+        region: 'global', status: fw.disabled ? 'disabled' : 'active',
+        consoleUrl: consoleLink(`net-security/firewall-manager/firewall-policies/details/${fw.name}`) });
+    }
+
+    return items;
+  }
+
 }

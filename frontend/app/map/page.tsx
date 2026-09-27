@@ -2,70 +2,89 @@
 
 /**
  * ============================================================================
- * frontend/app/map/page.tsx — THE WORLD MAP (/map)
+ * frontend/app/map/page.tsx — INFRASTRUCTURE MAP (/map)
  * ============================================================================
  *
- * Where every cloud region is, how far each is from you (estimated ping),
- * what it costs, where your machines are running, and where the backend
- * lives. The map itself is components/WorldMap.tsx; this page loads the data
- * and adds the controls, legend and a "nearest regions" table (the same
- * information as the map, in text form).
+ * Everything you've deployed, on a world map, by location and status, colour
+ * coded (and shape coded) by cloud. Refreshes every 10 seconds.
+ *
+ * LAYOUT
+ *   • Cost overlay: running now ($/hour), standing ($/month for disks,
+ *     snapshots and IPs that bill even when machines are stopped), and
+ *     orphans (things still billing but attached to nothing).
+ *   • Per-cloud strip: resources, machines, spend for each cloud.
+ *   • The map (components/InfraMap.tsx): one stacked marker per cloud +
+ *     region, status rings, orphan badges, faint available regions, our
+ *     platform (Railway), you + ping rings, zoom & pan.
+ *   • Detail panel for the clicked marker: every resource there with its
+ *     status and cost, console links, and Start / Stop / Sync / Connect for
+ *     machines (running live, with the operation log).
+ *   • Orphans list and a full table (the map's data in text form).
  *
  * DATA
- *   GET /api/status/catalog  (public)  regions, GPUs, prices, backend region
- *   GET /api/machines        (signed in only)  your machines
+ *   GET /api/inventory   your deployed resources, live from each cloud (cached 60 s)
+ *   GET /api/status/catalog   public: all regions, prices, where the backend runs
  *
- * YOUR LOCATION is only ever used in your browser (never sent anywhere) and
- * remembered in this browser's storage. Choose "Use my location" (the
- * browser asks permission) or click anywhere on the map. Until then, a rough
- * guess from your time zone is used.
+ * Your location is only used in this browser (never sent), and remembered here.
  * ============================================================================
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiUrl } from '@/lib/api';
-import { apiFetch } from '@/lib/auth';
+import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
-import WorldMap, { CLOUD_STYLE, estimatePingMs, type LatLng, type MapMachine, type MapRegion } from '@/components/WorldMap';
+import InfraMap, { CLOUD_STYLE, STATUS_STYLE, estimatePingMs, type AvailableRegion, type GroupStatus, type LatLng, type MarkerGroup } from '@/components/InfraMap';
+import OperationConsole from '@/components/OperationConsole';
+import FriendlyErrorCard from '@/components/FriendlyErrorCard';
+import MachineConnectionPanel from '@/components/MachineConnectionPanel';
 
+interface Item {
+  provider: string; type: string; id: string; name: string; region: string; zone?: string; status: string;
+  instanceId?: string; attachedTo?: string; sizeGb?: number; hourlyCost?: number; monthlyCost?: number;
+  orphan?: boolean; orphanReason?: string; consoleUrl?: string; createdAt?: string; machineId?: string; source: 'cloud' | 'app';
+}
+interface Inventory {
+  generatedAt: string;
+  clouds: string[];
+  items: Item[];
+  errors: Array<{ provider: string; error: FriendlyError }>;
+  totals: { runningMachines: number; hourly: number; monthlyStanding: number; orphans: number; orphanMonthly: number; orphanHourly: number };
+  byCloud: Record<string, { label: string; items: number; machines: number; running: number; hourly: number; monthly: number }>;
+}
 interface Catalog {
-  providers: Array<{
-    provider: string;
-    label: string;
-    priceNote: string;
-    regions: Array<{ id: string; name: string; lat: number; lng: number; gpus: string[]; cheapest: MapRegion['cheapest'] }>;
-  }>;
+  providers: Array<{ provider: string; label: string; regions: Array<{ id: string; name: string; lat: number; lng: number; gpus: string[]; cheapest: { onDemand: number } | null }> }>;
   backendRegion: string | null;
 }
 
-/** Railway region codes (prefix) → approximate location. */
-const RAILWAY_REGIONS: Array<{ prefix: string; label: string; lat: number; lng: number }> = [
+const RAILWAY_REGIONS = [
   { prefix: 'us-west', label: 'US West (California)', lat: 37.4, lng: -122.0 },
   { prefix: 'us-east', label: 'US East (Virginia)', lat: 39.0, lng: -77.5 },
   { prefix: 'europe-west', label: 'EU West (Amsterdam)', lat: 52.4, lng: 4.9 },
   { prefix: 'asia-southeast', label: 'Southeast Asia (Singapore)', lat: 1.35, lng: 103.8 },
 ];
-
 const LOCATION_KEY = 'cg_location';
+const TYPE_LABEL: Record<string, string> = {
+  vm: 'Machine', disk: 'Disk', snapshot: 'Snapshot', network: 'Network', subnet: 'Subnet', firewall: 'Firewall',
+  'public-ip': 'Public IP', nic: 'Network card', gateway: 'Internet gateway', 'route-table': 'Route table', 'resource-group': 'Resource group', other: 'Other',
+};
 
-function guessFromTimezone(): LatLng & { approximate: true } {
-  // Very rough: longitude from the UTC offset (15° per hour), a mid latitude.
-  const lng = Math.max(-179, Math.min(179, (-new Date().getTimezoneOffset() / 60) * 15));
-  return { lat: 20, lng, approximate: true };
+/** Machine status words (they vary by cloud) → one of five map states. */
+function vmState(status: string): GroupStatus {
+  const s = status.toLowerCase();
+  if (s === 'running') return 'running';
+  if (/fail|missing|unknown|error/.test(s)) return 'problem';
+  if (/still billed|creat|start|stopp|delet|provision|staging|deallocating|pending|repair|suspending/.test(s)) return 'changing';
+  if (/stopped|deallocated|terminated|suspended/.test(s)) return 'stopped';
+  return 'changing';
 }
+const STATE_RANK: GroupStatus[] = ['problem', 'changing', 'running', 'stopped', 'resources'];
 
-function pingLabel(ms: number): { text: string; cls: string } {
-  if (ms <= 30) return { text: 'great', cls: 'text-neon-lime' };
-  if (ms <= 60) return { text: 'ok', cls: 'text-neon-amber' };
-  return { text: 'laggy', cls: 'text-neon-pink' };
-}
-
-function ShapeIcon({ provider }: { provider: string }) {
+function ShapeIcon({ provider, size = 12 }: { provider: string; size?: number }) {
   const s = CLOUD_STYLE[provider];
   if (!s) return null;
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden className="inline-block align-[-1px]">
+    <svg width={size} height={size} viewBox="0 0 12 12" aria-hidden className="inline-block align-[-1px]">
       {s.shape === 'circle' && <circle cx="6" cy="6" r="5" fill={s.color} />}
       {s.shape === 'square' && <rect x="1" y="1" width="10" height="10" rx="1.5" fill={s.color} />}
       {s.shape === 'triangle' && <polygon points="6,0.5 11.5,11 0.5,11" fill={s.color} />}
@@ -74,188 +93,356 @@ function ShapeIcon({ provider }: { provider: string }) {
   );
 }
 
-export default function MapPage() {
-  const { user } = useAuth();
+function StatusChip({ status }: { status: string }) {
+  const st = STATUS_STYLE[vmState(status)];
+  return (
+    <span className="inline-flex items-center gap-1 text-[0.66rem] uppercase tracking-label rounded border px-1.5 py-px" style={{ borderColor: `${st.color}80`, color: '#e2e8f0' }}>
+      <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: st.color }} />{status}
+    </span>
+  );
+}
+
+function Tile({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) {
+  return (
+    <div className={`rounded border px-3 py-2.5 ${warn ? 'border-neon-pink/40 bg-neon-pink/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
+      <p className="label">{label}</p>
+      <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
+      {sub && <p className="text-[0.68rem] text-slate-500 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+export default function InfrastructureMapPage() {
+  const { user, loading: authLoading } = useAuth();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [machines, setMachines] = useState<MapMachine[]>([]);
+  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [location, setLocation] = useState<(LatLng & { approximate?: boolean }) | null>(null);
-  const [locating, setLocating] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const [visible, setVisible] = useState<Set<string>>(new Set(['gcp', 'aws', 'azure', 'oracle']));
+  const [layers, setLayers] = useState({ available: true, rings: true, paths: true });
+  const [ops, setOps] = useState<Record<string, string>>({});        // machineId → running operation id
+  const [connectFor, setConnectFor] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
 
-  // Remembered location, or a time-zone guess.
+  // ---- Location (browser only) ----
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(LOCATION_KEY);
-      if (saved) { setLocation(JSON.parse(saved)); return; }
-    } catch { /* storage blocked */ }
-    setLocation(guessFromTimezone());
+    try { const saved = localStorage.getItem(LOCATION_KEY); if (saved) { setLocation(JSON.parse(saved)); return; } } catch { /* ignore */ }
+    setLocation({ lat: 20, lng: Math.max(-179, Math.min(179, (-new Date().getTimezoneOffset() / 60) * 15)), approximate: true });
   }, []);
+  const saveLocation = (loc: LatLng) => { setLocation(loc); try { localStorage.setItem(LOCATION_KEY, JSON.stringify(loc)); } catch { /* ignore */ } };
+  const useMyLocation = () => navigator.geolocation?.getCurrentPosition(
+    (p) => saveLocation({ lat: p.coords.latitude, lng: p.coords.longitude }),
+    () => setLoadError('Location permission denied — click on the map to set where you are.'),
+  );
 
-  const saveLocation = (loc: LatLng) => {
-    setLocation(loc);
-    try { localStorage.setItem(LOCATION_KEY, JSON.stringify(loc)); } catch { /* ignore */ }
-  };
-
-  const useMyLocation = () => {
-    if (!navigator.geolocation) { setError('This browser can\'t share its location — click on the map instead.'); return; }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { saveLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setLocating(false); },
-      () => { setError('Location permission was denied — click on the map to set where you are instead.'); setLocating(false); },
-      { enableHighAccuracy: false, timeout: 10000 }
-    );
-  };
-
-  // Public catalog.
+  // ---- Data ----
   useEffect(() => {
     fetch(apiUrl('/status/catalog'), { cache: 'no-store' })
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setCatalog)
-      .catch((e) => setError(e.message === 'HTTP 404'
-        ? 'The backend is an older version without the map data — redeploy it on Railway.'
-        : `Couldn't load regions (${e.message}). Check the BACKEND light.`));
+      .catch((e) => setLoadError(e.message === 'HTTP 404' ? 'The backend is an older version — redeploy it on Railway.' : `Couldn't load regions (${e.message}).`));
   }, []);
 
-  const regions: MapRegion[] = useMemo(() => (catalog?.providers || []).flatMap((p) =>
-    p.regions.map((r) => ({ ...r, provider: p.provider, providerLabel: p.label }))), [catalog]);
+  const loadInventory = useCallback(async (refresh = false) => {
+    if (!user) return;
+    if (refresh) setRefreshing(true);
+    try {
+      setInventory(await apiFetch<Inventory>(`/inventory${refresh ? '?refresh=true' : ''}`));
+    } catch (e) {
+      setLoadError((e as ApiError).message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user]);
 
-  // Your machines (signed in), placed at their region's coordinates.
   useEffect(() => {
-    if (!user || regions.length === 0) { setMachines([]); return; }
-    apiFetch<any[]>('/machines')
-      .then((list) => setMachines(list
-        .filter((m) => !['deleting'].includes(m.status))
-        .map((m) => {
-          const r = regions.find((x) => x.provider === m.provider && x.id === m.region);
-          return r ? { ...m, cost_per_hour: Number(m.cost_per_hour) || 0, lat: r.lat, lng: r.lng } : null;
-        })
-        .filter(Boolean) as MapMachine[]))
-      .catch(() => setMachines([]));
-  }, [user, regions]);
+    if (!user) return;
+    loadInventory();
+    const timer = setInterval(() => loadInventory(), 10000);
+    return () => clearInterval(timer);
+  }, [user, loadInventory]);
+
+  // ---- Derived: region lookup, marker groups ----
+  const regionInfo = useMemo(() => {
+    const map = new Map<string, { name: string; lat: number; lng: number }>();
+    for (const p of catalog?.providers || []) for (const r of p.regions) map.set(`${p.provider}:${r.id}`, r);
+    return map;
+  }, [catalog]);
+
+  const items = useMemo(() => (inventory?.items || []).filter((i) => visible.has(i.provider)), [inventory, visible]);
+
+  const groups: MarkerGroup[] = useMemo(() => {
+    const byKey = new Map<string, Item[]>();
+    for (const it of items) {
+      if (!regionInfo.has(`${it.provider}:${it.region}`)) continue; // 'global' etc. are listed, not mapped
+      const key = `${it.provider}:${it.region}`;
+      byKey.set(key, [...(byKey.get(key) || []), it]);
+    }
+    return Array.from(byKey.entries()).map(([key, list]) => {
+      const [provider, region] = key.split(':');
+      const info = regionInfo.get(key)!;
+      const vms = list.filter((i) => i.type === 'vm');
+      const states = vms.map((v) => vmState(v.status));
+      const status: GroupStatus = vms.length ? STATE_RANK.find((s) => states.includes(s)) || 'stopped' : 'resources';
+      return {
+        key, provider, region, regionName: info.name, lat: info.lat, lng: info.lng,
+        count: list.length, machines: vms.length, status,
+        orphans: list.filter((i) => i.orphan).length,
+        hourly: vms.filter((v) => v.status === 'running').reduce((s, v) => s + (v.hourlyCost || 0), 0),
+        monthly: list.reduce((s, i) => s + (i.monthlyCost || 0), 0),
+      };
+    });
+  }, [items, regionInfo]);
+
+  const available: AvailableRegion[] = useMemo(() => (catalog?.providers || [])
+    .filter((p) => visible.has(p.provider))
+    .flatMap((p) => p.regions.map((r) => ({ provider: p.provider, id: r.id, name: r.name, lat: r.lat, lng: r.lng, fromPrice: r.cheapest?.onDemand }))), [catalog, visible]);
 
   const backend = useMemo(() => {
     const code = catalog?.backendRegion || '';
-    const match = RAILWAY_REGIONS.find((r) => code.startsWith(r.prefix));
-    return match ? { lat: match.lat, lng: match.lng, label: `${match.label} · ${code}` } : null;
+    const m = RAILWAY_REGIONS.find((r) => code.startsWith(r.prefix));
+    return m ? { lat: m.lat, lng: m.lng, label: `${m.label} · ${code}` } : null;
   }, [catalog]);
 
-  const nearest = useMemo(() => {
-    if (!location) return [];
-    return regions
-      .filter((r) => visible.has(r.provider))
-      .map((r) => ({ ...r, ping: estimatePingMs(location, r) }))
-      .sort((a, b) => a.ping - b.ping)
-      .slice(0, 12);
-  }, [regions, location, visible]);
+  const selectedGroup = groups.find((g) => g.key === selected) || null;
+  const selectedItems = selectedGroup ? items.filter((i) => `${i.provider}:${i.region}` === selectedGroup.key) : [];
+  const unmapped = items.filter((i) => !regionInfo.has(`${i.provider}:${i.region}`));
+  const orphans = items.filter((i) => i.orphan);
 
-  const running = machines.filter((m) => m.status === 'running');
+  // ---- Machine actions ----
+  const act = async (machineId: string, action: 'start' | 'stop' | 'sync') => {
+    setActionError(null);
+    try {
+      const res = await apiFetch<{ operationId: string }>(`/machines/${machineId}/${action}`, { method: 'POST', body: {} });
+      setOps((o) => ({ ...o, [machineId]: res.operationId }));
+    } catch (e) {
+      setActionError(e as ApiError);
+    }
+  };
 
-  const toggle = (p: string) => setVisible((v) => {
-    const next = new Set(v);
-    if (next.has(p)) next.delete(p); else next.add(p);
-    return next;
-  });
+  const toggleCloud = (p: string) => setVisible((v) => { const n = new Set(v); if (n.has(p)) n.delete(p); else n.add(p); return n; });
 
+  // ---- Render ----
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold neon-text mb-1 font-mono">[ WORLD_MAP ]</h1>
-          <p className="text-sm text-slate-400 max-w-2xl">
-            Every region you can launch in, how far it is from you, what it costs, and where your machines and the backend are running.
-          </p>
+          <h1 className="text-xl font-bold neon-text mb-1 font-mono">[ INFRASTRUCTURE_MAP ]</h1>
+          <p className="text-sm text-slate-400 max-w-2xl">Everything you&apos;ve deployed, by location and status, colour-coded by cloud. Updates every 10 seconds.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={useMyLocation} disabled={locating} className="btn-neon text-xs disabled:opacity-50">
-            {locating ? 'Locating…' : '◎ Use my location'}
-          </button>
-          <span className="text-xs text-slate-500">or click the map</span>
+          {user && (
+            <button type="button" onClick={() => loadInventory(true)} disabled={refreshing} className="btn-neon text-xs disabled:opacity-50">
+              {refreshing ? 'Asking the clouds…' : '↻ Refresh from clouds'}
+            </button>
+          )}
+          <button type="button" onClick={useMyLocation} className="btn-neon text-xs">◎ Use my location</button>
         </div>
       </div>
 
-      {error && <p className="text-sm text-neon-amber">⚠ {error}</p>}
-      {location?.approximate && (
-        <p className="text-xs text-slate-500">Your position is a rough guess from your time zone — use your location or click the map for accurate ping estimates.</p>
+      {loadError && <p className="text-sm text-neon-amber">⚠ {loadError}</p>}
+      {!authLoading && !user && (
+        <div className="rounded border border-white/10 p-4 text-sm text-slate-300">
+          Showing available regions only. <Link href="/login?next=/map" className="text-neon-cyan hover:underline">Sign in</Link> to see your deployed infrastructure.
+        </div>
       )}
 
-      {/* Filters + legend, one row above the map */}
+      {/* ---- Cost overlay ---- */}
+      {inventory && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          <Tile label="Running now" value={`$${inventory.totals.hourly.toFixed(2)}/h`} sub={`${inventory.totals.runningMachines} machine${inventory.totals.runningMachines === 1 ? '' : 's'} running`} />
+          <Tile label="Standing cost" value={`$${inventory.totals.monthlyStanding.toFixed(2)}/mo`} sub="disks, snapshots, IPs — billed even when stopped" />
+          <Tile label="Resources" value={`${inventory.items.length}`} sub={`across ${inventory.clouds.length} cloud${inventory.clouds.length === 1 ? '' : 's'}`} />
+          <Tile label="Orphans" value={`${inventory.totals.orphans}`} warn={inventory.totals.orphans > 0}
+            sub={inventory.totals.orphans ? `≈$${inventory.totals.orphanMonthly.toFixed(2)}/mo${inventory.totals.orphanHourly ? ` + $${inventory.totals.orphanHourly.toFixed(2)}/h` : ''} wasted` : 'nothing left behind'} />
+        </div>
+      )}
+
+      {/* ---- Filters (per cloud, with its totals) + layers ---- */}
       <div className="flex flex-wrap items-center gap-2">
-        {Object.entries(CLOUD_STYLE).map(([key, s]) => (
-          <button key={key} type="button" onClick={() => toggle(key)} aria-pressed={visible.has(key)}
-            className={`inline-flex items-center gap-1.5 text-xs rounded border px-2.5 py-1 ${visible.has(key) ? 'border-white/25 text-slate-200' : 'border-white/10 text-slate-500 line-through'}`}>
-            <ShapeIcon provider={key} /> {s.label}
-          </button>
+        {Object.entries(CLOUD_STYLE).map(([key, s]) => {
+          const t = inventory?.byCloud[key];
+          return (
+            <button key={key} type="button" onClick={() => toggleCloud(key)} aria-pressed={visible.has(key)}
+              className={`inline-flex items-center gap-1.5 text-xs rounded border px-2.5 py-1 ${visible.has(key) ? 'border-white/25 text-slate-200' : 'border-white/10 text-slate-500 line-through'}`}>
+              <ShapeIcon provider={key} /> {s.label}
+              {t && <span className="text-slate-400 tabular-nums">· {t.items} · ${t.hourly.toFixed(2)}/h · ${t.monthly.toFixed(0)}/mo</span>}
+            </button>
+          );
+        })}
+        <span className="mx-1 h-4 w-px bg-white/10" />
+        {([['available', 'Available regions'], ['rings', 'Ping rings'], ['paths', 'Paths']] as const).map(([k, label]) => (
+          <label key={k} className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+            <input type="checkbox" checked={layers[k]} onChange={(e) => setLayers((l) => ({ ...l, [k]: e.target.checked }))} /> {label}
+          </label>
         ))}
-        <span className="text-[0.7rem] text-slate-500 ml-2 flex flex-wrap gap-3">
-          <span>◯ ring = your machine (green running · grey stopped)</span>
-          <span className="text-neon-lime">┈ stream path</span>
-          <span className="text-neon-cyan">— control path</span>
-          <span>╌ ping rings 30 / 60 / 100 ms</span>
-        </span>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr,300px] gap-4">
-        <div className="neon-card rounded-lg border border-white/10 p-2 self-start">
-          {catalog ? (
-            <WorldMap regions={regions} machines={machines} user={location} backend={backend} visibleClouds={visible} onPickLocation={saveLocation} />
-          ) : (
-            <p className="font-mono text-sm text-neon-cyan animate-pulse p-6">&gt; LOADING_MAP…</p>
-          )}
+      {inventory?.errors.map((e) => (
+        <details key={e.provider} className="rounded border border-neon-amber/30 px-3 py-2">
+          <summary className="text-xs text-neon-amber cursor-pointer">⚠ Couldn&apos;t read {CLOUD_STYLE[e.provider]?.label || e.provider}: {e.error.title} (click for the fix)</summary>
+          <div className="mt-2"><FriendlyErrorCard friendly={e.error} compact /></div>
+        </details>
+      ))}
+
+      <div className="grid lg:grid-cols-[1fr,340px] gap-4">
+        {/* ---- Map + legend ---- */}
+        <div className="space-y-2 self-start">
+          <div className="neon-card rounded-lg border border-white/10 p-2">
+            {catalog ? (
+              <InfraMap groups={groups} available={available} user={location} backend={backend}
+                showAvailable={layers.available} showRings={layers.rings} showPaths={layers.paths}
+                selectedKey={selected} onSelect={setSelected} onPickLocation={saveLocation} />
+            ) : <p className="font-mono text-sm text-neon-cyan animate-pulse p-6">&gt; LOADING_MAP…</p>}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.68rem] text-slate-400">
+            {(Object.keys(STATUS_STYLE) as GroupStatus[]).map((k) => (
+              <span key={k} className="inline-flex items-center gap-1.5">
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><circle cx="7" cy="7" r="5" fill="none" stroke={STATUS_STYLE[k].color} strokeWidth="2" strokeDasharray={STATUS_STYLE[k].dashed ? '2 2' : undefined} /></svg>
+                {STATUS_STYLE[k].label}
+              </span>
+            ))}
+            <span>① count badge</span><span className="text-neon-pink">⚠ orphan</span>
+            <span className="text-neon-lime">┈ stream</span><span className="text-neon-cyan">— control</span>
+            <span>◇ Railway (API + DB) · Vercel serves the site from every edge</span>
+            {location?.approximate && <span className="text-slate-500">· your position is a time-zone guess — click the map</span>}
+          </div>
         </div>
 
-        <aside className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded border border-white/10 bg-white/[0.02] px-3 py-2">
-              <p className="label">Closest</p>
-              <p className="text-sm text-slate-100 mt-0.5">{nearest[0] ? `${nearest[0].name}` : '—'}</p>
-              <p className="text-[0.68rem] text-slate-500">{nearest[0] ? `~${nearest[0].ping} ms · ${CLOUD_STYLE[nearest[0].provider].label}` : ''}</p>
-            </div>
-            <div className="rounded border border-white/10 bg-white/[0.02] px-3 py-2">
-              <p className="label">Running</p>
-              <p className="text-sm text-slate-100 mt-0.5 tabular-nums">{user ? `${running.length} machine${running.length === 1 ? '' : 's'}` : '—'}</p>
-              <p className="text-[0.68rem] text-slate-500">{user ? `≈$${running.reduce((s, m) => s + m.cost_per_hour, 0).toFixed(2)}/h` : <Link href="/login?next=/map" className="text-neon-cyan">sign in</Link>}</p>
-            </div>
-          </div>
+        {/* ---- Detail panel ---- */}
+        <aside className="rounded-lg border border-white/10 bg-cyber-panel/50 p-4 space-y-3 self-start">
+          {!selectedGroup ? (
+            <>
+              <p className="label">Details</p>
+              <p className="text-sm text-slate-400">Click a marker to see what&apos;s deployed there and manage it.</p>
+              {user && inventory && groups.length === 0 && (
+                <p className="text-sm text-slate-400">Nothing deployed yet. <Link href="/machines" className="text-neon-cyan hover:underline">Launch a machine →</Link></p>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-100 flex items-center gap-2"><ShapeIcon provider={selectedGroup.provider} /> {CLOUD_STYLE[selectedGroup.provider].label} · {selectedGroup.regionName}</p>
+                  <p className="text-xs text-slate-500">{selectedGroup.region}{location ? ` · est. ping ~${estimatePingMs(location, selectedGroup)} ms` : ''}</p>
+                </div>
+                <button type="button" onClick={() => setSelected(null)} className="text-xs text-slate-400 hover:text-slate-100">✕</button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Tile label="Running" value={`$${selectedGroup.hourly.toFixed(2)}/h`} />
+                <Tile label="Standing" value={`$${selectedGroup.monthly.toFixed(2)}/mo`} />
+              </div>
+              {actionError && <FriendlyErrorCard message={actionError.message} tip={actionError.tip} friendly={actionError.friendly} />}
+              <ul className="space-y-2">
+                {selectedItems
+                  .sort((a, b) => (a.type === 'vm' ? -1 : b.type === 'vm' ? 1 : a.type.localeCompare(b.type)))
+                  .map((it) => (
+                  <li key={`${it.provider}-${it.id}`} className={`rounded border p-2.5 ${it.orphan ? 'border-neon-pink/40' : 'border-white/10'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[0.66rem] uppercase tracking-label text-slate-500">{TYPE_LABEL[it.type] || it.type}{it.zone ? ` · ${it.zone}` : ''}</p>
+                        <p className="text-xs text-slate-100 break-all">{it.name}</p>
+                      </div>
+                      <StatusChip status={it.status} />
+                    </div>
+                    <p className="text-[0.7rem] text-slate-400 mt-1 tabular-nums">
+                      {it.hourlyCost ? `≈$${it.hourlyCost.toFixed(2)}/h while running` : ''}
+                      {it.monthlyCost ? `${it.hourlyCost ? ' · ' : ''}≈$${it.monthlyCost.toFixed(2)}/mo` : ''}
+                      {it.sizeGb ? ` · ${it.sizeGb} GB` : ''}
+                      {!it.hourlyCost && !it.monthlyCost ? 'no charge' : ''}
+                    </p>
+                    {it.orphan && <p className="text-[0.7rem] text-neon-pink mt-1">⚠ {it.orphanReason}</p>}
+                    {it.source === 'app' && (
+                      <p className="text-[0.7rem] text-slate-500 mt-1">
+                        {inventory?.errors.some((e) => e.provider === it.provider)
+                          ? `Couldn't read ${CLOUD_STYLE[it.provider]?.label} just now — showing the app's own record.`
+                          : !inventory?.clouds.includes(it.provider)
+                          ? `No ${CLOUD_STYLE[it.provider]?.label} keys saved — showing the app's own record.`
+                          : 'Known to the app only — not (yet) returned by the cloud.'}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {it.type === 'vm' && it.machineId && (
+                        <>
+                          {vmState(it.status) === 'stopped' && <button type="button" onClick={() => act(it.machineId!, 'start')} className="btn-neon-lime text-[0.7rem] py-0.5 px-2">Start</button>}
+                          {it.status === 'running' && <button type="button" onClick={() => act(it.machineId!, 'stop')} className="btn-neon-pink text-[0.7rem] py-0.5 px-2">Stop</button>}
+                          <button type="button" onClick={() => act(it.machineId!, 'sync')} className="btn-neon text-[0.7rem] py-0.5 px-2">Sync</button>
+                          {it.status === 'running' && <button type="button" onClick={() => setConnectFor(connectFor === it.machineId ? null : it.machineId!)} className="btn-neon-magenta text-[0.7rem] py-0.5 px-2">Connect</button>}
+                        </>
+                      )}
+                      {it.consoleUrl && <a href={it.consoleUrl} target="_blank" rel="noopener noreferrer" className="text-[0.7rem] text-neon-cyan hover:underline self-center">Open in console ↗</a>}
+                    </div>
+                    {it.machineId && ops[it.machineId] && (
+                      <div className="mt-2"><OperationConsole operationId={ops[it.machineId]} height="max-h-40" onFinished={() => loadInventory(true)} /></div>
+                    )}
+                    {it.machineId && connectFor === it.machineId && (
+                      <div className="mt-3"><MachineConnectionPanel machineId={it.machineId} status={it.status} /></div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
-          <div className="rounded border border-white/10">
-            <p className="label px-3 pt-3 pb-2">Nearest regions (estimated ping)</p>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-slate-500 text-left">
-                  <th className="px-3 py-1 font-normal">Region</th>
-                  <th className="px-2 py-1 font-normal text-right">Ping</th>
-                  <th className="px-3 py-1 font-normal text-right">From</th>
-                </tr>
-              </thead>
-              <tbody>
-                {nearest.map((r) => {
-                  const q = pingLabel(r.ping);
-                  return (
-                    <tr key={`${r.provider}-${r.id}`} className="border-t border-white/5">
-                      <td className="px-3 py-1.5 text-slate-200">
-                        <ShapeIcon provider={r.provider} /> {r.name}
-                        <span className="block text-[0.65rem] text-slate-500 pl-4">{CLOUD_STYLE[r.provider].label} · {r.gpus.join('/')}</span>
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-200">
-                        {r.ping} ms <span className={`block text-[0.62rem] ${q.cls}`}>{q.text}</span>
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-300">{r.cheapest ? `$${r.cheapest.onDemand.toFixed(2)}/h` : '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <p className="text-[0.65rem] text-slate-500 px-3 py-2 leading-relaxed">
-              Ping is estimated from distance (≈5 ms + 1.5 ms per 100 km); your real ping depends on your internet provider. Under ~30 ms feels local;
-              over ~60 ms is noticeable in fast games. Prices are on-demand estimates.
-            </p>
-          </div>
-          <p className="text-[0.68rem] text-slate-500 leading-relaxed">
-            The website itself is served by Vercel from the edge location nearest you, so it isn&apos;t drawn. The game stream goes straight between you and the machine.
-          </p>
+          {/* Orphans across everything */}
+          {orphans.length > 0 && (
+            <div className="border-t border-white/5 pt-3">
+              <p className="label text-neon-pink mb-2">⚠ Orphans — still billing</p>
+              <ul className="space-y-1.5 text-xs">
+                {orphans.map((o) => (
+                  <li key={`${o.provider}-${o.id}`} className="flex items-start gap-2">
+                    <ShapeIcon provider={o.provider} />
+                    <span className="min-w-0">
+                      <button type="button" className="text-slate-200 hover:underline text-left break-all" onClick={() => setSelected(`${o.provider}:${o.region}`)}>{TYPE_LABEL[o.type]} {o.name}</button>
+                      <span className="block text-slate-500">{o.region} · {o.monthlyCost ? `$${o.monthlyCost.toFixed(2)}/mo` : o.hourlyCost ? `$${o.hourlyCost.toFixed(2)}/h` : 'no charge'} · {o.orphanReason}</span>
+                      {o.consoleUrl && <a href={o.consoleUrl} target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline">Delete in console ↗</a>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {unmapped.length > 0 && (
+            <div className="border-t border-white/5 pt-3">
+              <p className="label mb-2">Global / not on the map</p>
+              <ul className="space-y-1 text-xs text-slate-300">
+                {unmapped.map((u) => <li key={`${u.provider}-${u.id}`}><ShapeIcon provider={u.provider} /> {TYPE_LABEL[u.type]} · {u.name} <span className="text-slate-500">({u.region}, {u.status})</span></li>)}
+              </ul>
+            </div>
+          )}
         </aside>
       </div>
+
+      {/* ---- Table view (the same data as text) ---- */}
+      {inventory && inventory.items.length > 0 && (
+        <details className="neon-card rounded-lg border border-white/10 p-4">
+          <summary className="label cursor-pointer">Table view — all {inventory.items.length} resources</summary>
+          <div className="overflow-x-auto mt-3">
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-slate-500">
+                <th className="py-1 pr-3 font-normal">Cloud</th><th className="py-1 pr-3 font-normal">Region</th><th className="py-1 pr-3 font-normal">Type</th>
+                <th className="py-1 pr-3 font-normal">Name</th><th className="py-1 pr-3 font-normal">Status</th><th className="py-1 pr-3 font-normal text-right">$/h</th><th className="py-1 font-normal text-right">$/mo</th>
+              </tr></thead>
+              <tbody>
+                {inventory.items.map((i) => (
+                  <tr key={`${i.provider}-${i.id}`} className="border-t border-white/5">
+                    <td className="py-1 pr-3"><ShapeIcon provider={i.provider} /> {CLOUD_STYLE[i.provider]?.label}</td>
+                    <td className="py-1 pr-3 text-slate-300">{i.region}{i.zone ? ` / ${i.zone}` : ''}</td>
+                    <td className="py-1 pr-3 text-slate-300">{TYPE_LABEL[i.type] || i.type}</td>
+                    <td className="py-1 pr-3 text-slate-200 break-all">{i.name}{i.orphan ? ' ⚠' : ''}</td>
+                    <td className="py-1 pr-3 text-slate-300">{i.status}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums text-slate-300">{i.type === 'vm' && i.hourlyCost ? i.hourlyCost.toFixed(2) : '—'}</td>
+                    <td className="py-1 text-right tabular-nums text-slate-300">{i.monthlyCost ? i.monthlyCost.toFixed(2) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -127,3 +127,33 @@ export interface SetupStage {
   key: string;       // e.g. 'drivers', 'ready', 'failed'
   message: string;
 }
+
+// ---------------------------------------------------------------------------
+// Inventory: everything the app has created in a user's cloud account
+// ---------------------------------------------------------------------------
+// Returned by CloudProvider.listResources() and drawn on the infrastructure
+// map. One entry per resource (machine, disk, network, firewall, public IP,
+// snapshot, resource group...). Costs are ESTIMATES in US dollars.
+
+export type InventoryType =
+  | 'vm' | 'disk' | 'snapshot' | 'network' | 'subnet' | 'firewall'
+  | 'public-ip' | 'nic' | 'gateway' | 'route-table' | 'resource-group' | 'other';
+
+export interface InventoryItem {
+  provider: ProviderName;
+  type: InventoryType;
+  id: string;               // the cloud's own id/name for it (unique within the provider)
+  name: string;             // friendly name shown on the map
+  region: string;           // catalog region id, e.g. 'asia-southeast1' / 'ap-southeast-1' / 'southeastasia'; 'global' if not regional
+  zone?: string;            // zone / availability zone / availability domain, if any
+  status: string;           // cloud's state in plain words: 'running', 'stopped', 'available', 'in-use', 'ready', 'creating'...
+  instanceId?: string;      // for type 'vm': the id format we store in machines.instance_id (e.g. 'zone/name'), so it can be matched
+  attachedTo?: string;      // for disks/IPs/NICs: the instanceId (our format) of the VM it belongs to, if any
+  sizeGb?: number;          // disks/snapshots
+  hourlyCost?: number;      // while it runs (VMs)
+  monthlyCost?: number;     // standing cost even when stopped (disks, snapshots, reserved IPs)
+  orphan?: boolean;         // true = costs money but isn't attached to any machine (leftover)
+  orphanReason?: string;    // plain-English why, e.g. 'Disk not attached to any machine'
+  consoleUrl?: string;      // link to it in the cloud console
+  createdAt?: string;       // ISO timestamp, if known
+}
