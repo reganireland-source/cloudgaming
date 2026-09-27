@@ -86,6 +86,7 @@ import statusRoutes from './api/routes/status';             // health lights + b
 import credentialRoutes from './api/routes/credentials';    // add/check/remove your cloud keys (encrypted)
 import operationRoutes from './api/routes/operations';      // live progress of cloud actions
 import { failOrphanedOperations } from './services/OperationLog';
+import { recordRequest } from './services/Metrics';
 
 // Middleware that checks the user's login token (a "JWT") and rejects the
 // request if it's missing or invalid. See src/api/middleware/auth.ts.
@@ -137,6 +138,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.on('finish', () => {
     const duration = Date.now() - start;
     console.log(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+    // Also count it for the BACKEND light's stats panel (services/Metrics.ts).
+    // originalUrl, not path: by the time the reply finishes, Express has
+    // trimmed the mount prefix off req.path (e.g. "/api/status" → "/").
+    recordRequest(req.method, req.originalUrl.split('?')[0], res.statusCode, duration);
   });
 
   // IMPORTANT: calling next() hands the request on to the next middleware or

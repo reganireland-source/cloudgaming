@@ -31,6 +31,7 @@
 import { useState, useEffect } from 'react';
 import { apiUrl } from '@/lib/api';
 import BuildInfoPanel from './BuildInfoPanel';
+import StatusDetailPanel, { type LightKey } from './StatusDetailPanel';
 
 // These interfaces describe the JSON the backend sends. They mirror the ones
 // in src/services/StatusService.ts — if you change one, change the other.
@@ -68,11 +69,13 @@ function Light({
   connected,
   loading,
   latencyMs,
+  onClick,
 }: {
   label: string;
   connected: boolean | null;
   loading: boolean;
   latencyMs?: number;
+  onClick: () => void; // opens the stats panel for this light
 }) {
   // Chained ternaries: loading ? grey : (connected ? green : red).
   const color = loading
@@ -89,7 +92,13 @@ function Light({
 
   // `title` = the tooltip shown when you hover over the light.
   return (
-    <div className="flex items-center gap-1.5" title={latencyMs !== undefined ? `${latencyMs}ms` : undefined}>
+    // A <button> so it's clickable AND reachable with the keyboard (Tab + Enter).
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1.5 rounded px-1 -mx-1 hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-1 focus-visible:outline-neon-cyan"
+      title={`${label}: click for details${latencyMs !== undefined ? ` (${latencyMs}ms)` : ''}`}
+    >
       <span
         className={`inline-block w-1.5 h-1.5 rounded-full ${color} ${glow} ${
           loading ? 'animate-pulse' : ''
@@ -101,7 +110,7 @@ function Light({
       {!loading && connected && latencyMs !== undefined && (
         <span className="text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -111,6 +120,7 @@ export default function SystemStatusBar() {
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);   // did that request work at all?
   const [loading, setLoading] = useState(true);                                     // still waiting for the first answer?
   const [panelOpen, setPanelOpen] = useState(false);                                // is the Build info pop-up showing?
+  const [detailFor, setDetailFor] = useState<LightKey | null>(null);                // which light's stats panel is open
 
   // Runs once after the bar first appears (the empty [] at the end means
   // "no dependencies — don't re-run on re-renders").
@@ -159,15 +169,20 @@ export default function SystemStatusBar() {
   }, []);
 
   return (
-    <div className="sticky top-12 z-40 border-b border-white/[0.05] bg-cyber-darker/95 backdrop-blur-md">
+    // No blur effect on this bar on purpose: CSS makes any "position: fixed"
+    // child of a blurred (backdrop-filter) element position itself inside
+    // that element, which squeezed the pop-ups into this 30px bar.
+    <div className="sticky top-12 z-40 border-b border-white/[0.05] bg-cyber-darker">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-4 overflow-x-auto">
         <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
           {/* `status?.database.connected ?? null` below: `?.` = "if status
               exists" (it's null until the first answer), and `?? null` =
               "if that gave undefined, use null (= unknown)". */}
-          <Light label="Backend" connected={backendReachable} loading={loading} />
+          <Light label="Backend"
+            onClick={() => setDetailFor('backend')} connected={backendReachable} loading={loading} />
           <Light
             label="Database"
+            onClick={() => setDetailFor('database')}
             connected={status?.database.connected ?? null}
             loading={loading}
             latencyMs={status?.database.latencyMs}
@@ -175,24 +190,28 @@ export default function SystemStatusBar() {
           <div className="hidden sm:block h-3 w-px bg-neon-cyan/20" />
           <Light
             label="AWS"
+            onClick={() => setDetailFor('aws')}
             connected={status?.providers.aws.connected ?? null}
             loading={loading}
             latencyMs={status?.providers.aws.latencyMs}
           />
           <Light
             label="Azure"
+            onClick={() => setDetailFor('azure')}
             connected={status?.providers.azure.connected ?? null}
             loading={loading}
             latencyMs={status?.providers.azure.latencyMs}
           />
           <Light
             label="GCP"
+            onClick={() => setDetailFor('gcp')}
             connected={status?.providers.gcp.connected ?? null}
             loading={loading}
             latencyMs={status?.providers.gcp.latencyMs}
           />
           <Light
             label="Oracle"
+            onClick={() => setDetailFor('oracle')}
             connected={status?.providers.oracle.connected ?? null}
             loading={loading}
             latencyMs={status?.providers.oracle.latencyMs}
@@ -210,6 +229,8 @@ export default function SystemStatusBar() {
       {/* The pop-up only exists while panelOpen is true. We pass it a
           function to call when it wants to close. */}
       {panelOpen && <BuildInfoPanel onClose={() => setPanelOpen(false)} />}
+      {/* Clicking a light opens its live stats (components/StatusDetailPanel.tsx). */}
+      {detailFor && <StatusDetailPanel initial={detailFor} onClose={() => setDetailFor(null)} />}
     </div>
   );
 }

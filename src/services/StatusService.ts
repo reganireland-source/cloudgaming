@@ -30,6 +30,8 @@ export interface ServiceStatus {
   connected: boolean;       // green (true) or red (false)
   latencyMs?: number;       // how long the check took, in milliseconds
   detail?: string;          // why it failed, if it did
+  httpStatus?: number;      // cloud probes: the HTTP status the API answered with
+  remoteAddress?: string;   // cloud probes: the IP address we actually connected to
   checkedAt: string;        // when the check ran (ISO timestamp text)
 }
 
@@ -50,7 +52,7 @@ export interface SystemStatus {
 // (usually with an error like "unauthorised", which still proves we can
 // reach them). `Record<'aws' | ..., string>` means: an object that MUST have
 // exactly these four keys, each holding a string.
-const PROVIDER_PROBES: Record<'aws' | 'azure' | 'gcp' | 'oracle', string> = {
+export const PROVIDER_PROBES: Record<'aws' | 'azure' | 'gcp' | 'oracle', string> = {
   aws: 'https://ec2.amazonaws.com',
   azure: 'https://management.azure.com',
   gcp: 'https://compute.googleapis.com',
@@ -77,7 +79,7 @@ let cache: { data: SystemStatus; expiresAt: number } | null = null;
  * good or bad, is resolved as a result object, so callers don't need
  * try/catch for normal network failures.
  */
-function probeUrl(url: string): Promise<{ ok: boolean; latencyMs: number; detail?: string }> {
+function probeUrl(url: string): Promise<{ ok: boolean; latencyMs: number; detail?: string; httpStatus?: number; remoteAddress?: string }> {
   return new Promise((resolve) => {
     const start = Date.now();
 
@@ -87,7 +89,7 @@ function probeUrl(url: string): Promise<{ ok: boolean; latencyMs: number; detail
       // the connection is released properly.
       res.resume();
       // Any HTTP reply at all — even 401/403/404 — proves the network path works.
-      resolve({ ok: true, latencyMs: Date.now() - start });
+      resolve({ ok: true, latencyMs: Date.now() - start, httpStatus: res.statusCode, remoteAddress: res.socket?.remoteAddress });
     });
 
     // No reply within PROBE_TIMEOUT_MS: abort the request and report down.
@@ -146,6 +148,8 @@ async function checkProvider(
       connected: result.ok,
       latencyMs: result.latencyMs,
       detail: result.detail,
+      httpStatus: result.httpStatus,
+      remoteAddress: result.remoteAddress,
       checkedAt: new Date().toISOString(),
     };
   } catch (error: any) {
@@ -196,5 +200,52 @@ export async function getSystemStatus(forceRefresh = false): Promise<SystemStatu
 
   // Remember this result for the next 15 seconds.
   cache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+  remember(database);
+  for (const p of [aws, azure, gcp, oracle]) remember(p);
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// History: the last few results for each light, for the detail panels
+// ---------------------------------------------------------------------------
+// Kept in memory only (resets on restart). A fresh result is added each time
+// the status is actually re-checked (at most every 15 s, and only while
+// someone has the site open), so ~40 entries ≈ the last 10+ minutes.
+
+export interface HistoryPoint {
+  at: string;
+  ok: boolean;
+  latencyMs?: number;
+  httpStatus?: number;
+  detail?: string;
+}
+
+const HISTORY_LENGTH = 40;
+const history: Record<string, HistoryPoint[]> = {};
+
+function remember(status: ServiceStatus): void {
+  const list = (history[status.name] ||= []);
+  list.push({ at: status.checkedAt, ok: status.connected, latencyMs: status.latencyMs, httpStatus: status.httpStatus, detail: status.detail });
+  if (list.length > HISTORY_LENGTH) list.shift();
+}
+
+/** The recorded history for one light ('database', 'aws', ...). */
+export function getHistory(name: string): HistoryPoint[] {
+  return history[name] ? [...history[name]] : [];
+}
+
+/** Summary numbers over a history: success rate and latency spread. */
+export function summarise(points: HistoryPoint[]) {
+  const latencies = points.filter((p) => p.ok && typeof p.latencyMs === 'number').map((p) => p.latencyMs as number);
+  const sorted = [...latencies].sort((a, b) => a - b);
+  const pick = (q: number) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : null);
+  return {
+    checks: points.length,
+    successRate: points.length ? Math.round((points.filter((p) => p.ok).length / points.length) * 1000) / 10 : null,
+    latencyMin: sorted.length ? sorted[0] : null,
+    latencyMedian: pick(0.5),
+    latencyP95: pick(0.95),
+    latencyMax: sorted.length ? sorted[sorted.length - 1] : null,
+    lastFailure: [...points].reverse().find((p) => !p.ok) || null,
+  };
 }
