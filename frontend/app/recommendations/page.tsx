@@ -86,17 +86,21 @@ const RATING: Record<Rating, { label: string; className: string }> = {
  * choosing a region (priority).
  */
 const CATEGORIES: Array<{ id: string; label: string; examples: string; tier: TierId; priority: Priority; why: string }> = [
-  { id: 'competitive', label: 'Competitive', examples: 'Valorant, CS2, Fortnite, Rocket League', tier: 'good', priority: 'latency',
-    why: 'Every millisecond counts, and these run fast on a T4 — so the closest region wins, price second.' },
+  { id: 'competitive', label: 'Competitive', examples: 'CS2, Dota 2, Overwatch 2, Street Fighter 6', tier: 'good', priority: 'latency',
+    why: 'Every millisecond counts, and these run fast on a T4 — so the closest region wins, price second. (Kernel anti-cheat games like Valorant or Fortnite can’t run on these Linux machines.)' },
   { id: 'modern-aaa', label: 'Modern AAA', examples: 'Cyberpunk 2077, Elden Ring, Starfield', tier: 'better', priority: 'balanced',
     why: 'Needs a current GPU for 1440p — the best-value region with a good ping.' },
   { id: 'demanding', label: 'Demanding / 4K', examples: 'Flight Simulator, Baldur’s Gate 3, big sims & strategy', tier: 'best', priority: 'balanced',
     why: 'Heavy on GPU and CPU — the most powerful machines, at a good ping.' },
-  { id: 'classic', label: 'Classic', examples: 'GTA V, Skyrim, The Witcher 3, older AAA', tier: 'good', priority: 'balanced',
+  { id: 'classic', label: 'Classic', examples: 'Skyrim, The Witcher 3, Fallout 4, older AAA', tier: 'good', priority: 'balanced',
     why: 'A T4 runs these at 1080p60 — no need to pay for more; good ping, then lowest price.' },
   { id: 'indie', label: 'Indie & casual', examples: 'Hades, Stardew Valley, Minecraft, turn-based', tier: 'good', priority: 'price',
     why: 'Light on hardware and forgiving of a little lag — the cheapest region that’s still playable.' },
 ];
+// Games whose anti-cheat blocks Linux / Proton (the machines run Ubuntu +
+// Steam Proton), so they won't start on these machines at all.
+const ANTI_CHEAT_BLOCKED = /valorant|fortnite|apex legends|pubg|league of legends|rainbow six|destiny 2|call of duty|warzone|battlefield|gta online|roblox/i;
+
 const PRIORITY_LABEL: Record<Priority, string> = { latency: 'Lowest ping', balanced: 'Balanced', price: 'Lowest price' };
 
 // Tier → the launch form's streaming quality.
@@ -330,6 +334,9 @@ export default function RecommendationsPage() {
                   ))}
                 </div>
               </div>
+              {ANTI_CHEAT_BLOCKED.test(game) && (
+                <p className="col-span-2 text-xs text-neon-pink">⚠ {game.trim()} uses anti-cheat that blocks Linux, so it won’t run on these machines (they run Steam on Linux via Proton). Check protondb.com for a game before launching.</p>
+              )}
               {result?.gameNotFound && game.trim() && (
                 <p className="col-span-2 text-xs text-slate-400">“{game.trim()}” isn’t in the game library yet — the category above still applies{result.games.length ? ` (known: ${result.games.join(', ')})` : ''}.</p>
               )}
