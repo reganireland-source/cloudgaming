@@ -63,7 +63,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "CloudGaming Hub",
+  title: "Gints Global Gaming Hubjob",
   description: "Multi-cloud gaming infrastructure — cost, latency and performance across AWS, Azure, GCP and Oracle",
 };
 
@@ -97,12 +97,25 @@ export default function RootLayout({
               <div className="flex justify-between items-center h-12 gap-3 sm:gap-6">
                 {/* Logo / wordmark — links back to the dashboard */}
                 <a href="/" className="flex items-center gap-2 sm:gap-3 flex-shrink-0 min-w-0">
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-sm border border-neon-cyan/40 bg-neon-cyan/[0.06] text-neon-cyan text-[0.7rem] shadow-[0_0_10px_-2px_rgba(95,215,224,0.5)]">
-                    ▲
+                  {/* The mark: a globe (Global) — same drawing as app/icon.svg, the browser-tab icon. */}
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-sm border border-neon-cyan/40 bg-neon-cyan/[0.06] text-neon-cyan shadow-[0_0_10px_-2px_rgba(95,215,224,0.5)]">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+                      <circle cx="12" cy="12" r="9" />
+                      <ellipse cx="12" cy="12" rx="4" ry="9" />
+                      <path d="M3.5 9h17M3.5 15h17" />
+                    </svg>
                   </span>
-                  {/* Full name from 400px wide; just "CG/HUB" on the smallest screens. */}
-                  <span className="text-[0.8rem] sm:text-[0.85rem] font-semibold tracking-[0.12em] sm:tracking-[0.14em] text-slate-100 whitespace-nowrap">
-                    <span className="hidden xs:inline">CLOUDGAMING</span><span className="xs:hidden">CG</span><span className="text-neon-cyan">/</span>HUB
+                  {/* Wordmark. Full name "GINTS GLOBAL / GAMING HUBJOB" on wide
+                      screens (xl); "GINTS / HUBJOB" from 400px; "GGG / HJ" on the
+                      smallest phones. */}
+                  <span className="text-[0.8rem] sm:text-[0.85rem] font-semibold tracking-[0.12em] sm:tracking-[0.14em] text-slate-100 whitespace-nowrap" aria-label="Gints Global Gaming Hubjob">
+                    <span aria-hidden>
+                      <span className="hidden xl:inline">GINTS GLOBAL</span>
+                      <span className="xl:hidden"><span className="hidden xs:inline">GINTS</span><span className="xs:hidden">GGG</span></span>
+                      <span className="text-neon-cyan">/</span>
+                      <span className="hidden xl:inline">GAMING HUBJOB</span>
+                      <span className="xl:hidden"><span className="hidden xs:inline">HUBJOB</span><span className="xs:hidden">HJ</span></span>
+                    </span>
                   </span>
                   {/* Version chip — "hidden md:inline-block" = only shown on medium+ screens */}
                   <span className="hidden md:inline-block text-[0.62rem] tracking-label text-slate-500 border border-white/10 rounded-sm px-1.5 py-px">
@@ -132,7 +145,7 @@ export default function RootLayout({
           <footer className="border-t border-white/[0.06] mt-12 short:mt-6">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row gap-2 justify-between items-center text-[0.68rem] tracking-label uppercase text-slate-500">
               <span>
-                <span className="text-slate-300">CloudGaming Hub</span> · multi-cloud gaming infrastructure
+                <span className="text-slate-300">Gints Global Gaming Hubjob</span> · multi-cloud gaming infrastructure
               </span>
               <span>
                 AWS <span className="text-slate-700">/</span> Azure <span className="text-slate-700">/</span> GCP <span className="text-slate-700">/</span> Oracle

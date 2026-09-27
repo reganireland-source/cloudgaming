@@ -455,7 +455,7 @@ export class AzureProvider extends CloudProvider {
         tags: TAGS,
         securityRules: SUNSHINE_PORT_RANGES.map((p, i) => ({
           name: `sunshine-${p.protocol}-${p.from}${p.to !== p.from ? `-${p.to}` : ''}`,
-          description: 'CloudGaming Hub: Sunshine/Moonlight streaming',
+          description: 'Gints Global Gaming Hubjob: Sunshine/Moonlight streaming',
           priority: 1000 + i * 10,   // lower number = checked first; any value 100–4096 works
           direction: 'Inbound',
           access: 'Allow',
@@ -545,7 +545,7 @@ export class AzureProvider extends CloudProvider {
       throw new FriendlyCloudError({
         code: 'UNKNOWN_SHAPE',
         title: `Unknown machine type "${config.instanceType}"`,
-        explanation: 'This machine size isn\'t one CloudGaming Hub knows how to launch on Azure.',
+        explanation: 'This machine size isn\'t one Gints Global Gaming Hubjob knows how to launch on Azure.',
         fixes: [`Choose one of: ${AZURE_SHAPES.map((s) => `${s.label} (${s.id})`).join(', ')}.`],
       });
     }

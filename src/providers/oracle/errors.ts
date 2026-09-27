@@ -45,7 +45,7 @@ export function oracleConsole(path = ''): string {
 }
 
 /**
- * The IAM policy statements a group needs so CloudGaming Hub can do its job.
+ * The IAM policy statements a group needs so Gints Global Gaming Hubjob can do its job.
  * `scope` is "tenancy" or "compartment <name>". Shown in error cards and in
  * the credential checks so the user can copy-paste them.
  */

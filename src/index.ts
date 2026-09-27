@@ -239,7 +239,7 @@ failOrphanedOperations();
 // these log lines are the first thing to look for in Railway's logs to
 // confirm a deploy succeeded.
 app.listen(PORT, () => {
-  console.log(`CloudGaming Hub backend running on port ${PORT}`);
+  console.log(`Gints Global Gaming Hubjob backend running on port ${PORT}`);
   console.log(`Environment: ${env.NODE_ENV}`);
   console.log(`Log level: ${env.LOG_LEVEL}`);
 });

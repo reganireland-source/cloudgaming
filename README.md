@@ -1,4 +1,4 @@
-# CloudGaming Hub
+# Gints Global Gaming Hubjob
 
 A multi-cloud gaming infrastructure platform that enables cost-optimized game streaming across AWS, Azure, GCP, and Oracle Cloud. Find the best cloud region for your game, location, and budget with automated cost tracking and real-time bill of materials visualization.
 

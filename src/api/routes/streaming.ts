@@ -296,7 +296,7 @@ router.get('/:machineId/streaming-status', authMiddleware, async (req: Request, 
  */
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   const clientsList = {
-    description: 'Streaming clients compatible with CloudGaming Hub (Sunshine-based)',
+    description: 'Streaming clients compatible with Gints Global Gaming Hubjob (Sunshine-based)',
     clients: [
       {
         name: 'Sunshine Web UI',
@@ -357,7 +357,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
       easeOfUse: 'Sunshine Web UI (browser)',
       allAroundBest: 'Moonlight (native) + Sunshine Web UI (browser fallback)',
     },
-    note: 'CloudGaming Hub is built on Sunshine streaming server - all Sunshine-compatible clients work',
+    note: 'Gints Global Gaming Hubjob is built on Sunshine streaming server - all Sunshine-compatible clients work',
   };
 
   res.json(clientsList);

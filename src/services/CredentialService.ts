@@ -193,7 +193,7 @@ export async function loadCredentials(userId: string, provider: string): Promise
     throw new FriendlyCloudError({
       code: 'NO_CREDENTIALS',
       title: `You haven't added ${label} credentials yet`,
-      explanation: `CloudGaming Hub works inside YOUR ${label} account, so it needs a limited-access key for it.`,
+      explanation: `Gints Global Gaming Hubjob works inside YOUR ${label} account, so it needs a limited-access key for it.`,
       fixes: [
         'Open the Config page.',
         `Pick ${label} and follow the setup guide to create a key.`,

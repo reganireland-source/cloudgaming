@@ -44,7 +44,7 @@ try {
 
 # Create AMI build info file
 $buildInfo = @"
-CloudGaming Hub Windows AMI Build Information
+Gints Global Gaming Hubjob Windows AMI Build Information
 ===============================================
 
 Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
@@ -58,7 +58,7 @@ Pre-installed Components:
 - Battle.net Launcher
 - Steam Client
 - Epic Games Launcher
-- CloudGaming Hub Monitoring Agent
+- Gints Global Gaming Hubjob Monitoring Agent
 
 Configuration:
 - Sunshine Web UI: http://<instance-ip>:47990
@@ -66,7 +66,7 @@ Configuration:
 - Default Quality: High (1440p 60fps 25Mbps)
 - Auto-start: Enabled
 
-Ready for CloudGaming Hub deployment
+Ready for Gints Global Gaming Hubjob deployment
 
 For support: https://github.com/reganireland-source/cloudgaming
 "@
@@ -74,4 +74,4 @@ For support: https://github.com/reganireland-source/cloudgaming
 Set-Content -Path "C:\cloudgaming-build-info.txt" -Value $buildInfo
 
 Write-Host "AMI optimization complete"
-Write-Host "This AMI is ready for CloudGaming Hub deployment"
+Write-Host "This AMI is ready for Gints Global Gaming Hubjob deployment"

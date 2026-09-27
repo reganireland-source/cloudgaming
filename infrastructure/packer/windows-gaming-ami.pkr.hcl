@@ -1,4 +1,4 @@
-// Packer configuration for building CloudGaming Hub Windows AMI
+// Packer configuration for building Gints Global Gaming Hubjob Windows AMI
 // Pre-installs: GPU drivers, Sunshine, Battle.net, and essential gaming software
 // Build: packer build -var-file=vars.pkr.hcl windows-gaming-ami.pkr.hcl
 
@@ -40,7 +40,7 @@ variable "ami_name" {
 
 variable "ami_description" {
   type    = string
-  default = "CloudGaming Hub Windows AMI with GPU drivers, Sunshine, and gaming clients pre-installed"
+  default = "Gints Global Gaming Hubjob Windows AMI with GPU drivers, Sunshine, and gaming clients pre-installed"
 }
 
 variable "root_volume_size" {
@@ -103,7 +103,7 @@ source "amazon-ebs" "cloudgaming_windows" {
   tags = {
     Name      = "CloudGaming-Gaming-AMI"
     Builder   = "Packer"
-    CreatedBy = "CloudGaming Hub"
+    CreatedBy = "Gints Global Gaming Hubjob"
     Purpose   = "Gaming Instance Template"
   }
 
@@ -167,7 +167,7 @@ build {
       "  Write-Host 'AMI Build Verification'",
       "  Write-Host ('GPU Status: ' + (Get-WmiObject -Class Win32_VideoController).Name)",
       "  Write-Host ('Sunshine Version: ' + (Get-Item -Path 'C:\\Program Files\\Sunshine\\' -ErrorAction SilentlyContinue).VersionInfo.ProductVersion)",
-      "  Write-Host 'Build complete - AMI ready for CloudGaming Hub'",
+      "  Write-Host 'Build complete - AMI ready for Gints Global Gaming Hubjob'",
       "\""
     ]
   }

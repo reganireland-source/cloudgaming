@@ -671,7 +671,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div className="w-full max-w-[420px]">
         <div className="mb-5 text-center">
           <p className="label mb-1">[ ACCESS_TERMINAL ]</p>
-          <h1 className="text-lg neon-text">Welcome to CloudGaming Hub</h1>
+          <h1 className="text-lg neon-text">Welcome to Gints Global Gaming Hubjob</h1>
         </div>
         <div className="neon-card rounded-md p-5 sm:p-6">{children}</div>
         <p className="mt-4 px-2 text-center text-[0.7rem] leading-relaxed text-slate-500">

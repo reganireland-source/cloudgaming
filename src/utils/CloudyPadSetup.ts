@@ -341,7 +341,7 @@ powershell -Command "
 
   # Create or update Sunshine configuration
   @'
-# Sunshine Configuration - CloudGaming Hub
+# Sunshine Configuration - Gints Global Gaming Hubjob
 # Auto-generated from quality setting: ${this.quality}
 
 resolution_width = ${qualitySettings.width}
@@ -569,7 +569,7 @@ export function getStreamingConnectionDetails(
 2. Or use Moonlight client with host: ${ipAddress}:47998
 3. Default credentials will be displayed in Sunshine setup
 4. For optimal performance, use wired connection
-5. Monitor performance via CloudGaming Hub performance portal
+5. Monitor performance via Gints Global Gaming Hubjob performance portal
     `,
   };
 }

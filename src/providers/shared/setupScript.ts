@@ -53,7 +53,7 @@
  *
  * One deliberate difference from CloudyPad: Sunshine's web page (port 47990)
  * accepts connections from the internet (password-protected), because
- * CloudGaming Hub pairs Moonlight through that page instead of over SSH.
+ * Gints Global Gaming Hubjob pairs Moonlight through that page instead of over SSH.
  * ============================================================================
  */
 
@@ -98,7 +98,7 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
 // in the bash below (JavaScript would treat it as an insertion). Use $VAR
 // instead of ${VAR}, and awk/sed/cut for string manipulation.
 const SCRIPT_TEMPLATE = String.raw`#!/bin/bash
-# CloudGaming Hub machine setup (modelled on CloudyPad). Runs as root.
+# Gints Global Gaming Hubjob machine setup (modelled on CloudyPad). Runs as root.
 set -uo pipefail
 export DEBIAN_FRONTEND=noninteractive
 STATE=/var/lib/cloudgaming
@@ -125,7 +125,7 @@ if [ "$(printenv CG_FROM_UNIT)" != "1" ]; then
   install -m 700 "$0" /usr/local/sbin/cloudgaming-setup.sh
   cat > /etc/systemd/system/cloudgaming-setup.service <<'UNIT'
 [Unit]
-Description=CloudGaming Hub machine setup
+Description=Gints Global Gaming Hubjob machine setup
 After=network-online.target
 Wants=network-online.target
 [Service]
@@ -333,7 +333,7 @@ services:
       CLOUDYPAD_KEYBOARD_VARIANT: ""
       CLOUDYPAD_KEYBOARD_OPTIONS: ""
       CLOUDYPAD_LOCALE: "en_US.UTF-8"
-      SUNSHINE_SERVER_NAME: "CloudGaming Hub"
+      SUNSHINE_SERVER_NAME: "Gints Global Gaming Hubjob"
       SUNSHINE_WEB_USERNAME: "$SUN_USER"
       SUNSHINE_WEB_PASSWORD_BASE64: "$SUN_PASS_B64"
       CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG: ""
@@ -398,7 +398,7 @@ AUTOSTOP
   chmod 700 /usr/local/sbin/cloudgaming-autostop.sh
   cat > /etc/systemd/system/cloudgaming-autostop.service <<'UNIT'
 [Unit]
-Description=CloudGaming Hub auto-stop when idle
+Description=Gints Global Gaming Hubjob auto-stop when idle
 After=docker.service
 [Service]
 ExecStart=/usr/local/sbin/cloudgaming-autostop.sh

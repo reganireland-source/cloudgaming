@@ -162,7 +162,7 @@ export default function SettingsPage() {
       <div className="mb-8">
         <h1 className="text-xl font-bold neon-text mb-2 font-mono">[ CONFIGURATION ]</h1>
         <p className="text-sm text-slate-400 max-w-3xl">
-          Connect CloudGaming Hub to <strong>your own</strong> cloud accounts. Machines are created in your account and billed to you by the
+          Connect Gints Global Gaming Hubjob to <strong>your own</strong> cloud accounts. Machines are created in your account and billed to you by the
           cloud; this app only stores a limited-access key, encrypted, so it can start and stop them for you.
         </p>
       </div>

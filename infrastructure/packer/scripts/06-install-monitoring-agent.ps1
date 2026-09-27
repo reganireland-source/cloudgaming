@@ -1,9 +1,9 @@
-# Install CloudGaming Hub monitoring agent for performance metrics
+# Install Gints Global Gaming Hubjob monitoring agent for performance metrics
 
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
 $ProgressPreference = 'SilentlyContinue'
 
-Write-Host "Installing CloudGaming Hub monitoring agent..."
+Write-Host "Installing Gints Global Gaming Hubjob monitoring agent..."
 
 $agentDir = 'C:\Program Files\CloudGaming-Agent'
 $agentExe = "$agentDir\agent.exe"

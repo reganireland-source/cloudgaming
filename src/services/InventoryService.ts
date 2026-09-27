@@ -4,7 +4,7 @@
  * ============================================================================
  *
  * Feeds the infrastructure map. For one user it:
- *   1. asks each cloud they have keys for what CloudGaming Hub created there
+ *   1. asks each cloud they have keys for what Gints Global Gaming Hubjob created there
  *      (provider.listResources(): machines, disks, snapshots, networks,
  *      firewalls, public IPs...), all clouds in parallel,
  *   2. merges in the app's own machine records (status, name, cost) — and

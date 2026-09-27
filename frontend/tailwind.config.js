@@ -1,3 +1,5 @@
+const defaultTheme = require('tailwindcss/defaultTheme');
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
@@ -6,16 +8,17 @@ module.exports = {
     './components/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
+    // Breakpoints: xs (at least 400px wide) is listed BEFORE the defaults so
+    // its CSS comes first and larger ones (sm, md, lg, xl) still override it.
+    // short = screens under 600px TALL (square phones like the Unihertz
+    // Titan 2 Elite, or any phone in landscape) — used to stop the header and
+    // status bar pinning to the top and eating space.
+    screens: {
+      xs: '400px',
+      ...defaultTheme.screens,
+      short: { raw: '(max-height: 600px)' },
+    },
     extend: {
-      // Extra breakpoints for small phones:
-      //   xs    = at least 400px wide
-      //   short = screens under 600px TALL (square phones like the Unihertz
-      //           Titan 2 Elite, or any phone in landscape) — used to stop the
-      //           header and status bar pinning to the top and eating space.
-      screens: {
-        xs: '400px',
-        short: { raw: '(max-height: 600px)' },
-      },
       // Phosphor-terminal palette: the same hues as the original neon set,
       // pulled back in saturation so they read as CRT phosphor rather than
       // blacklight. Names unchanged so every existing class picks these up.

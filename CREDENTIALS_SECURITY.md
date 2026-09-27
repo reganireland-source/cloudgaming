@@ -2,7 +2,7 @@
 
 ## Architecture: Frontend Credential Entry + Backend Encryption Storage
 
-This document outlines how CloudGaming Hub securely handles cloud provider credentials in a multi-user environment.
+This document outlines how Gints Global Gaming Hubjob securely handles cloud provider credentials in a multi-user environment.
 
 ### Data Flow
 

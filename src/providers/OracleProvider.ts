@@ -547,7 +547,7 @@ export class OracleProvider extends CloudProvider {
               destination: '0.0.0.0/0',
               destinationType: core.models.RouteRule.DestinationType.CidrBlock,
               networkEntityId: igId,
-              description: 'CloudGaming Hub: internet access',
+              description: 'Gints Global Gaming Hubjob: internet access',
             },
           ],
         },
@@ -669,7 +669,7 @@ export class OracleProvider extends CloudProvider {
       throw new FriendlyCloudError({
         code: 'UNKNOWN_SHAPE',
         title: `Unknown machine type "${config.instanceType}"`,
-        explanation: 'This machine type isn\'t one CloudGaming Hub knows how to launch on Oracle Cloud.',
+        explanation: 'This machine type isn\'t one Gints Global Gaming Hubjob knows how to launch on Oracle Cloud.',
         fixes: [`Choose one of: ${ORACLE_SHAPES.map((s) => `${s.label} (${s.id})`).join(', ')}.`],
       });
     }
@@ -1111,7 +1111,7 @@ export class OracleProvider extends CloudProvider {
   // ==========================================================================
 
   /**
-   * Everything CloudGaming Hub has created in this Oracle account, in every
+   * Everything Gints Global Gaming Hubjob has created in this Oracle account, in every
    * region we might have used: the user's home region plus each catalog
    * region the tenancy is subscribed to. Regions are read in parallel; a
    * region that fails (e.g. a subscription still being set up) is skipped,

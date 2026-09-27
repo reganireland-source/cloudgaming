@@ -1,4 +1,4 @@
-# CloudGaming Hub Infrastructure
+# Gints Global Gaming Hubjob Infrastructure
 
 Production-ready infrastructure setup for cloud gaming with Sunshine streaming and GamePad support across AWS, Azure, GCP, and Oracle Cloud.
 
@@ -11,7 +11,7 @@ Builds Windows Server 2022 AMI with pre-installed streaming infrastructure:
 - CloudyPad streaming framework
 - Sunshine streaming server (NVIDIA-optimized)
 - Battle.net launcher + gaming clients
-- CloudGaming Hub monitoring agent
+- Gints Global Gaming Hubjob monitoring agent
 - Auto-start services
 
 ### 2. CloudyPad Setup Utility (`src/utils/CloudyPadSetup.ts`)

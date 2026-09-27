@@ -384,7 +384,7 @@ export default function CredentialManager({
                   </div>
                   {confirmRemove?.provider === key && (
                     <div className="rounded border border-neon-pink/40 p-3 text-xs text-slate-300 space-y-2">
-                      <p>{confirmRemove.message || `Remove your ${entry?.label} keys from CloudGaming Hub? (They stay valid in ${entry?.label} — delete them there too if you no longer need them.)`}</p>
+                      <p>{confirmRemove.message || `Remove your ${entry?.label} keys from Gints Global Gaming Hubjob? (They stay valid in ${entry?.label} — delete them there too if you no longer need them.)`}</p>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => remove(key, confirmRemove.force)} className="btn-neon-pink text-xs">
                           {confirmRemove.force ? 'Remove anyway' : 'Yes, remove'}

@@ -1,10 +1,10 @@
-# CloudGaming Hub Streaming Setup Guide
+# Gints Global Gaming Hubjob Streaming Setup Guide
 
 Complete guide to setting up production-ready game streaming infrastructure with Sunshine and Moonlight support.
 
 ## Overview
 
-The CloudGaming Hub provides two paths to game streaming:
+The Gints Global Gaming Hubjob provides two paths to game streaming:
 
 ### Path 1: Sunshine Web UI (Browser)
 - No installation required
@@ -24,7 +24,7 @@ The CloudGaming Hub provides two paths to game streaming:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ CloudGaming Hub Frontend (React/Next.js)                    │
+│ Gints Global Gaming Hubjob Frontend (React/Next.js)                    │
 │ - Machine manager                                           │
 │ - Streaming dashboard                                       │
 │ - Performance monitoring                                    │
@@ -32,7 +32,7 @@ The CloudGaming Hub provides two paths to game streaming:
                        │ /api/streaming endpoints
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ CloudGaming Hub Backend (Node.js/Express)                   │
+│ Gints Global Gaming Hubjob Backend (Node.js/Express)                   │
 │ - Streaming routes (streaming.ts)                           │
 │ - Machine service with CloudyPadSetup integration           │
 │ - Performance & cost tracking                               │

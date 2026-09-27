@@ -16,7 +16,7 @@ if (-not (Test-Path $configDir)) {
 
 # Default Sunshine configuration (good quality balance)
 $sunshineConfig = @"
-# CloudGaming Hub - Sunshine Configuration
+# Gints Global Gaming Hubjob - Sunshine Configuration
 # Generated during AMI build for streaming optimization
 
 # Video settings (High Quality - 1440p 60fps)
@@ -92,7 +92,7 @@ try {
 
         # Also create service entry for Windows services management
         & sc.exe create "Sunshine" binpath= "$sunshineExe" start= auto `
-            DisplayName= "CloudGaming Hub - Sunshine Streaming" 2>&1 | Out-Null
+            DisplayName= "Gints Global Gaming Hubjob - Sunshine Streaming" 2>&1 | Out-Null
 
         Write-Host "Windows service created for Sunshine"
 

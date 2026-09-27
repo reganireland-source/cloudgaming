@@ -248,7 +248,7 @@ export class GCPProvider extends CloudProvider {
         networkResource: {
           name: NETWORK_NAME,
           autoCreateSubnetworks: false,
-          description: 'CloudGaming Hub: network for gaming machines',
+          description: 'Gints Global Gaming Hubjob: network for gaming machines',
         },
       });
       await this.waitGlobalOp(lro);
@@ -293,7 +293,7 @@ export class GCPProvider extends CloudProvider {
         name: FIREWALL_RULE_NAME,
         network: `global/networks/${NETWORK_NAME}`,
         direction: 'INGRESS',
-        description: 'CloudGaming Hub: Sunshine/Moonlight streaming ports',
+        description: 'Gints Global Gaming Hubjob: Sunshine/Moonlight streaming ports',
         sourceRanges: ['0.0.0.0/0'],
         targetTags: [NETWORK_TAG],
         allowed: [
@@ -321,7 +321,7 @@ export class GCPProvider extends CloudProvider {
       throw new FriendlyCloudError({
         code: 'UNKNOWN_SHAPE',
         title: `Unknown machine type "${config.instanceType}"`,
-        explanation: 'This machine type isn\'t one CloudGaming Hub knows how to launch on Google Cloud.',
+        explanation: 'This machine type isn\'t one Gints Global Gaming Hubjob knows how to launch on Google Cloud.',
         fixes: [`Choose one of: ${GCP_SHAPES.map((s) => s.label).join(', ')}.`],
       });
     }
@@ -675,7 +675,7 @@ export class GCPProvider extends CloudProvider {
   // ==========================================================================
 
   /**
-   * Everything CloudGaming Hub created in this project: machines, their
+   * Everything Gints Global Gaming Hubjob created in this project: machines, their
    * disks, snapshots, our network, subnets and firewall rules — found by our
    * label (app=cloudgaming-hub) or our "cg-" / "cloudgaming-" names.
    * Uses "aggregated list" calls, which return every zone in one request.

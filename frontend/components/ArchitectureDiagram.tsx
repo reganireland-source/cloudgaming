@@ -5,7 +5,7 @@
  * frontend/components/ArchitectureDiagram.tsx — THE LIVE "WHAT RUNS WHERE" MAP
  * ============================================================================
  *
- * Draws every layer involved in playing a game through CloudGaming Hub, from
+ * Draws every layer involved in playing a game through Gints Global Gaming Hubjob, from
  * your screen down to the GPU, coloured by LIVE status:
  *
  *   YOU        your browser (this page)          + the Moonlight app
@@ -111,7 +111,7 @@ function explain(key: string, t: CloudTerms, m?: MachineLike): NodeInfo {
   const lib: Record<string, NodeInfo> = {
     browser: {
       title: 'Your browser (this page)',
-      what: 'The CloudGaming Hub website running on your computer or phone.',
+      what: 'The Gints Global Gaming Hubjob website running on your computer or phone.',
       how: 'It downloads the site from Vercel, then talks to the Railway API with your sign-in token (JSON over HTTPS). It never talks to the cloud directly and never holds your cloud keys after you save them.',
       control: 'You.', cost: 'Free.',
     },
@@ -143,7 +143,7 @@ function explain(key: string, t: CloudTerms, m?: MachineLike): NodeInfo {
       title: `${t.name} control plane — ${t.api}`,
       what: `The ${t.name} service that creates, starts, stops and deletes resources in your ${t.account.toLowerCase()}.`,
       how: 'Every request is signed with the limited-access key you added. The cloud checks that key\'s permissions and your quotas (e.g. GPU limits), then schedules the work onto its hardware. Most actions are "long-running operations" the backend waits on.',
-      control: `${t.name} runs it; your key decides what CloudGaming Hub may do in your ${t.account.toLowerCase()}.`, cost: 'API calls are free (AWS Cost Explorer queries are $0.01 each).',
+      control: `${t.name} runs it; your key decides what Gints Global Gaming Hubjob may do in your ${t.account.toLowerCase()}.`, cost: 'API calls are free (AWS Cost Explorer queries are $0.01 each).',
     },
     account: {
       title: `Your ${t.name} ${t.account.toLowerCase()}`,

@@ -1,12 +1,12 @@
 #!/bin/bash
-# CloudGaming Hub Packer AMI Build Script
+# Gints Global Gaming Hubjob Packer AMI Build Script
 # Builds Windows Server 2022 AMI with gaming infrastructure for AWS Singapore
 # Requirements: packer, aws-cli, AWS credentials configured
 
 set -e  # Exit on error
 
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║     CloudGaming Hub - Custom Gaming AMI Build Script           ║"
+echo "║     Gints Global Gaming Hubjob - Custom Gaming AMI Build Script           ║"
 echo "║     Region: AWS Singapore (ap-southeast-1)                    ║"
 echo "║     Instance: g4dn.xlarge (NVIDIA T4 GPU)                     ║"
 echo "╚════════════════════════════════════════════════════════════════╝"

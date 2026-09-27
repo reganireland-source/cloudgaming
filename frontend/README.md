@@ -1,4 +1,4 @@
-# CloudGaming Hub Frontend
+# Gints Global Gaming Hubjob Frontend
 
 Next.js frontend for the multi-cloud gaming infrastructure platform.
 

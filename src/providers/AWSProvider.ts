@@ -307,7 +307,7 @@ export class AWSProvider extends CloudProvider {
     await this.report('info', `Creating security group "${STREAMING_FIREWALL_NAME}" to open the streaming ports (one-time per region)…`, portText);
     const created = await ec2.createSecurityGroup({
       GroupName: STREAMING_FIREWALL_NAME,
-      Description: 'CloudGaming Hub: Sunshine/Moonlight streaming ports',
+      Description: 'Gints Global Gaming Hubjob: Sunshine/Moonlight streaming ports',
       VpcId: vpcId,
       TagSpecifications: [{ ResourceType: 'security-group', Tags: tags(STREAMING_FIREWALL_NAME) }],
     }).promise();
@@ -384,7 +384,7 @@ export class AWSProvider extends CloudProvider {
       throw new FriendlyCloudError({
         code: 'UNKNOWN_SHAPE',
         title: `Unknown machine type "${config.instanceType}"`,
-        explanation: 'This machine type isn\'t one CloudGaming Hub knows how to launch on AWS.',
+        explanation: 'This machine type isn\'t one Gints Global Gaming Hubjob knows how to launch on AWS.',
         fixes: [`Choose one of: ${AWS_SHAPES.map((s) => `${s.id} (${s.label})`).join(', ')}.`],
       });
     }
@@ -687,7 +687,7 @@ export class AWSProvider extends CloudProvider {
       'Stopping the machine first gives the most reliable snapshot.');
     const snap = await ec2.createSnapshot({
       VolumeId: volumeId,
-      Description: `CloudGaming Hub snapshot of ${id}`,
+      Description: `Gints Global Gaming Hubjob snapshot of ${id}`,
       TagSpecifications: [{ ResourceType: 'snapshot', Tags: tags(`cg-snap-${id}`, { SourceInstance: id }) }],
     }).promise();
     const snapshotId = snap.SnapshotId!;
@@ -760,7 +760,7 @@ export class AWSProvider extends CloudProvider {
     await this.report('info', `Registering a temporary machine image from snapshot ${snapId}…`);
     const registered = await ec2.registerImage({
       Name: `cg-restore-${snapId}-${Date.now()}`,
-      Description: 'CloudGaming Hub temporary restore image (safe to delete)',
+      Description: 'Gints Global Gaming Hubjob temporary restore image (safe to delete)',
       Architecture: 'x86_64',
       VirtualizationType: 'hvm',
       EnaSupport: true, // g4dn/g5 need the ENA network driver flag
@@ -818,7 +818,7 @@ export class AWSProvider extends CloudProvider {
     const result = await this.ec2For(targetRegion).copySnapshot({
       SourceRegion: fromRegion,
       SourceSnapshotId: parsed.id,
-      Description: `CloudGaming Hub copy of ${parsed.id} from ${fromRegion}`,
+      Description: `Gints Global Gaming Hubjob copy of ${parsed.id} from ${fromRegion}`,
       TagSpecifications: [{ ResourceType: 'snapshot', Tags: tags(`cg-copy-${parsed.id}`, { SourceSnapshot: parsed.id, SourceRegion: fromRegion }) }],
     }).promise();
     if (!result.SnapshotId) throw new Error('AWS accepted the copy but returned no snapshot id');
@@ -942,7 +942,7 @@ export class AWSProvider extends CloudProvider {
   // ==========================================================================
 
   /**
-   * Everything CloudGaming Hub has created in this AWS account, in every
+   * Everything Gints Global Gaming Hubjob has created in this AWS account, in every
    * region of our catalog: machines, their disks (EBS volumes), snapshots,
    * the streaming security group and any Elastic IPs — each with an
    * estimated cost, and "orphans" (things that still cost money but belong

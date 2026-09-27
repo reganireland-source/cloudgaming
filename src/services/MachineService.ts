@@ -510,7 +510,7 @@ export { AlreadyRecorded };
  */
 function sendSunshinePin(host: string, username: string, password: string, pin: string): Promise<{ ok: boolean; status?: number; problem: string }> {
   return new Promise((resolve) => {
-    const body = JSON.stringify({ pin, name: 'CloudGaming Hub' });
+    const body = JSON.stringify({ pin, name: 'Gints Global Gaming Hubjob' });
     const req = https.request(
       {
         host,

@@ -145,11 +145,11 @@ export default function MoonlightLauncher({
   const launcherFile = () => {
     const safeName = app.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     if (os === 'windows') {
-      download(`moonlight-${safeName}.bat`, `@echo off\r\nREM CloudGaming Hub: stream "${app}" from ${host}\r\n${streamCommand.replace(/'/g, '"')}\r\n`);
+      download(`moonlight-${safeName}.bat`, `@echo off\r\nREM Gints Global Gaming Hubjob: stream "${app}" from ${host}\r\n${streamCommand.replace(/'/g, '"')}\r\n`);
     } else {
       // macOS: .command files open in Terminal on double-click (you may need to
       // allow it once: right-click → Open). Linux: run with "sh file.sh".
-      download(`moonlight-${safeName}.${os === 'macos' ? 'command' : 'sh'}`, `#!/bin/sh\n# CloudGaming Hub: stream "${app}" from ${host}\n${streamCommand}\n`);
+      download(`moonlight-${safeName}.${os === 'macos' ? 'command' : 'sh'}`, `#!/bin/sh\n# Gints Global Gaming Hubjob: stream "${app}" from ${host}\n${streamCommand}\n`);
     }
   };
 
