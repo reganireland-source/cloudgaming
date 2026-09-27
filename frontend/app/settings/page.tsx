@@ -1,7 +1,34 @@
 'use client';
+// ↑ Client component: the page keeps form state and reacts to clicks.
+
+/**
+ * ============================================================================
+ * frontend/app/settings/page.tsx — THE "CONFIG" PAGE (/settings)
+ * ============================================================================
+ *
+ * Three sections, top to bottom:
+ *   1. CLOUD_PROVIDERS — pick a cloud, type in its credentials.
+ *   2. CREDENTIAL_SETUP_GUIDE — detailed, step-by-step instructions for
+ *      getting those credentials (components/CloudSetupGuide.tsx).
+ *   3. TROUBLESHOOTING — common error messages and what they mean.
+ *
+ * KNOWN ISSUES (be aware before relying on this page)
+ * -----------------------------------------------------
+ * - SAVING IS NOT CONNECTED YET. handleSaveCredentials only waits one second
+ *   and marks the cloud "READY" in this page's memory. Nothing is sent to the
+ *   backend, and a page refresh forgets it. The backend reads cloud
+ *   credentials from its own Railway environment variables instead.
+ * - When saving IS wired up, the backend must encrypt the secrets before
+ *   storing them. It does not do that today, so the page no longer claims it.
+ * ============================================================================
+ */
 
 import { useState } from 'react';
+import CloudSetupGuide from '@/components/CloudSetupGuide';
 
+// One cloud's entry in the picker. `requiredFields` drives the form: one
+// input box is drawn per name, and names containing "Key" or "Secret" get a
+// hidden (password-style) box.
 interface CloudProvider {
   name: 'aws' | 'azure' | 'gcp' | 'oracle';
   label: string;
@@ -41,7 +68,126 @@ const providers: CloudProvider[] = [
   },
 ];
 
+// Troubleshooting entries, as data: `cloud` is the small tag, `title` the
+// error you'd see, `fixes` the things to check, in the order to check them.
+const TROUBLESHOOTING: { cloud: string; title: string; fixes: string[] }[] = [
+  {
+    cloud: 'AWS',
+    title: 'InvalidClientTokenId / SignatureDoesNotMatch',
+    fixes: [
+      'The Access Key ID or Secret Access Key was copied wrongly — a missing character or an extra space is enough.',
+      'The key may have been deleted or made inactive: IAM → Users → your user → Security credentials.',
+      'If in doubt, delete the key and create a new one. The secret is only shown once, when it is created.',
+    ],
+  },
+  {
+    cloud: 'AWS',
+    title: 'UnauthorizedOperation / AccessDenied',
+    fixes: [
+      'The keys work but the IAM user lacks permission. Check the policies attached to the user (see the setup guide above).',
+      'Cost figures need Cost Explorer turned on once, in Billing → Cost Explorer. It takes up to 24 hours to start.',
+    ],
+  },
+  {
+    cloud: 'AWS',
+    title: 'VcpuLimitExceeded / "You have requested more vCPU capacity than your current vCPU limit"',
+    fixes: [
+      'New accounts have a GPU instance limit of 0. Request more under Service Quotas → Amazon EC2 → "Running On-Demand G and VT instances".',
+      'The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, so ask for at least 8.',
+      'Quotas are per region. Request it in the same region you set in the app (for example ap-southeast-1).',
+    ],
+  },
+  {
+    cloud: 'Azure',
+    title: 'AuthorizationFailed / "does not have authorization to perform action"',
+    fixes: [
+      'The app registration has no role on the subscription. Go to Subscriptions → your subscription → Access control (IAM) → Add role assignment → Contributor → select the app.',
+      'Role assignments can take a few minutes to take effect.',
+    ],
+  },
+  {
+    cloud: 'Azure',
+    title: 'AADSTS7000215: Invalid client secret provided',
+    fixes: [
+      'You pasted the secret\'s ID instead of its Value. Only the Value column works, and it is only shown right after creating the secret.',
+      'Client secrets expire (6–24 months). Create a new one under Certificates & secrets.',
+    ],
+  },
+  {
+    cloud: 'Azure',
+    title: 'OperationNotAllowed / quota exceeded for NV-series',
+    fixes: [
+      'Request GPU quota under Subscriptions → Usage + quotas, filtered to your region and the NVadsA10 v5 family.',
+      'Free and trial subscriptions cannot get GPU quota — upgrade to pay-as-you-go first.',
+    ],
+  },
+  {
+    cloud: 'GCP',
+    title: 'Invalid JWT / "invalid_grant" / key could not be parsed',
+    fixes: [
+      'Paste the ENTIRE JSON key file, from the first { to the last }. The private_key inside contains \\n sequences — keep them exactly as they are.',
+      'The key may have been deleted. Check IAM & Admin → Service Accounts → the account → Keys.',
+    ],
+  },
+  {
+    cloud: 'GCP',
+    title: 'Permission "compute.instances.create" denied / 403 Forbidden',
+    fixes: [
+      'The service account needs the Compute Admin and Service Account User roles. Add them under IAM & Admin → IAM → Grant access.',
+      'Check that the Project ID in the app matches the project_id inside the JSON key.',
+    ],
+  },
+  {
+    cloud: 'GCP',
+    title: 'Compute Engine API has not been used in project … or it is disabled',
+    fixes: [
+      'Enable it under APIs & Services → Library → Compute Engine API → Enable, then wait a minute or two and retry.',
+      'Billing must be linked to the project, or the API cannot be turned on.',
+    ],
+  },
+  {
+    cloud: 'GCP',
+    title: 'Quota \'GPUS_ALL_REGIONS\' exceeded. Limit: 0.0',
+    fixes: [
+      'Request quota under IAM & Admin → Quotas: raise "GPUs (all regions)" to at least 1, AND the per-region GPU quota (for example NVIDIA T4 or L4 GPUs in asia-southeast1).',
+      'Free-trial accounts cannot get GPU quota. Upgrade to a full billing account first.',
+      'Approval usually takes minutes to a couple of days.',
+    ],
+  },
+  {
+    cloud: 'Oracle',
+    title: 'NotAuthenticated / 401',
+    fixes: [
+      'The fingerprint must match the uploaded public key exactly (it looks like aa:bb:cc:…).',
+      'Use OCIDs, not names: the user OCID starts with ocid1.user, the tenancy with ocid1.tenancy.',
+      'The private key must be pasted whole, including the -----BEGIN … KEY----- and -----END … KEY----- lines.',
+    ],
+  },
+  {
+    cloud: 'Oracle',
+    title: 'NotAuthorizedOrNotFound / 404',
+    fixes: [
+      'Oracle reports "no permission" and "not found" as the same error. Check the user\'s group has a policy like: Allow group CloudGaming to manage instance-family in compartment <name>.',
+      'Check the compartment OCID (ocid1.compartment…) is the one the policy names.',
+    ],
+  },
+  {
+    cloud: 'Any',
+    title: 'Worked before, fails now',
+    fixes: [
+      'Credentials can expire or be rotated by an admin. Create new ones and update the Railway variables.',
+      'Check the status lights at the top of the page: a red cloud light means the backend could not reach that cloud.',
+    ],
+  },
+];
+
 export default function SettingsPage() {
+  // The page's memory (useState — see components/SystemStatusBar.tsx):
+  //   selectedProvider — which cloud card is clicked (null = none yet)
+  //   credentials      — what's typed in the boxes, as { fieldName: value }
+  //   savedProviders   — clouds marked READY (in memory only, see KNOWN ISSUES)
+  //   message          — the green/red banner at the top
+  //   showKey          — reveal the hidden secret boxes?
   const [selectedProvider, setSelectedProvider] = useState<'aws' | 'azure' | 'gcp' | 'oracle' | null>(null);
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [savedProviders, setSavedProviders] = useState<Set<string>>(new Set());
@@ -51,10 +197,16 @@ export default function SettingsPage() {
 
   const provider = selectedProvider ? providers.find(p => p.name === selectedProvider) : null;
 
+  // Runs on every keystroke. `{ ...prev, [field]: value }` copies the old
+  // object and overwrites one key (React needs a NEW object to notice a change).
   const handleInputChange = (field: string, value: string) => {
     setCredentials(prev => ({ ...prev, [field]: value }));
   };
 
+  // PLACEHOLDER SAVE — see KNOWN ISSUES above. The fake one-second wait
+  // stands in for a future POST to the backend.
+  // Note the check below only requires at least ONE field to be filled in,
+  // not all of them.
   const handleSaveCredentials = async () => {
     if (!selectedProvider || Object.keys(credentials).length === 0) {
       setMessage({ type: 'error', text: 'Please fill in all required fields' });
@@ -65,7 +217,7 @@ export default function SettingsPage() {
     try {
       await new Promise(resolve => setTimeout(resolve, 1000));
       setSavedProviders(prev => new Set(prev).add(selectedProvider));
-      setMessage({ type: 'success', text: `${provider?.label} credentials saved securely` });
+      setMessage({ type: 'success', text: `${provider?.label} marked ready (this browser session only — not yet sent to the backend)` });
       setCredentials({});
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to save credentials. Please try again.' });
@@ -74,6 +226,7 @@ export default function SettingsPage() {
     }
   };
 
+  // Un-marks a cloud as READY. confirm() shows the browser's OK/Cancel box.
   const handleDeleteCredentials = async (providerName: string) => {
     if (!confirm(`Remove ${providerName} credentials?`)) return;
     setSavedProviders(prev => {
@@ -172,9 +325,13 @@ export default function SettingsPage() {
               ))}
             </div>
 
-            <div className="bg-cyan-950/30 border border-neon-cyan/30 rounded-lg p-4 mb-6 font-mono text-xs text-neon-cyan">
+            {/* Honest status of the save button (see KNOWN ISSUES at the top). */}
+            <div className="bg-amber-950/20 border border-amber-400/30 rounded-lg p-4 mb-6 text-xs text-slate-300 leading-relaxed">
               <p>
-                <strong className="text-neon-magenta">🔒 SECURE:</strong> AES-256 encryption. Never logged, shared, or displayed.
+                <strong className="neon-amber">NOTE:</strong> Saving here is not connected to the backend yet — it only
+                marks this cloud as ready until you refresh. To use a cloud today, set its credentials as variables
+                on the Railway backend. Credentials are not yet encrypted at rest, so only use limited-access keys
+                (the setup guide below creates exactly those).
               </p>
             </div>
 
@@ -218,233 +375,35 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* How to Get Credentials with Direct Links */}
-      <div className="neon-card rounded-lg border border-neon-cyan/30 p-6 mb-8">
-        <h3 className="text-sm font-bold neon-text mb-6 font-mono">[ CREDENTIAL_SETUP ]</h3>
+      {/* Detailed per-cloud setup instructions. `selected` makes the guide
+          jump to whichever cloud you clicked above. */}
+      <CloudSetupGuide selected={selectedProvider} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* AWS */}
-          <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan/30">
-            <h4 className="font-bold text-neon-cyan mb-4 flex items-center gap-2 text-[0.8rem] font-mono">
-              <span>☁️</span> AMAZON_WEB_SERVICES
-            </h4>
-            <ol className="text-xs text-neon-cyan space-y-3 mb-4 font-mono">
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-cyan">[1]</span>
-                <span className="text-neon-lime">Open <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline font-medium">AWS_IAM_CONSOLE</a></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-cyan">[2]</span>
-                <span className="text-neon-lime">Click_your_username</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-cyan">[3]</span>
-                <span className="text-neon-lime">Access_keys → <strong>Create</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-cyan">[4]</span>
-                <span className="text-neon-lime">Select <strong>Application_Outside_AWS</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-cyan">[5]</span>
-                <span className="text-neon-lime">Copy <strong>KEY_ID</strong> + <strong>SECRET_KEY</strong> now</span>
-              </li>
-            </ol>
-            <div className="bg-yellow-950/30 border border-neon-pink/30 rounded p-3 text-xs text-neon-pink mb-3 font-mono">
-              <strong className="text-neon-magenta">⚠ CRITICAL:</strong> Secret shown only once!
-            </div>
-            <div className="text-xs text-neon-cyan/70 mb-3 font-mono">
-              <strong>REGIONS:</strong> us-east-1 / us-west-2 / eu-west-1 / ap-se-1
-            </div>
-            <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-cyan">
-              [ OPEN_IAM_CONSOLE ]
-            </a>
-          </div>
-
-          {/* Azure */}
-          <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta/30">
-            <h4 className="font-bold text-neon-magenta mb-4 flex items-center gap-2 text-[0.8rem] font-mono">
-              <span>🔵</span> MICROSOFT_AZURE
-            </h4>
-            <ol className="text-xs text-neon-magenta space-y-3 mb-4 font-mono">
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[1]</span>
-                <span className="text-neon-cyan">Open <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="text-neon-magenta hover:underline font-medium">AZURE_PORTAL</a></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[2]</span>
-                <span className="text-neon-cyan">Click <strong>+_New_Registration</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[3]</span>
-                <span className="text-neon-cyan">Name: "CloudGaming" → Register</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[4]</span>
-                <span className="text-neon-cyan">Copy <strong>APP_ID</strong> + <strong>TENANT_ID</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[5]</span>
-                <span className="text-neon-cyan">Certificates → <strong>+_New_Secret</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[6]</span>
-                <span className="text-neon-cyan">Copy secret <strong>Value</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[7]</span>
-                <span className="text-neon-cyan">Get Subscription_ID from <a href="https://portal.azure.com/#blade/Microsoft_Azure_Billing/SubscriptionsBlade" target="_blank" rel="noopener noreferrer" className="text-neon-magenta hover:underline">Billing_Blade</a></span>
-              </li>
-            </ol>
-            <div className="bg-yellow-950/30 border border-neon-pink/30 rounded p-3 text-xs text-neon-pink mb-3 font-mono">
-              <strong className="text-neon-magenta">⚠ REQUIRED:</strong> Assign "Contributor" role!
-            </div>
-            <a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-magenta">
-              [ OPEN_APP_REGISTRATIONS ]
-            </a>
-          </div>
-
-          {/* GCP */}
-          <div className="neon-card-lime rounded-lg p-6 border border-neon-lime/30">
-            <h4 className="font-bold text-neon-lime mb-4 flex items-center gap-2 text-[0.8rem] font-mono">
-              <span>🟠</span> GOOGLE_CLOUD_PLATFORM
-            </h4>
-            <ol className="text-xs text-neon-lime space-y-3 mb-4 font-mono">
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[1]</span>
-                <span className="text-neon-magenta">Open <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="text-neon-lime hover:underline font-medium">GCP_CONSOLE</a></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[2]</span>
-                <span className="text-neon-magenta">Click <strong>+_Create_Service_Account</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[3]</span>
-                <span className="text-neon-magenta">Name: "cloudgaming" → Create</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[4]</span>
-                <span className="text-neon-magenta">Grant: <strong>Compute_Admin</strong> → Continue</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[5]</span>
-                <span className="text-neon-magenta">Service Account → <strong>Keys_Tab</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[6]</span>
-                <span className="text-neon-magenta"><strong>+_Add_Key</strong> → JSON</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-lime">[7]</span>
-                <span className="text-neon-magenta">Copy entire JSON content</span>
-              </li>
-            </ol>
-            <div className="bg-cyan-950/30 border border-neon-cyan/30 rounded p-3 text-xs text-neon-cyan mb-3 font-mono">
-              <strong className="text-neon-magenta">📝 PROJECT_ID:</strong> From console header (my-project-XXXXXX)
-            </div>
-            <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-lime">
-              [ OPEN_SERVICE_ACCOUNTS ]
-            </a>
-          </div>
-
-          {/* Oracle */}
-          <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta/30">
-            <h4 className="font-bold text-neon-magenta mb-4 flex items-center gap-2 text-[0.8rem] font-mono">
-              <span>🔴</span> ORACLE_CLOUD_INFRA
-            </h4>
-            <ol className="text-xs text-neon-magenta space-y-3 mb-4 font-mono">
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[1]</span>
-                <span className="text-neon-cyan">Open <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="text-neon-magenta hover:underline font-medium">OCI_CONSOLE</a></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[2]</span>
-                <span className="text-neon-cyan">Click your username (top right)</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[3]</span>
-                <span className="text-neon-cyan">API_Keys → <strong>Add_API_Key</strong></span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[4]</span>
-                <span className="text-neon-cyan"><strong>Generate_Key_Pair</strong> → Download</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[5]</span>
-                <span className="text-neon-cyan">Copy <strong>Fingerprint</strong> value</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[6]</span>
-                <span className="text-neon-cyan">Get User_OCID (ocid1.user.*)</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-bold text-neon-magenta">[7]</span>
-                <span className="text-neon-cyan">Get Tenancy_OCID from profile menu</span>
-              </li>
-            </ol>
-            <div className="bg-green-950/30 border border-neon-lime/30 rounded p-3 text-xs text-neon-lime mb-3 font-mono">
-              <strong className="text-neon-magenta">💰 ORACLE_ADVANTAGE:</strong> FREE_EGRESS in Singapore = Huge_Savings!
-            </div>
-            <a href="https://cloud.oracle.com/identity/users" target="_blank" rel="noopener noreferrer" className="inline-block w-full text-center btn-neon-magenta">
-              [ OPEN_USERS_PAGE ]
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* Troubleshooting */}
+      {/* Troubleshooting: native <details> elements open and close on click
+          with no JavaScript. `group` + `group-open:` (Tailwind) flips the
+          arrow when its <details> is open. */}
       <div className="neon-card rounded-lg border border-neon-cyan/30 p-6">
-        <h3 className="text-sm font-bold neon-text mb-6 font-mono">[ TROUBLESHOOTING ]</h3>
-        <div className="space-y-3">
-          <details className="group neon-card-cyan rounded-lg p-4 border border-neon-cyan/30">
-            <summary className="cursor-pointer font-bold text-neon-cyan hover:text-neon-magenta flex justify-between items-center font-mono text-sm">
-              <span>AWS: InvalidClientTokenId error</span>
-              <span className="group-open:rotate-180 transition">▼</span>
-            </summary>
-            <p className="text-xs text-neon-lime mt-3 font-mono">
-              Check that you copied the Access Key ID and Secret Access Key exactly from IAM Console. Any space or character difference causes this error. Delete the key and create a new one if needed.
-            </p>
-          </details>
-
-          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
-            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
-              <span>Azure: "Insufficient privileges" or "AADSTS permission denied" error</span>
-              <span className="group-open:rotate-180 transition">▼</span>
-            </summary>
-            <p className="text-sm text-gray-700 mt-3">
-              Your app registration needs the "Contributor" role. Go to Azure Portal → Subscriptions → Click your subscription → Access Control (IAM) → Add role assignment → Contributor role → Select your app.
-            </p>
-          </details>
-
-          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
-            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
-              <span>GCP: "Invalid service account" or "Service account key invalid" error</span>
-              <span className="group-open:rotate-180 transition">▼</span>
-            </summary>
-            <p className="text-sm text-gray-700 mt-3">
-              Make sure you're copying the entire JSON key content (not just parts). Also verify the service account has "Compute Admin" role. Re-download the key from Service Accounts page if needed.
-            </p>
-          </details>
-
-          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
-            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
-              <span>Oracle: "User not in tenancy" or "Invalid authentication" error</span>
-              <span className="group-open:rotate-180 transition">▼</span>
-            </summary>
-            <p className="text-sm text-gray-700 mt-3">
-              Make sure you're using the User OCID (long string starting with "ocid1.user"), not your username. Also verify the private key is properly formatted (starts with "-----BEGIN RSA PRIVATE KEY-----").
-            </p>
-          </details>
-
-          <details className="group bg-gray-50 rounded-lg p-4 border border-gray-200">
-            <summary className="cursor-pointer font-medium text-gray-900 hover:text-blue-600 flex justify-between items-center">
-              <span>Any provider: "Credentials expired" after several months</span>
-              <span className="group-open:rotate-180 transition">▼</span>
-            </summary>
-            <p className="text-sm text-gray-700 mt-3">
-              Some credentials have expiration dates. Generate new credentials from your cloud provider console and update them here. Delete the old credentials first.
-            </p>
-          </details>
+        <h3 className="text-sm tracking-label font-bold neon-text mb-2 font-mono">[ TROUBLESHOOTING ]</h3>
+        <p className="text-xs text-slate-400 mb-6 max-w-3xl">
+          The error text shown is what the cloud usually says. Click one to see what it means and how to fix it.
+        </p>
+        <div className="space-y-2">
+          {TROUBLESHOOTING.map((item) => (
+            <details key={item.title} className="group rounded-lg border border-white/10 bg-white/[0.02] px-4 py-3">
+              <summary className="cursor-pointer list-none flex justify-between items-center gap-4 text-xs font-mono">
+                <span>
+                  <span className="label mr-2">{item.cloud}</span>
+                  <span className="text-slate-200">{item.title}</span>
+                </span>
+                <span className="text-neon-cyan/60 group-open:rotate-180 transition">▼</span>
+              </summary>
+              <ul className="mt-3 space-y-1.5 text-xs text-slate-300 leading-relaxed list-disc pl-5">
+                {item.fixes.map((fix) => (
+                  <li key={fix}>{fix}</li>
+                ))}
+              </ul>
+            </details>
+          ))}
         </div>
       </div>
     </div>
