@@ -25,7 +25,13 @@
  *   GET /api/inventory   your deployed resources, live from each cloud (cached 60 s)
  *   GET /api/status/catalog   public: all regions, prices, where the backend runs
  *
- * Your location is only used in this browser (never sent), and remembered here.
+ * YOUR LOCATION, best source first:
+ *   1. a spot you chose (browser GPS via "Use precise location", or a map
+ *      click) — remembered in this browser;
+ *   2. your IP address, looked up by Vercel's edge (GET /api/geo on the
+ *      frontend — no third-party service; usually the right city);
+ *   3. a rough guess from your time zone.
+ * The label under the map always says which one is in use.
  * ============================================================================
  */
 
@@ -118,7 +124,8 @@ export default function InfrastructureMapPage() {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [location, setLocation] = useState<(LatLng & { approximate?: boolean }) | null>(null);
+  // Where you are, and how we know (see header).
+  const [location, setLocation] = useState<(LatLng & { source: 'manual' | 'gps' | 'ip' | 'timezone'; label?: string; approximate?: boolean }) | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [visible, setVisible] = useState<Set<string>>(new Set(['gcp', 'aws', 'azure', 'oracle']));
   const [layers, setLayers] = useState({ available: true, rings: true, paths: true });
@@ -128,12 +135,36 @@ export default function InfrastructureMapPage() {
 
   // ---- Location (browser only) ----
   useEffect(() => {
-    try { const saved = localStorage.getItem(LOCATION_KEY); if (saved) { setLocation(JSON.parse(saved)); return; } } catch { /* ignore */ }
-    setLocation({ lat: 20, lng: Math.max(-179, Math.min(179, (-new Date().getTimezoneOffset() / 60) * 15)), approximate: true });
+    // 1. A spot you chose earlier?
+    try {
+      const saved = localStorage.getItem(LOCATION_KEY);
+      if (saved) { const loc = JSON.parse(saved); setLocation({ source: 'manual', ...loc }); return; }
+    } catch { /* storage blocked */ }
+    // 3. (placeholder until the IP lookup answers) time-zone guess
+    setLocation({ lat: 20, lng: Math.max(-179, Math.min(179, (-new Date().getTimezoneOffset() / 60) * 15)), source: 'timezone', approximate: true });
+    // 2. Your IP address, via Vercel's edge (same-site route, see app/api/geo/route.ts).
+    fetch('/api/geo', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((g) => {
+        if (g?.available) {
+          const place = [g.city, g.country].filter(Boolean).join(', ');
+          setLocation((cur) => (cur && (cur.source === 'manual' || cur.source === 'gps')) ? cur
+            : { lat: g.lat, lng: g.lng, source: 'ip', label: place || undefined, approximate: true });
+        }
+      })
+      .catch(() => { /* keep the time-zone guess */ });
   }, []);
-  const saveLocation = (loc: LatLng) => { setLocation(loc); try { localStorage.setItem(LOCATION_KEY, JSON.stringify(loc)); } catch { /* ignore */ } };
+  const saveLocation = (loc: LatLng, source: 'manual' | 'gps' = 'manual') => {
+    const next = { lat: loc.lat, lng: loc.lng, source, label: source === 'gps' ? 'your device' : 'chosen on the map' };
+    setLocation(next);
+    try { localStorage.setItem(LOCATION_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  const forgetLocation = () => {
+    try { localStorage.removeItem(LOCATION_KEY); } catch { /* ignore */ }
+    window.location.reload(); // simplest way to re-run the IP lookup
+  };
   const useMyLocation = () => navigator.geolocation?.getCurrentPosition(
-    (p) => saveLocation({ lat: p.coords.latitude, lng: p.coords.longitude }),
+    (p) => saveLocation({ lat: p.coords.latitude, lng: p.coords.longitude }, 'gps'),
     () => setLoadError('Location permission denied — click on the map to set where you are.'),
   );
 
@@ -238,7 +269,7 @@ export default function InfrastructureMapPage() {
               {refreshing ? 'Asking the clouds…' : '↻ Refresh from clouds'}
             </button>
           )}
-          <button type="button" onClick={useMyLocation} className="btn-neon text-xs">◎ Use my location</button>
+          <button type="button" onClick={useMyLocation} className="btn-neon text-xs">◎ Use precise location</button>
         </div>
       </div>
 
@@ -293,6 +324,7 @@ export default function InfrastructureMapPage() {
           <div className="neon-card rounded-lg border border-white/10 p-2">
             {catalog ? (
               <InfraMap groups={groups} available={available} user={location} backend={backend}
+                userLabel={location?.source === 'ip' && location.label ? `You · ${location.label.split(',')[0]}` : 'You'}
                 showAvailable={layers.available} showRings={layers.rings} showPaths={layers.paths}
                 selectedKey={selected} onSelect={setSelected} onPickLocation={saveLocation} />
             ) : <p className="font-mono text-sm text-neon-cyan animate-pulse p-6">&gt; LOADING_MAP…</p>}
@@ -307,7 +339,19 @@ export default function InfrastructureMapPage() {
             <span>① count badge</span><span className="text-neon-pink">⚠ orphan</span>
             <span className="text-neon-lime">┈ stream</span><span className="text-neon-cyan">— control</span>
             <span>◇ Railway (API + DB) · Vercel serves the site from every edge</span>
-            {location?.approximate && <span className="text-slate-500">· your position is a time-zone guess — click the map</span>}
+            <span className="text-slate-400 w-full">
+              📍 You: {location ? (
+                <>
+                  <span className="text-slate-200">{location.label || `${location.lat.toFixed(1)}°, ${location.lng.toFixed(1)}°`}</span>
+                  {' — '}
+                  {{ ip: 'from your IP address (approximate, city level)', gps: 'from your device (precise)', manual: 'chosen on the map', timezone: 'rough guess from your time zone' }[location.source]}
+                  {(location.source === 'manual' || location.source === 'gps') && (
+                    <button type="button" onClick={forgetLocation} className="ml-2 text-neon-cyan hover:underline">use IP location instead</button>
+                  )}
+                  {location.source !== 'gps' && <span className="text-slate-500"> · click the map to set it yourself</span>}
+                </>
+              ) : 'locating…'}
+            </span>
           </div>
         </div>
 

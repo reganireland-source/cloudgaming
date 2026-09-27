@@ -98,11 +98,13 @@ function Shape({ shape, size, color, dim }: { shape: string; size: number; color
 }
 
 export default function InfraMap({
-  groups, available, user, backend, showAvailable, showRings, showPaths, selectedKey, onSelect, onPickLocation,
+  groups, available, user, userLabel = 'You', backend, showAvailable, showRings, showPaths, selectedKey, onSelect, onPickLocation,
 }: {
   groups: MarkerGroup[];
   available: AvailableRegion[];
   user: LatLng | null;
+  /** Text next to your position, e.g. "You · Singapore". */
+  userLabel?: string;
   backend: (LatLng & { label: string }) | null;
   showAvailable: boolean;
   showRings: boolean;
@@ -279,7 +281,7 @@ export default function InfraMap({
             return (
               <g transform={`translate(${x},${y}) scale(${inv})`} pointerEvents="none">
                 <circle r={5} fill="#f8fafc" stroke="#0c1018" strokeWidth={2} />
-                <text x={9} y={4} fontSize={11} fill="#f8fafc" fontWeight={600}>You</text>
+                <text x={9} y={4} fontSize={11} fill="#f8fafc" fontWeight={600}>{userLabel}</text>
               </g>
             );
           })()}
