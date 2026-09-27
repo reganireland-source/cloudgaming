@@ -7,66 +7,24 @@
  * ============================================================================
  *
  * Three sections, top to bottom:
- *   1. CLOUD_PROVIDERS — pick a cloud, type in its credentials.
- *   2. CREDENTIAL_SETUP_GUIDE — detailed, step-by-step instructions for
- *      getting those credentials (components/CloudSetupGuide.tsx).
+ *   1. YOUR_CLOUD_KEYS — add, re-check or remove the limited-access keys for
+ *      each cloud (components/CredentialManager.tsx). Needs you signed in.
+ *      Keys are checked live against the cloud, then ENCRYPTED on the
+ *      backend before being stored, and never shown again.
+ *   2. CREDENTIAL_SETUP_GUIDE — step-by-step instructions for creating those
+ *      keys in each cloud's console (components/CloudSetupGuide.tsx). It
+ *      follows whichever cloud's form you open.
  *   3. TROUBLESHOOTING — common error messages and what they mean.
- *
- * KNOWN ISSUES (be aware before relying on this page)
- * -----------------------------------------------------
- * - SAVING IS NOT CONNECTED YET. handleSaveCredentials only waits one second
- *   and marks the cloud "READY" in this page's memory. Nothing is sent to the
- *   backend, and a page refresh forgets it. The backend reads cloud
- *   credentials from its own Railway environment variables instead.
- * - When saving IS wired up, the backend must encrypt the secrets before
- *   storing them. It does not do that today, so the page no longer claims it.
  * ============================================================================
  */
 
 import { useState } from 'react';
 import CloudSetupGuide from '@/components/CloudSetupGuide';
+import CredentialManager from '@/components/CredentialManager';
+import Link from 'next/link';
+import { useAuth } from '@/components/AuthProvider';
 
-// One cloud's entry in the picker. `requiredFields` drives the form: one
-// input box is drawn per name, and names containing "Key" or "Secret" get a
-// hidden (password-style) box.
-interface CloudProvider {
-  name: 'aws' | 'azure' | 'gcp' | 'oracle';
-  label: string;
-  icon: string;
-  requiredFields: string[];
-  description: string;
-}
-
-const providers: CloudProvider[] = [
-  {
-    name: 'aws',
-    label: 'Amazon Web Services',
-    icon: '☁️',
-    requiredFields: ['accessKeyId', 'secretAccessKey', 'region'],
-    description: 'AWS EC2 for g4/g5 GPU instances with CloudWatch monitoring',
-  },
-  {
-    name: 'azure',
-    label: 'Microsoft Azure',
-    icon: '🔵',
-    requiredFields: ['subscriptionId', 'clientId', 'clientSecret', 'tenantId', 'resourceGroup'],
-    description: 'Azure VM with NV-series GPUs and monitoring',
-  },
-  {
-    name: 'gcp',
-    label: 'Google Cloud Platform',
-    icon: '🟠',
-    requiredFields: ['projectId', 'serviceAccountKey'],
-    description: 'GCP Compute Engine with L4/A100 GPUs',
-  },
-  {
-    name: 'oracle',
-    label: 'Oracle Cloud',
-    icon: '🔴',
-    requiredFields: ['compartmentId', 'userId', 'tenancy', 'fingerprint', 'privateKey'],
-    description: 'Oracle VM instances with free egress in Singapore region',
-  },
-];
+type ProviderKey = 'aws' | 'azure' | 'gcp' | 'oracle';
 
 // Troubleshooting entries, as data: `cloud` is the small tag, `title` the
 // error you'd see, `fixes` the things to check, in the order to check them.
@@ -186,209 +144,50 @@ const TROUBLESHOOTING: { cloud: string; title: string; fixes: string[] }[] = [
     cloud: 'Any',
     title: 'Worked before, fails now',
     fixes: [
-      'Credentials can expire or be rotated by an admin. Create new ones and update the Railway variables.',
+      'Credentials can expire or be rotated by an admin. Create new ones and use "Replace keys" above; "Re-check now" shows what changed.',
       'Check the status lights at the top of the page: a red cloud light means the backend could not reach that cloud.',
     ],
   },
 ];
 
 export default function SettingsPage() {
-  // The page's memory (useState — see components/SystemStatusBar.tsx):
-  //   selectedProvider — which cloud card is clicked (null = none yet)
-  //   credentials      — what's typed in the boxes, as { fieldName: value }
-  //   savedProviders   — clouds marked READY (in memory only, see KNOWN ISSUES)
-  //   message          — the green/red banner at the top
-  //   showKey          — reveal the hidden secret boxes?
-  const [selectedProvider, setSelectedProvider] = useState<'aws' | 'azure' | 'gcp' | 'oracle' | null>(null);
-  const [credentials, setCredentials] = useState<Record<string, string>>({});
-  const [savedProviders, setSavedProviders] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showKey, setShowKey] = useState(false);
-
-  const provider = selectedProvider ? providers.find(p => p.name === selectedProvider) : null;
-
-  // Runs on every keystroke. `{ ...prev, [field]: value }` copies the old
-  // object and overwrites one key (React needs a NEW object to notice a change).
-  const handleInputChange = (field: string, value: string) => {
-    setCredentials(prev => ({ ...prev, [field]: value }));
-  };
-
-  // PLACEHOLDER SAVE — see KNOWN ISSUES above. The fake one-second wait
-  // stands in for a future POST to the backend.
-  // Note the check below only requires at least ONE field to be filled in,
-  // not all of them.
-  const handleSaveCredentials = async () => {
-    if (!selectedProvider || Object.keys(credentials).length === 0) {
-      setMessage({ type: 'error', text: 'Please fill in all required fields' });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setSavedProviders(prev => new Set(prev).add(selectedProvider));
-      setMessage({ type: 'success', text: `${provider?.label} marked ready (this browser session only — not yet sent to the backend)` });
-      setCredentials({});
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to save credentials. Please try again.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Un-marks a cloud as READY. confirm() shows the browser's OK/Cancel box.
-  const handleDeleteCredentials = async (providerName: string) => {
-    if (!confirm(`Remove ${providerName} credentials?`)) return;
-    setSavedProviders(prev => {
-      const updated = new Set(prev);
-      updated.delete(providerName);
-      return updated;
-    });
-    setMessage({ type: 'success', text: `${providerName} credentials removed` });
-  };
+  // Which cloud's key form is open — the setup guide below follows it.
+  const [guideFor, setGuideFor] = useState<ProviderKey | null>(null);
+  // Who's signed in (components/AuthProvider.tsx). The guide below is public;
+  // only managing keys needs an account.
+  const { user, loading } = useAuth();
 
   return (
     <div>
       <div className="mb-8">
         <h1 className="text-xl font-bold neon-text mb-2 font-mono">[ CONFIGURATION ]</h1>
-        <p className="font-mono text-neon-lime text-sm">
-          {'> manage_cloud_provider_credentials_and_settings'.toUpperCase()}
+        <p className="text-sm text-slate-400 max-w-3xl">
+          Connect CloudGaming Hub to <strong>your own</strong> cloud accounts. Machines are created in your account and billed to you by the
+          cloud; this app only stores a limited-access key, encrypted, so it can start and stop them for you.
         </p>
       </div>
 
-      {message && (
-        <div className={`mb-6 p-4 rounded-lg font-mono text-sm border-l-4 ${
-          message.type === 'success'
-            ? 'border-neon-lime bg-green-950/30 text-neon-lime'
-            : 'border-neon-pink bg-red-950/30 text-neon-pink'
-        }`}>
-          {message.type === 'success' ? '✓' : '✗'} {message.text}
-        </div>
-      )}
-
-      {/* Cloud Provider Credentials Section */}
-      <div className="neon-card rounded-lg p-6 mb-8 border border-neon-cyan/30">
-        <h2 className="text-sm tracking-label font-bold neon-text mb-6 font-mono">[ CLOUD_PROVIDERS ]</h2>
-
-        {/* Provider Selection Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {providers.map((p) => (
-            <button
-              key={p.name}
-              onClick={() => setSelectedProvider(p.name)}
-              className={`p-4 rounded-lg border transition font-mono text-sm ${
-                selectedProvider === p.name
-                  ? 'neon-card-magenta border-neon-magenta'
-                  : 'neon-card border-neon-cyan hover:border-neon-magenta hover:neon-card-magenta'
-              }`}
-            >
-              <div className="text-2xl mb-2">{p.icon}</div>
-              <h3 className="font-bold text-neon-cyan text-xs mb-2">{p.label}</h3>
-              {savedProviders.has(p.name) && (
-                <div className="text-xs border border-neon-lime/30 text-neon-lime px-2 py-1 rounded inline-block bg-green-950/20">
-                  ✓ READY
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Credential Entry Form */}
-        {selectedProvider && provider && (
-          <div className="border-t border-neon-cyan/30 pt-6">
-            <h3 className="text-sm font-bold neon-accent mb-2 font-mono">{provider.label}</h3>
-            <p className="text-neon-lime mb-6 text-xs font-mono">{provider.description}</p>
-
-            <div className="space-y-4 mb-6">
-              {provider.requiredFields.map((field) => (
-                <div key={field}>
-                  <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">
-                    {field.toUpperCase()}
-                  </label>
-                  {field.includes('Key') || field.includes('Secret') ? (
-                    <div className="relative">
-                      <input
-                        type={showKey ? 'text' : 'password'}
-                        value={credentials[field] || ''}
-                        onChange={(e) => handleInputChange(field, e.target.value)}
-                        placeholder={`[${field}]`}
-                        className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowKey(!showKey)}
-                        className="absolute right-3 top-2.5 text-neon-lime hover:text-neon-cyan transition-colors"
-                      >
-                        {showKey ? '▓' : '▒'}
-                      </button>
-                    </div>
-                  ) : (
-                    <input
-                      type="text"
-                      value={credentials[field] || ''}
-                      onChange={(e) => handleInputChange(field, e.target.value)}
-                      placeholder={`[${field}]`}
-                      className="input-neon w-full px-4 py-2 rounded font-mono text-sm"
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Honest status of the save button (see KNOWN ISSUES at the top). */}
-            <div className="bg-amber-950/20 border border-amber-400/30 rounded-lg p-4 mb-6 text-xs text-slate-300 leading-relaxed">
-              <p>
-                <strong className="neon-amber">NOTE:</strong> Saving here is not connected to the backend yet — it only
-                marks this cloud as ready until you refresh. To use a cloud today, set its credentials as variables
-                on the Railway backend. Credentials are not yet encrypted at rest, so only use limited-access keys
-                (the setup guide below creates exactly those).
-              </p>
-            </div>
-
-            <button
-              onClick={handleSaveCredentials}
-              disabled={loading || Object.keys(credentials).length === 0}
-              className="btn-neon-cyan disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? '[ SAVING... ]' : '[ SAVE_CREDENTIALS ]'}
-            </button>
-          </div>
-        )}
-
-        {/* Saved Credentials Summary */}
-        {savedProviders.size > 0 && (
-          <div className="mt-8 border-t border-neon-magenta/30 pt-6">
-            <h3 className="text-sm font-bold neon-accent mb-4 font-mono">[ CONNECTED_PROVIDERS ]</h3>
-            <div className="space-y-3">
-              {providers.map((p) => {
-                if (!savedProviders.has(p.name)) return null;
-                return (
-                  <div key={p.name} className="flex items-center justify-between p-4 neon-card-magenta rounded-lg border border-neon-magenta/30">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">{p.icon}</span>
-                      <div className="font-mono">
-                        <p className="font-bold text-neon-magenta text-sm">{p.label}</p>
-                        <p className="text-xs text-neon-cyan/70">ready_to_use</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteCredentials(p.name)}
-                      className="px-4 py-2 text-neon-pink hover:bg-red-950/30 rounded-lg font-bold transition border border-neon-pink/50 hover:border-neon-pink font-mono text-sm"
-                    >
-                      REVOKE
-                    </button>
-                  </div>
-                );
-              })}
+      {/* Your encrypted cloud keys (sign-in required for this part only). */}
+      <section className="neon-card rounded-lg p-6 mb-8 border border-neon-cyan/30">
+        <h2 className="text-sm tracking-label font-bold neon-text mb-4 font-mono">[ YOUR_CLOUD_KEYS ]</h2>
+        {loading ? (
+          <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; CHECKING_SESSION…</p>
+        ) : user ? (
+          <CredentialManager onEditingChange={setGuideFor} />
+        ) : (
+          <div className="text-sm text-slate-300 space-y-3">
+            <p>Sign in to add your cloud keys. Each account only ever sees and uses its own keys.</p>
+            <div className="flex gap-2">
+              <Link href="/login?next=/settings" className="btn-neon">Sign in</Link>
+              <Link href="/login?mode=signup&next=/settings" className="btn-neon-magenta">Create account</Link>
             </div>
           </div>
         )}
-      </div>
+      </section>
 
       {/* Detailed per-cloud setup instructions. `selected` makes the guide
-          jump to whichever cloud you clicked above. */}
-      <CloudSetupGuide selected={selectedProvider} />
+          jump to whichever cloud's form you opened above. */}
+      <CloudSetupGuide selected={guideFor} />
 
       {/* Troubleshooting: native <details> elements open and close on click
           with no JavaScript. `group` + `group-open:` (Tailwind) flips the

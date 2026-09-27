@@ -46,6 +46,10 @@ import "./globals.css"; // global styles, loaded once for the whole site
 // so "@/components/X" = frontend/components/X.
 import SystemStatusBar from "@/components/SystemStatusBar";
 import NavLinks from "@/components/NavLinks";
+// Who is signed in, shared with every page (components/AuthProvider.tsx),
+// and the "Signed in as … / Sign out" widget in the header.
+import { AuthProvider } from "@/components/AuthProvider";
+import UserMenu from "@/components/UserMenu";
 
 // Next.js reads this exported object to fill in the page's <title> and
 // description (what shows in the browser tab and in search results).
@@ -67,6 +71,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-cyber-dark">
+        {/* AuthProvider wraps everything so any page or component can ask
+            "who is signed in?" with useAuth(). */}
+        <AuthProvider>
         {/* Column layout filling at least the whole screen height, so the footer sits at the bottom even on short pages */}
         <div className="flex flex-col min-h-screen">
 
@@ -89,8 +96,12 @@ export default function RootLayout({
                     NEON_CORE v0.1
                   </span>
                 </a>
-                {/* Page links with the active-page underline (components/NavLinks.tsx) */}
-                <NavLinks />
+                {/* Page links with the active-page underline (components/NavLinks.tsx),
+                    then the signed-in user / Sign in link (components/UserMenu.tsx) */}
+                <div className="flex items-center gap-4 min-w-0">
+                  <NavLinks />
+                  <UserMenu />
+                </div>
               </div>
             </div>
           </nav>
@@ -117,6 +128,7 @@ export default function RootLayout({
             </div>
           </footer>
         </div>
+        </AuthProvider>
       </body>
     </html>
   );

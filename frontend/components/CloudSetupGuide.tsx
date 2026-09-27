@@ -56,278 +56,152 @@ interface Guide {
 // THE CONTENT
 // ---------------------------------------------------------------------------
 const GUIDES: Record<ProviderKey, Guide> = {
-  aws: {
-    label: 'Amazon Web Services',
-    accent: 'text-neon-cyan',
-    status: 'Supported — the only cloud the app can launch machines on today.',
-    timeNeeded: '~15 minutes, plus waiting for GPU quota approval',
-    beforeYouStart: [
-      'An AWS account with a payment method added. GPU machines are not in the free tier.',
-      'Sign in as an administrator. Don\'t use the "root" login for the app — you\'ll create a separate, limited user below.',
-      'Work in the Asia Pacific (Singapore) region, ap-southeast-1 — the region this project is set up for. Pick it in the region menu at the top right of the console; key pairs and quotas are per region.',
-    ],
-    steps: [
-      {
-        title: 'Create a dedicated IAM user for the app',
-        detail:
-          'IAM → Users → Create user. Name it something like "cloudgaming-hub". Leave "Provide user access to the AWS Management Console" unticked — this user is only for the app, not for logging in.',
-        link: { href: 'https://console.aws.amazon.com/iam/home#/users', label: 'IAM → Users' },
-      },
-      {
-        title: 'Give it only the permissions it needs',
-        detail:
-          'On the permissions screen choose "Attach policies directly" and tick: AmazonEC2FullAccess (launch/stop machines, disks, snapshots), AWSPriceListServiceFullAccess (look up hourly prices) and AWSBillingReadOnlyAccess (read actual spend). Click Next → Create user.',
-      },
-      {
-        title: 'Turn on Cost Explorer (one-time)',
-        detail:
-          'Billing and Cost Management → Cost Explorer → Launch Cost Explorer. Needed for real cost figures; AWS takes up to 24 hours to prepare the data the first time.',
-        link: { href: 'https://console.aws.amazon.com/cost-management/home#/cost-explorer', label: 'Cost Explorer' },
-      },
-      {
-        title: 'Create an access key for the user',
-        detail:
-          'Open the user → "Security credentials" tab → Access keys → Create access key. Choose the use case "Application running outside AWS", click Next, add a description, then Create access key.',
-      },
-      {
-        title: 'Copy both halves of the key immediately',
-        detail:
-          'You\'ll see an Access key ID (starts with AKIA…) and a Secret access key. The secret is shown ONCE — click "Download .csv file" as a backup. If you lose it, delete the key and make a new one.',
-      },
-      {
-        title: 'Create the SSH key pair the app expects',
-        detail:
-          'EC2 → Network & Security → Key Pairs (in ap-southeast-1) → Create key pair. Name it exactly "cloudgaming-key" (the app uses this name), type RSA, format .pem. The .pem file downloads once — keep it safe; the backend needs it to finish setting up each machine.',
-        link: { href: 'https://ap-southeast-1.console.aws.amazon.com/ec2/home?region=ap-southeast-1#KeyPairs:', label: 'EC2 → Key Pairs (Singapore)' },
-      },
-      {
-        title: 'Create a security group (firewall) for streaming',
-        detail:
-          'EC2 → Security Groups → Create security group, e.g. "cloudgaming-sg". Inbound rules: TCP 22 (SSH, for automated setup); TCP 47984, 47989, 47990 and 48010; UDP 47998–48000, 48002 and 48010 (Sunshine/Moonlight streaming). Where possible set the source to your own IP rather than "Anywhere". Note: the backend currently has a placeholder security-group id (sg-0123456789abcdef0) in src/services/MachineService.ts — replace it with your new group\'s id.',
-        link: { href: 'https://ap-southeast-1.console.aws.amazon.com/ec2/home?region=ap-southeast-1#SecurityGroups:', label: 'EC2 → Security Groups (Singapore)' },
-      },
-    ],
-    fields: [
-      { field: 'accessKeyId', value: 'Access key ID from step 5', example: 'AKIAIOSFODNN7EXAMPLE' },
-      { field: 'secretAccessKey', value: 'Secret access key from step 5', example: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY…' },
-      { field: 'region', value: 'The region code', example: 'ap-southeast-1' },
-    ],
-    quota: {
-      summary:
-        'AWS measures GPU quota in vCPUs (virtual CPU cores), not machines. A g4dn.xlarge uses 4 vCPUs. The app launches SPOT machines (cheaper, can be interrupted), so the spot quota is the one that matters most.',
-      steps: [
-        'Service Quotas → AWS services → Amazon Elastic Compute Cloud (Amazon EC2), with the region set to Singapore.',
-        'Search "All G and VT Spot Instance Requests" → Request increase at account level → enter 8 (room for two g4dn.xlarge).',
-        'Also search "Running On-Demand G and VT instances" and request 8 as well, as a fallback.',
-        'Approval is often automatic for small numbers but can take a day or two for new accounts. You\'ll get an email.',
-      ],
-    },
-    warnings: [
-      'Never paste your root account keys here — only the dedicated user\'s.',
-      'A running g4dn.xlarge costs roughly US$0.50+/hour plus data transfer. Stop machines you\'re not using.',
-    ],
-  },
-
-  azure: {
-    label: 'Microsoft Azure',
-    accent: 'text-neon-magenta',
-    status: 'Credentials can be entered, but launching Azure machines isn\'t built yet.',
-    timeNeeded: '~20 minutes, plus waiting for GPU quota approval',
-    beforeYouStart: [
-      'A Pay-As-You-Go (or other paid) subscription. Free-trial subscriptions can\'t get GPU quota.',
-      'Owner or User Access Administrator rights on the subscription — you need them to grant the app access in step 6.',
-      'Suggested region: Southeast Asia (Singapore).',
-    ],
-    steps: [
-      {
-        title: 'Register an application (the app\'s identity)',
-        detail:
-          'Microsoft Entra ID → App registrations → New registration. Name: "cloudgaming-hub". Supported account types: "Accounts in this organizational directory only". Leave Redirect URI empty → Register.',
-        link: { href: 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade', label: 'App registrations' },
-      },
-      {
-        title: 'Copy the two IDs from the Overview page',
-        detail:
-          'On the new app\'s Overview, copy "Application (client) ID" (→ clientId) and "Directory (tenant) ID" (→ tenantId). Both look like 1a2b3c4d-… .',
-      },
-      {
-        title: 'Create a client secret (the app\'s password)',
-        detail:
-          'Certificates & secrets → Client secrets → New client secret. Description "cloudgaming-hub", expiry e.g. 12 months → Add. Copy the "Value" column straight away — NOT the "Secret ID" column. The value is only shown once. Put a reminder in your calendar to renew it before it expires.',
-      },
-      {
-        title: 'Copy your Subscription ID',
-        detail: 'Subscriptions → click your subscription → copy "Subscription ID".',
-        link: { href: 'https://portal.azure.com/#view/Microsoft_Azure_Billing/SubscriptionsBlade', label: 'Subscriptions' },
-      },
-      {
-        title: 'Create a resource group to hold the machines',
-        detail:
-          'Resource groups → Create. Subscription: yours; name "cloudgaming-rg"; region Southeast Asia → Review + create → Create. Everything the app creates will live in here, which keeps it tidy and easy to delete.',
-        link: { href: 'https://portal.azure.com/#browse/resourcegroups', label: 'Resource groups' },
-      },
-      {
-        title: 'Grant the app "Contributor" on that resource group',
-        detail:
-          'Open cloudgaming-rg → Access control (IAM) → Add → Add role assignment. On the "Privileged administrator roles" tab choose Contributor → Next. "Assign access to": User, group, or service principal → Select members → search "cloudgaming-hub" → Select → Review + assign. Granting it on the resource group (not the whole subscription) limits what the app can touch.',
-      },
-    ],
-    fields: [
-      { field: 'subscriptionId', value: 'Subscription ID (step 4)', example: '00000000-0000-0000-0000-000000000000' },
-      { field: 'clientId', value: 'Application (client) ID (step 2)', example: '1a2b3c4d-…' },
-      { field: 'clientSecret', value: 'Client secret VALUE (step 3)', example: 'abc8Q~…' },
-      { field: 'tenantId', value: 'Directory (tenant) ID (step 2)', example: '5e6f7a8b-…' },
-      { field: 'resourceGroup', value: 'Resource group name (step 5)', example: 'cloudgaming-rg' },
-    ],
-    quota: {
-      summary:
-        'Azure grants GPU capacity per VM "family", in vCPUs, per region. New subscriptions usually have 0 for GPU families.',
-      steps: [
-        'Search the portal for "Quotas" → Compute → filter region "Southeast Asia".',
-        'Find a GPU family such as "Standard NVADSA10v5 Family vCPUs" (NVIDIA A10) or "Standard NCASv3_T4 Family vCPUs" (NVIDIA T4).',
-        'Click the pencil / "New quota request" and ask for at least 6–8 vCPUs.',
-        'Note: the older NV-series (Standard_NV6) used in this app\'s price tables has been retired by Microsoft — the A10 or T4 families are the current equivalents.',
-      ],
-    },
-    warnings: [
-      'The client secret expires — when it does, create a new one and update it here.',
-    ],
-  },
-
   gcp: {
-    label: 'Google Cloud Platform',
+    label: 'Google Cloud',
     accent: 'text-neon-lime',
-    status: 'Credentials can be entered, but launching Google Cloud machines isn\'t built yet.',
+    status: 'Launch, start, stop, delete, snapshots and live setup progress are built. Not yet tested end to end on a real project.',
     timeNeeded: '~15 minutes, plus waiting for GPU quota approval',
     beforeYouStart: [
-      'A project with billing enabled. Free-trial accounts cannot use GPUs — click "Activate full account" first.',
-      'Suggested region: asia-southeast1 (Singapore).',
+      'A Google Cloud project with billing linked. Free-trial accounts can\'t use GPUs — click "Activate full account" first.',
+      'Suggested region: asia-southeast1 (Singapore). Pick the one closest to you in the launch form.',
     ],
     steps: [
-      {
-        title: 'Pick (or create) a project and note its Project ID',
-        detail:
-          'Use the project picker at the top of the console. Copy the Project ID (e.g. "my-gaming-412305") — not the display name; they are often different.',
-      },
-      {
-        title: 'Enable the Compute Engine API',
-        detail:
-          'APIs & Services → Library → search "Compute Engine API" → Enable. Takes a minute or two the first time.',
-        link: { href: 'https://console.cloud.google.com/apis/library/compute.googleapis.com', label: 'Compute Engine API' },
-      },
-      {
-        title: 'Create a service account (the app\'s identity)',
-        detail:
-          'IAM & Admin → Service Accounts → Create service account. Name "cloudgaming-hub" → Create and continue.',
-        link: { href: 'https://console.cloud.google.com/iam-admin/serviceaccounts', label: 'Service Accounts' },
-      },
-      {
-        title: 'Give it the roles it needs',
-        detail:
-          'Under "Grant this service account access to project", add: Compute Admin (create/stop VMs, disks, snapshots) and Service Account User (lets it start VMs that run as a service account) → Continue → Done.',
-      },
-      {
-        title: 'Create a JSON key',
-        detail:
-          'Click the new service account → Keys tab → Add key → Create new key → JSON → Create. A .json file downloads. If you see "Service account key creation is disabled", see that error under TROUBLESHOOTING below: the fix is to switch the policy off for this one project.',
-      },
-      {
-        title: 'Paste the WHOLE file',
-        detail:
-          'Open the .json file in a text editor and copy everything, from the first { to the last } — including the long "private_key" line. Partial copies are the most common cause of "invalid key" errors.',
-      },
+      { title: 'Pick (or create) a project and note its Project ID', detail: 'Use the project picker at the top of the console. Copy the Project ID (e.g. "my-gaming-412305") — not the display name.', link: { href: 'https://console.cloud.google.com/projectselector2/home/dashboard', label: 'Open project picker' } },
+      { title: 'Enable the Compute Engine API', detail: 'APIs & Services → Library → "Compute Engine API" → Enable. Takes a minute or two the first time.', link: { href: 'https://console.cloud.google.com/apis/library/compute.googleapis.com', label: 'Open Compute Engine API' } },
+      { title: 'Create a service account (the app\'s identity)', detail: 'IAM & Admin → Service Accounts → Create service account. Name: "cloudgaming-hub" → Create and continue.', link: { href: 'https://console.cloud.google.com/iam-admin/serviceaccounts/create', label: 'Create service account' } },
+      { title: 'Give it the "Compute Admin" role', detail: 'In "Grant this service account access to project", add Compute Admin (creates machines, disks, snapshots and the streaming firewall rule) → Continue → Done. "Service Account User" is optional — the app doesn\'t attach service accounts to machines.' },
+      { title: 'Create a JSON key', detail: 'Click the service account → Keys → Add key → Create new key → JSON → Create. A .json file downloads. If you see "Service account key creation is disabled", see that entry under TROUBLESHOOTING below.' },
+      { title: 'Add it on this page', detail: 'Under YOUR_CLOUD_KEYS → Google Cloud → Add keys, click "Upload file" and pick the .json (or paste all of it). Project ID can be left blank — it\'s read from the file. Press "Check & save": the app signs in, reads your GPU quotas and network, and only saves if nothing fails.' },
     ],
     fields: [
-      { field: 'projectId', value: 'Project ID (step 1)', example: 'my-gaming-412305' },
-      { field: 'serviceAccountKey', value: 'Entire contents of the JSON key file (step 6)', example: '{ "type": "service_account", "project_id": … }' },
+      { field: 'Service account key (JSON)', value: 'The whole downloaded key file (step 5)', example: '{ "type": "service_account", "project_id": … }' },
+      { field: 'Project ID (optional)', value: 'Only if different from the key\'s project', example: 'my-gaming-412305' },
     ],
     quota: {
-      summary:
-        'Google has TWO GPU limits and both must be above zero: a global "all regions" count and a per-region count for the specific GPU model.',
+      summary: 'Google has TWO GPU limits and both must be at least 1: a global "GPUs (all regions)" count and a per-region count for the GPU model. New projects start at 0. The key check on this page tells you which one is missing.',
       steps: [
         'IAM & Admin → Quotas & System Limits.',
-        'Filter "GPUs (all regions)" → select it → Edit → request at least 1.',
-        'Filter e.g. "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs" for region asia-southeast1 → request at least 1.',
+        'Filter "GPUs (all regions)" → select → Edit → request at least 1.',
+        'Filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs" for your region (e.g. asia-southeast1) → request at least 1.',
+        'For spot machines, also request "Preemptible NVIDIA T4 GPUs" (or L4).',
         'Approval usually takes from a few minutes to 2 business days.',
       ],
     },
     warnings: [
       'The JSON key file is a password — don\'t commit it to git or share it. Delete keys you no longer use (Keys tab).',
+      'The app creates a firewall rule "cloudgaming-sunshine" that opens the streaming ports to machines tagged with it. SSH is not opened.',
     ],
   },
-
-  oracle: {
-    label: 'Oracle Cloud (OCI)',
-    accent: 'text-neon-magenta',
-    status: 'Credentials can be entered, but launching Oracle machines isn\'t built yet.',
-    timeNeeded: '~20 minutes, plus waiting for a GPU limit increase',
+  aws: {
+    label: 'Amazon Web Services',
+    accent: 'text-neon-cyan',
+    status: 'Launch, start, stop, delete, snapshots and live setup progress are built. Not yet tested end to end on a real account.',
+    timeNeeded: '~15 minutes, plus waiting for GPU quota approval',
     beforeYouStart: [
-      'An upgraded ("Pay As You Go") account. Always Free / trial accounts don\'t include GPU shapes.',
-      'Oracle calls every resource\'s ID an OCID — a long string like ocid1.user.oc1..aaaa… . You\'ll copy several.',
-      'Suggested region: Singapore (ap-singapore-1).',
-      'Oracle\'s big advantage: the first 10 TB of outbound data each month is free (in every region). Streaming is mostly outbound data, so this can save a lot.',
+      'An AWS account with a payment method. GPU machines are not in the free tier.',
+      'Sign in as an administrator — but don\'t give the app your root login; you\'ll create a limited user below.',
+      'The region needs a default VPC (every account has one unless it was deleted). The key check warns if it\'s missing.',
     ],
     steps: [
-      {
-        title: 'Copy your User OCID',
-        detail:
-          'Profile icon (top right) → My profile → copy the OCID shown (starts with ocid1.user.). Use the OCID, not your username or email.',
-        link: { href: 'https://cloud.oracle.com/identity/domains/my-profile', label: 'My profile' },
-      },
-      {
-        title: 'Copy your Tenancy OCID',
-        detail:
-          'Profile icon → "Tenancy: <your name>" → copy the OCID (starts with ocid1.tenancy.).',
-      },
-      {
-        title: 'Create a compartment for the app',
-        detail:
-          'Identity & Security → Compartments → Create compartment, name "cloudgaming" → Create. Open it and copy its OCID (starts with ocid1.compartment.). (You can use the root compartment instead — its OCID is the same as the tenancy OCID — but a separate one keeps things tidy.)',
-        link: { href: 'https://cloud.oracle.com/identity/compartments', label: 'Compartments' },
-      },
-      {
-        title: 'Generate an API signing key',
-        detail:
-          'My profile → Resources (left) → API keys → Add API key → "Generate API key pair" → Download private key (a .pem file) → Add.',
-      },
-      {
-        title: 'Copy the fingerprint',
-        detail:
-          'After clicking Add, a "Configuration file preview" appears. Copy the fingerprint line — it looks like 12:34:56:ab:cd:… (16 pairs separated by colons).',
-      },
-      {
-        title: 'Paste the private key',
-        detail:
-          'Open the downloaded .pem file in a text editor and copy all of it, including the -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- lines.',
-      },
-      {
-        title: 'Permissions (only if you are not a tenancy administrator)',
-        detail:
-          'An admin must add a policy for your group, e.g.: "Allow group CloudGaming to manage instance-family in compartment cloudgaming", plus the same for "volume-family", and "use virtual-network-family".',
-      },
+      { title: 'Create a dedicated IAM user', detail: 'IAM → Users → Create user. Name: "cloudgaming-hub". Don\'t tick console access — the app only needs an access key.', link: { href: 'https://console.aws.amazon.com/iam/home#/users/create', label: 'Create IAM user' } },
+      { title: 'Attach its permissions', detail: 'Attach policies directly: AmazonEC2FullAccess (required — machines, disks, snapshots, security group). Optional: ServiceQuotasReadOnlyAccess (lets the key check read your GPU quota) and a policy allowing ce:GetCostAndUsage (real spend reports).' },
+      { title: 'Create an access key', detail: 'Open the user → Security credentials → Create access key → "Application running outside AWS" → Create.' },
+      { title: 'Copy both halves immediately', detail: 'The Access key ID (starts with AKIA) and the Secret access key. The secret is shown ONLY once.' },
+      { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → AWS → Add keys → paste both → "Check & save". The check signs in, does a dry-run launch to confirm permissions, reads your GPU quota and checks the default VPC. Regions are chosen per machine in the launch form.' },
     ],
     fields: [
-      { field: 'compartmentId', value: 'Compartment OCID (step 3)', example: 'ocid1.compartment.oc1..aaaa…' },
-      { field: 'userId', value: 'User OCID (step 1)', example: 'ocid1.user.oc1..aaaa…' },
-      { field: 'tenancy', value: 'Tenancy OCID (step 2)', example: 'ocid1.tenancy.oc1..aaaa…' },
-      { field: 'fingerprint', value: 'API key fingerprint (step 5)', example: '12:34:56:78:9a:bc:de:f0:…' },
-      { field: 'privateKey', value: 'Full contents of the .pem file (step 6)', example: '-----BEGIN PRIVATE KEY-----…' },
+      { field: 'Access key ID', value: 'From step 4', example: 'AKIAIOSFODNN7EXAMPLE' },
+      { field: 'Secret access key', value: 'From step 4 (shown once)', example: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY…' },
     ],
     quota: {
-      summary: 'Oracle calls quotas "service limits". GPU shapes start at 0 for most accounts.',
+      summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge needs 8.',
       steps: [
-        'Governance & Administration → Limits, Quotas and Usage.',
-        'Service: Compute; scope: the Singapore availability domain; find a GPU shape such as "GPU A10 count" (VM.GPU.A10.1).',
-        'Click "Request a service limit update" and ask for 1.',
+        'Service Quotas → AWS services → Amazon EC2, in the region you\'ll use.',
+        'Find "Running On-Demand G and VT instances" → Request increase → 8.',
+        'For spot machines, also request "All G and VT Spot Instance Requests" → 8.',
+        'Approval takes from minutes to a couple of days; brand-new accounts may be asked for a use case.',
       ],
     },
     warnings: [
-      'The .pem private key is a password — keep the file safe and don\'t share it.',
+      'The app creates a security group "cloudgaming-sunshine" in the default VPC with only the streaming ports open. SSH is not opened.',
+      'Stopped machines still pay for their EBS disk (~$0.08–0.10/GB-month).',
+    ],
+  },
+  azure: {
+    label: 'Microsoft Azure',
+    accent: 'text-neon-purple',
+    status: 'Launch, start (deallocate/stop), delete, snapshots and live setup progress are built. Not yet tested end to end on a real subscription.',
+    timeNeeded: '~15 minutes, plus waiting for GPU quota approval',
+    beforeYouStart: [
+      'A Pay-As-You-Go subscription. Free-trial and student subscriptions can\'t get GPU quota — upgrade first.',
+      'Machines use full NVIDIA T4 GPUs (NCasT4_v3 sizes). The partial-GPU NVadsA10 v5 sizes need special drivers and aren\'t offered.',
+    ],
+    steps: [
+      { title: 'Open Azure Cloud Shell', detail: 'Click the >_ icon at the top of the Azure portal and choose Bash.', link: { href: 'https://portal.azure.com/#cloudshell/', label: 'Open Cloud Shell' } },
+      { title: 'Get your Subscription ID', detail: 'Run:  az account show --query id -o tsv' },
+      { title: 'Create the app\'s identity with Contributor access', detail: 'Run:  az ad sp create-for-rbac --name cloudgaming-hub --role Contributor --scopes /subscriptions/<SUBSCRIPTION_ID>   It prints appId (Client ID), password (Client secret) and tenant (Tenant ID). The password is shown only once.' },
+      { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → Azure → Add keys → paste the four values (or paste the whole JSON that az printed into any field) → "Check & save". The check signs in, confirms permissions, registers the Compute/Network providers if needed and reads your GPU quota.' },
+    ],
+    fields: [
+      { field: 'Tenant ID', value: '"tenant" from step 3', example: '5e6f7a8b-…' },
+      { field: 'Client ID', value: '"appId" from step 3', example: '1a2b3c4d-…' },
+      { field: 'Client secret', value: '"password" from step 3 (the VALUE, not the secret\'s ID)', example: 'abc8Q~…' },
+      { field: 'Subscription ID', value: 'From step 2', example: '00000000-0000-0000-0000-000000000000' },
+    ],
+    quota: {
+      summary: 'GPU quota is per region and per VM family, and starts at 0.',
+      steps: [
+        'Portal → Quotas → Compute → pick your region.',
+        'Find "Standard NCASv3_T4 Family vCPUs" → request 8.',
+        'For spot machines, also request "Total Regional Spot vCPUs" → 8.',
+      ],
+    },
+    warnings: [
+      'Stopping deallocates the VM (compute billing stops). A VM that is merely "stopped" inside Windows/Linux keeps billing — always stop from here.',
+      'The app creates a resource group "cloudgaming-hub-<region>" with a VNet and NSG; each machine gets its own public IP, network card and disk, all deleted with it.',
+      'Lost or expired secret? Run:  az ad sp credential reset --id <CLIENT_ID>',
+    ],
+  },
+  oracle: {
+    label: 'Oracle Cloud',
+    accent: 'text-neon-pink',
+    status: 'Launch, start, stop, delete, backups and live setup progress are built. Not yet tested end to end on a real tenancy.',
+    timeNeeded: '~20 minutes, plus waiting for a GPU limit increase',
+    beforeYouStart: [
+      'A Pay As You Go account. Free-trial and Always Free accounts can\'t use GPUs.',
+      'GPU machines are VM.GPU.A10.1 (NVIDIA A10) — powerful but ~$2/hour. Oracle\'s first 10 TB/month of streamed data is free.',
+      'If you want a region other than your home region, subscribe to it first (region menu → Manage regions).',
+    ],
+    steps: [
+      { title: 'Create a group and policy (skip if you\'re a tenancy administrator)', detail: 'Identity → Domains → Default → Groups → create "CloudGaming" and add your user. Then Identity & Security → Policies (root compartment) → Create policy → manual editor:  Allow group CloudGaming to manage instance-family in tenancy · Allow group CloudGaming to manage virtual-network-family in tenancy · Allow group CloudGaming to manage volume-family in tenancy · Allow group CloudGaming to read all-resources in tenancy', link: { href: 'https://cloud.oracle.com/identity/domains/policies', label: 'Open Policies' } },
+      { title: 'Create an API key', detail: 'Profile (top right) → My profile → API keys → Add API key → Generate API key pair → Download private key → Add.', link: { href: 'https://cloud.oracle.com/identity/domains/my-profile/api-keys', label: 'Open API keys' } },
+      { title: 'Copy the configuration preview', detail: 'After adding the key, Oracle shows a "Configuration file preview" with tenancy=, user=, fingerprint= and region=. Copy those four values.' },
+      { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → Oracle → Add keys → paste the values and upload the PRIVATE .pem (not the _public.pem) → "Check & save". The check verifies the key and fingerprint locally, signs in, tests permissions and looks for GPU shapes.' },
+    ],
+    fields: [
+      { field: 'Tenancy OCID', value: 'tenancy= from step 3', example: 'ocid1.tenancy.oc1..aaaa…' },
+      { field: 'User OCID', value: 'user= from step 3', example: 'ocid1.user.oc1..aaaa…' },
+      { field: 'Fingerprint', value: 'fingerprint= from step 3', example: '12:34:56:78:9a:bc:de:f0:…' },
+      { field: 'Private key', value: 'The downloaded private .pem', example: '-----BEGIN PRIVATE KEY-----…' },
+      { field: 'Region', value: 'region= from step 3', example: 'ap-singapore-1' },
+      { field: 'Compartment OCID (optional)', value: 'Blank = the root compartment', example: 'ocid1.compartment.oc1..aaaa…' },
+    ],
+    quota: {
+      summary: 'GPU shapes need a service limit increase, per availability domain.',
+      steps: [
+        'Governance → Limits, Quotas and Usage → Service: Compute → your region.',
+        'Search "GPU.A10" ("GPUs for GPU.A10 based VM and BM instances") → Request a service limit increase → 1.',
+        'Approval takes hours to a couple of days.',
+      ],
+    },
+    warnings: [
+      'Preemptible (spot) Oracle machines can\'t be stopped — only deleted. Use on-demand if you want to stop and resume.',
+      'The app creates a VCN "cloudgaming-vcn" with an internet gateway and a security list opening only the streaming ports (SSH is not opened).',
     ],
   },
 };
 
-const ORDER: ProviderKey[] = ['aws', 'azure', 'gcp', 'oracle'];
+const ORDER: ProviderKey[] = ['gcp', 'aws', 'azure', 'oracle'];
 
 /**
  * @param selected optional: which cloud to show. The Config page passes the
@@ -335,7 +209,7 @@ const ORDER: ProviderKey[] = ['aws', 'azure', 'gcp', 'oracle'];
  */
 export default function CloudSetupGuide({ selected }: { selected?: ProviderKey | null }) {
   // Which tab is showing. Starts on the page's selection, or AWS.
-  const [active, setActive] = useState<ProviderKey>(selected || 'aws');
+  const [active, setActive] = useState<ProviderKey>(selected || 'gcp');
 
   // When the parent's selection changes, follow it. (useEffect with
   // [selected] re-runs whenever `selected` changes.)
