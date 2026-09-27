@@ -4,6 +4,7 @@ import { Machine, Snapshot } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import { CloudyPadSetup } from '../utils/CloudyPadSetup';
+import { SnapshotService } from './SnapshotService';
 import { env } from '../config/env';
 
 /**
@@ -107,7 +108,25 @@ export class MachineService {
 
       const machine = machineResult.rows[0];
 
-      // 2. Get cloud provider
+      // 2. Create snapshot if requested
+      if (snapshot) {
+        try {
+          console.log('Creating game library snapshot...');
+          const snapshotMeta = await SnapshotService.createSnapshot({
+            machineId,
+            userId,
+            paths: ['/mnt/games'],
+            description: `Auto-snapshot from ${machine.provider} ${machine.region}`,
+          });
+
+          console.log(`Snapshot created: ${snapshotMeta.id}`);
+        } catch (error) {
+          console.error('Snapshot creation failed:', error);
+          // Non-blocking: continue with stop even if snapshot fails
+        }
+      }
+
+      // 3. Get cloud provider and stop instance
       const credsResult = await query(
         'SELECT encrypted_data FROM cloud_credentials WHERE user_id = $1 AND provider = $2',
         [userId, machine.provider]
@@ -116,27 +135,6 @@ export class MachineService {
       const credentials = JSON.parse(credsResult.rows[0].encrypted_data);
       const cloudProvider = getProvider(machine.provider, credentials);
 
-      // 3. Create snapshot if requested
-      if (snapshot) {
-        console.log('Creating game library snapshot...');
-        const snapResult = await cloudProvider.createSnapshot(machine.instance_id, '/mnt/games');
-
-        const snapshotId = uuidv4();
-        await query(
-          `INSERT INTO snapshots (
-            id, machine_id, user_id, provider, region, snapshot_provider_id, disk_size_gb
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [snapshotId, machineId, userId, machine.provider, machine.region, snapResult.snapshotId, snapResult.sizeGb]
-        );
-
-        // Update machine's snapshot reference
-        await query(
-          'UPDATE machines SET snapshot_id = $1 WHERE id = $2',
-          [snapshotId, machineId]
-        );
-      }
-
-      // 4. Stop instance
       await cloudProvider.stopInstance(machine.instance_id);
 
       // 5. Update machine status

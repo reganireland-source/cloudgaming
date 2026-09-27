@@ -13,6 +13,7 @@ import regionRoutes from './api/routes/regions';
 import performanceRoutes from './api/routes/performance';
 import streamingRoutes from './api/routes/streaming';
 import setupStatusRoutes from './api/routes/setup-status';
+import snapshotRoutes from './api/routes/snapshots';
 
 // Middleware
 import { authMiddleware } from './api/middleware/auth';
@@ -55,6 +56,7 @@ app.use('/api/regions', authMiddleware, regionRoutes);
 app.use('/api/performance', authMiddleware, performanceRoutes);
 app.use('/api/streaming', streamingRoutes);
 app.use('/api/setup-status', authMiddleware, setupStatusRoutes);
+app.use('/api/snapshots', authMiddleware, snapshotRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
