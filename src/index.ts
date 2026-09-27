@@ -10,6 +10,7 @@ import authRoutes from './api/routes/auth';
 import machineRoutes from './api/routes/machines';
 import costRoutes from './api/routes/costs';
 import regionRoutes from './api/routes/regions';
+import performanceRoutes from './api/routes/performance';
 
 // Middleware
 import { authMiddleware } from './api/middleware/auth';
@@ -49,6 +50,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/machines', authMiddleware, machineRoutes);
 app.use('/api/costs', authMiddleware, costRoutes);
 app.use('/api/regions', authMiddleware, regionRoutes);
+app.use('/api/performance', authMiddleware, performanceRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

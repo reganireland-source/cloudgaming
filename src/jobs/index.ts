@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { syncCostsJob, checkIdleJob, budgetAlertJob } from './SyncCosts';
+import { collectPerformanceMetricsJob } from './CollectPerformance';
 
 /**
  * Initialize all background jobs
@@ -20,6 +21,11 @@ export function initializeJobs() {
   // Budget alerts daily at 9 AM
   cron.schedule('0 9 * * *', () => {
     budgetAlertJob().catch(err => console.error('Budget alert job error:', err));
+  });
+
+  // Collect performance metrics every minute
+  cron.schedule('* * * * *', () => {
+    collectPerformanceMetricsJob().catch(err => console.error('Performance collection job error:', err));
   });
 
   console.log('Background jobs initialized');

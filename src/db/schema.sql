@@ -126,3 +126,33 @@ VALUES
   ('High', '1440p', 60, 12000, 'h265', 5.40),
   ('Ultra', '4K', 60, 20000, 'h265', 9.00)
 ON CONFLICT DO NOTHING;
+
+-- Performance metrics (real-time monitoring)
+CREATE TABLE IF NOT EXISTS performance_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  machine_id UUID NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cpu_usage DECIMAL(5, 2) NOT NULL,
+  gpu_usage DECIMAL(5, 2) NOT NULL,
+  gpu_memory_usage INTEGER NOT NULL,
+  gpu_memory_total INTEGER NOT NULL,
+  network_bandwidth_up DECIMAL(10, 2) NOT NULL,
+  network_bandwidth_down DECIMAL(10, 2) NOT NULL,
+  network_packet_loss DECIMAL(5, 2) NOT NULL,
+  network_latency DECIMAL(10, 2) NOT NULL,
+  streaming_fps DECIMAL(5, 2) NOT NULL,
+  streaming_frame_drops INTEGER NOT NULL DEFAULT 0,
+  disk_read_iops INTEGER NOT NULL,
+  disk_write_iops INTEGER NOT NULL,
+  disk_read_mbps DECIMAL(10, 2) NOT NULL,
+  disk_write_mbps DECIMAL(10, 2) NOT NULL,
+  memory_usage INTEGER NOT NULL,
+  memory_total INTEGER NOT NULL,
+  gpu_temperature DECIMAL(5, 2) NOT NULL,
+  cpu_temperature DECIMAL(5, 2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create indexes for performance metrics
+CREATE INDEX IF NOT EXISTS idx_performance_metrics_machine_id_timestamp ON performance_metrics(machine_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_performance_metrics_timestamp ON performance_metrics(timestamp DESC);
