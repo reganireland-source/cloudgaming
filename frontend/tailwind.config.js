@@ -7,30 +7,46 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // Phosphor-terminal palette: the same hues as the original neon set,
+      // pulled back in saturation so they read as CRT phosphor rather than
+      // blacklight. Names unchanged so every existing class picks these up.
       colors: {
-        'neon-cyan': '#00ffff',
-        'neon-magenta': '#ff00ff',
-        'neon-lime': '#00ff41',
-        'neon-purple': '#a000ff',
-        'neon-pink': '#ff0080',
-        'cyber-dark': '#0a0e27',
-        'cyber-darker': '#05070f',
+        'neon-cyan': '#5fd7e0',
+        'neon-magenta': '#d487e8',
+        'neon-lime': '#8fd694',
+        'neon-purple': '#a48cf0',
+        'neon-pink': '#ec8aa8',
+        'neon-amber': '#e8b863',
+        'cyber-dark': '#0c1018',
+        'cyber-darker': '#080b11',
+        'cyber-panel': '#111723',
+        'cyber-line': '#1f2937',
       },
       fontFamily: {
-        'mono': ['IBM Plex Mono', 'Courier New', 'monospace'],
-        'tech': ['Space Mono', 'Courier New', 'monospace'],
+        'mono': ['"IBM Plex Mono"', 'ui-monospace', 'Menlo', 'monospace'],
+        'sans': ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        'tech': ['"IBM Plex Mono"', 'ui-monospace', 'Menlo', 'monospace'],
       },
       boxShadow: {
-        'neon-cyan': '0 0 20px rgba(0, 255, 255, 0.5), inset 0 0 20px rgba(0, 255, 255, 0.1)',
-        'neon-magenta': '0 0 20px rgba(255, 0, 255, 0.5), inset 0 0 20px rgba(255, 0, 255, 0.1)',
-        'neon-lime': '0 0 20px rgba(0, 255, 65, 0.5), inset 0 0 20px rgba(0, 255, 65, 0.1)',
-        'neon-pink': '0 0 20px rgba(255, 0, 128, 0.5), inset 0 0 20px rgba(255, 0, 128, 0.1)',
+        'neon-cyan': '0 0 0 1px rgba(95, 215, 224, 0.25), 0 4px 18px -6px rgba(95, 215, 224, 0.25)',
+        'neon-magenta': '0 0 0 1px rgba(212, 135, 232, 0.25), 0 4px 18px -6px rgba(212, 135, 232, 0.25)',
+        'neon-lime': '0 0 0 1px rgba(143, 214, 148, 0.25), 0 4px 18px -6px rgba(143, 214, 148, 0.25)',
+        'neon-pink': '0 0 0 1px rgba(236, 138, 168, 0.25), 0 4px 18px -6px rgba(236, 138, 168, 0.25)',
       },
       backgroundImage: {
-        'grid-pattern': 'linear-gradient(0deg, transparent 24%, rgba(0, 255, 255, 0.05) 25%, rgba(0, 255, 255, 0.05) 26%, transparent 27%, transparent 74%, rgba(0, 255, 255, 0.05) 75%, rgba(0, 255, 255, 0.05) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(0, 255, 255, 0.05) 25%, rgba(0, 255, 255, 0.05) 26%, transparent 27%, transparent 74%, rgba(0, 255, 255, 0.05) 75%, rgba(0, 255, 255, 0.05) 76%, transparent 77%, transparent)',
+        'grid-pattern':
+          'linear-gradient(rgba(95, 215, 224, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(95, 215, 224, 0.035) 1px, transparent 1px)',
       },
       backgroundSize: {
-        'grid': '50px 50px',
+        'grid': '32px 32px',
+      },
+      letterSpacing: {
+        'label': '0.08em',
+      },
+      // Any `border`/`divide` with no explicit colour otherwise falls back to
+      // Tailwind's light-mode gray-200, which reads as a bright white rule here.
+      borderColor: {
+        DEFAULT: 'rgba(255, 255, 255, 0.07)',
       },
     },
   },

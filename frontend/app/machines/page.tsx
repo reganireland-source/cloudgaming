@@ -92,7 +92,7 @@ export default function MachinesPage() {
     <div>
       <div className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-4xl font-bold neon-text mb-2 font-mono">
+          <h1 className="text-xl font-bold neon-text mb-2 font-mono">
             [ INSTANCE_MANAGER ]
           </h1>
           <p className="font-mono text-sm text-neon-lime">
@@ -105,9 +105,9 @@ export default function MachinesPage() {
       </div>
 
       {machines.length > 0 ? (
-        <div className="neon-card rounded-lg border-2 border-neon-cyan overflow-hidden">
+        <div className="neon-card rounded-lg border border-neon-cyan/30 overflow-x-auto">
           <table className="min-w-full font-mono text-sm">
-            <thead className="border-b-2 border-neon-cyan">
+            <thead className="border-b border-neon-cyan/30">
               <tr className="bg-cyan-950/20">
                 <th className="px-6 py-4 text-left text-neon-cyan font-bold">[INSTANCE]</th>
                 <th className="px-6 py-4 text-left text-neon-magenta font-bold">[PROVIDER]</th>
@@ -173,7 +173,7 @@ export default function MachinesPage() {
           </table>
         </div>
       ) : (
-        <div className="neon-card rounded-lg p-12 text-center border-2 border-neon-cyan">
+        <div className="neon-card rounded-lg p-12 text-center border border-neon-cyan/30">
           <p className="font-mono text-neon-lime mb-6">
             {'> NO_INSTANCES_DETECTED'}
           </p>

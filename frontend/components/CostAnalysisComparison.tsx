@@ -76,7 +76,7 @@ export default function CostAnalysisComparison({
     return (
       <div className="p-8 text-center">
         <div className="inline-block">
-          <div className="animate-spin h-8 w-8 border-2 border-neon-cyan border-t-transparent rounded-full mb-4"></div>
+          <div className="animate-spin h-8 w-8 border border-neon-cyan/30 border-t-transparent rounded-full mb-4"></div>
           <p className="font-mono text-neon-cyan text-sm">
             {'> ANALYZING_COSTS_AND_PERFORMANCE...'}
           </p>
@@ -133,8 +133,8 @@ export default function CostAnalysisComparison({
   return (
     <div className="space-y-6">
       {/* Recommendation Box */}
-      <div className="p-6 rounded-lg border-2 border-neon-lime/50 bg-green-950/20">
-        <h3 className="font-bold font-mono text-neon-lime mb-2 text-lg">
+      <div className="p-6 rounded-lg border border-neon-lime/50 bg-green-950/20">
+        <h3 className="font-bold font-mono text-neon-lime mb-2 text-sm">
           [ RECOMMENDATION ]
         </h3>
         <p className="font-mono text-gray-300 text-sm mb-3">
@@ -151,7 +151,7 @@ export default function CostAnalysisComparison({
       </div>
 
       {/* Cost Breakdown */}
-      <div className="p-6 rounded-lg border-2 border-neon-cyan/30 bg-cyan-950/20">
+      <div className="p-6 rounded-lg border border-neon-cyan/30 bg-cyan-950/20">
         <h3 className="font-bold font-mono text-neon-cyan mb-4">[ PARAMETERS ]</h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
           <div>
@@ -177,9 +177,9 @@ export default function CostAnalysisComparison({
 
       {/* Region Comparison Table */}
       <div className="overflow-x-auto">
-        <div className="neon-card rounded-lg border-2 border-neon-cyan overflow-hidden">
+        <div className="neon-card rounded-lg border border-neon-cyan/30 overflow-x-auto">
           <table className="w-full font-mono text-sm">
-            <thead className="border-b-2 border-neon-cyan/30 bg-cyan-950/20">
+            <thead className="border-b border-neon-cyan/30 bg-cyan-950/20">
               <tr>
                 <th className="px-4 py-3 text-left text-neon-cyan font-bold">
                   [PROVIDER / REGION]
@@ -259,7 +259,7 @@ export default function CostAnalysisComparison({
       {/* Cost vs Performance Trade-off */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Cheapest */}
-        <div className="p-4 rounded-lg border-2 border-neon-cyan/30 bg-cyan-950/20">
+        <div className="p-4 rounded-lg border border-neon-cyan/30 bg-cyan-950/20">
           <p className="text-xs font-mono text-gray-400 mb-2">CHEAPEST_OPTION</p>
           <p className="font-bold text-neon-cyan mb-1">
             {analysis.recommendation.cheapest.provider.toUpperCase()}
@@ -276,7 +276,7 @@ export default function CostAnalysisComparison({
         </div>
 
         {/* Fastest */}
-        <div className="p-4 rounded-lg border-2 border-neon-magenta/30 bg-magenta-950/20">
+        <div className="p-4 rounded-lg border border-neon-magenta/30 bg-magenta-950/20">
           <p className="text-xs font-mono text-gray-400 mb-2">FASTEST_LATENCY</p>
           <p className="font-bold text-neon-magenta mb-1">
             {analysis.recommendation.fastestLatency.provider.toUpperCase()}
@@ -293,7 +293,7 @@ export default function CostAnalysisComparison({
         </div>
 
         {/* Best Value */}
-        <div className="p-4 rounded-lg border-2 border-neon-lime/30 bg-green-950/20">
+        <div className="p-4 rounded-lg border border-neon-lime/30 bg-green-950/20">
           <p className="text-xs font-mono text-gray-400 mb-2">BEST_VALUE</p>
           <p className="font-bold text-neon-lime mb-1">
             {analysis.recommendation.bestValue.provider.toUpperCase()}

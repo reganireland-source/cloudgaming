@@ -56,7 +56,7 @@ export default function StreamingConnectionDetails({
     return (
       <div className="p-12 text-center">
         <div className="inline-block">
-          <div className="animate-spin h-8 w-8 border-2 border-neon-cyan border-t-transparent rounded-full mb-4"></div>
+          <div className="animate-spin h-8 w-8 border border-neon-cyan/30 border-t-transparent rounded-full mb-4"></div>
           <p className="font-mono text-neon-cyan text-sm">
             {'> FETCHING_CONNECTION_DETAILS...'}
           </p>
@@ -73,7 +73,7 @@ export default function StreamingConnectionDetails({
         </p>
         <button
           onClick={onBack}
-          className="px-4 py-2 rounded font-mono border border-neon-cyan text-neon-cyan hover:border-neon-cyan/80 transition-all"
+          className="px-4 py-2 rounded font-mono border border-neon-cyan/30 text-neon-cyan hover:border-neon-cyan/80 transition-all"
         >
           [ BACK ]
         </button>
@@ -89,7 +89,7 @@ export default function StreamingConnectionDetails({
 
   return (
     <div className="flex flex-col h-full">
-      <div className={`border-b-2 ${borderColor}/30 p-6`}>
+      <div className={`border-b ${borderColor}/30 p-6`}>
         <h3 className={`text-xl font-bold font-mono neon-text mb-2 ${textColor}`}>
           {isSunshine ? '[ SUNSHINE_CONNECTION ]' : '[ MOONLIGHT_CONNECTION ]'}
         </h3>
@@ -102,7 +102,7 @@ export default function StreamingConnectionDetails({
         {isSunshine ? (
           <>
             {/* Sunshine Web UI Details */}
-            <div className={`p-4 rounded border-2 ${borderColor}/30 bg-${bgColor}`}>
+            <div className={`p-4 rounded border ${borderColor}/30 bg-${bgColor}`}>
               <p className="text-xs font-mono text-gray-400 mb-2">WEB_UI_URL</p>
               <div className="flex items-center gap-2">
                 <code className={`flex-1 font-mono ${textColor} text-sm font-bold break-all`}>
@@ -121,7 +121,7 @@ export default function StreamingConnectionDetails({
               </div>
             </div>
 
-            <div className={`p-4 rounded border-2 ${borderColor}/30 bg-${bgColor}`}>
+            <div className={`p-4 rounded border ${borderColor}/30 bg-${bgColor}`}>
               <button
                 onClick={() => window.open(details.sunshineWebUrl, '_blank')}
                 className="w-full px-4 py-3 rounded font-mono font-bold bg-neon-cyan text-slate-900 hover:bg-cyan-300 transition-all"
@@ -208,7 +208,7 @@ export default function StreamingConnectionDetails({
         )}
       </div>
 
-      <div className={`border-t-2 ${borderColor}/30 p-6 flex justify-between gap-3`}>
+      <div className={`border-t ${borderColor}/30 p-6 flex justify-between gap-3`}>
         <button
           onClick={onBack}
           className={`px-4 py-2 rounded font-mono border ${borderColor}/50 ${textColor} hover:${borderColor} transition-all`}

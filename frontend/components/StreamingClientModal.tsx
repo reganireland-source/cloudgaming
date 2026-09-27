@@ -23,11 +23,11 @@ export default function StreamingClientModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border-2 border-neon-cyan rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-slate-900 border border-neon-cyan/30 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {!showDetails ? (
           <>
-            <div className="border-b-2 border-neon-cyan/30 p-6">
-              <h2 className="text-2xl font-bold font-mono neon-text mb-2">
+            <div className="border-b border-neon-cyan/30 p-6">
+              <h2 className="text-sm tracking-label font-bold font-mono neon-text mb-2">
                 [ SELECT_STREAMING_CLIENT ]
               </h2>
               <p className="text-neon-lime text-sm font-mono">
@@ -39,7 +39,7 @@ export default function StreamingClientModal({
               {/* Sunshine Web UI */}
               <button
                 onClick={() => setSelectedClient('sunshine')}
-                className={`w-full p-6 rounded-lg border-2 transition-all text-left ${
+                className={`w-full p-6 rounded-lg border transition-all text-left ${
                   selectedClient === 'sunshine'
                     ? 'border-neon-cyan bg-cyan-950/30'
                     : 'border-neon-cyan/30 bg-slate-800/50 hover:border-neon-cyan/60'
@@ -47,7 +47,7 @@ export default function StreamingClientModal({
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="font-bold font-mono text-neon-cyan text-lg mb-2">
+                    <h3 className="font-bold font-mono text-neon-cyan text-sm mb-2">
                       [ SUNSHINE_WEB_UI ]
                     </h3>
                     <p className="text-neon-lime text-sm font-mono mb-3">
@@ -60,7 +60,7 @@ export default function StreamingClientModal({
                       <li>⚠ Slightly higher latency than Moonlight</li>
                     </ul>
                   </div>
-                  <div className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
+                  <div className={`w-6 h-6 rounded border flex items-center justify-center ${
                     selectedClient === 'sunshine'
                       ? 'border-neon-cyan bg-neon-cyan'
                       : 'border-neon-cyan/30'
@@ -75,7 +75,7 @@ export default function StreamingClientModal({
               {/* Moonlight */}
               <button
                 onClick={() => setSelectedClient('moonlight')}
-                className={`w-full p-6 rounded-lg border-2 transition-all text-left ${
+                className={`w-full p-6 rounded-lg border transition-all text-left ${
                   selectedClient === 'moonlight'
                     ? 'border-neon-magenta bg-magenta-950/30'
                     : 'border-neon-magenta/30 bg-slate-800/50 hover:border-neon-magenta/60'
@@ -83,7 +83,7 @@ export default function StreamingClientModal({
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="font-bold font-mono text-neon-magenta text-lg mb-2">
+                    <h3 className="font-bold font-mono text-neon-magenta text-sm mb-2">
                       [ MOONLIGHT_CLIENT ]
                     </h3>
                     <p className="text-neon-pink text-sm font-mono mb-3">
@@ -96,7 +96,7 @@ export default function StreamingClientModal({
                       <li>⚠ Requires client installation</li>
                     </ul>
                   </div>
-                  <div className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
+                  <div className={`w-6 h-6 rounded border flex items-center justify-center ${
                     selectedClient === 'moonlight'
                       ? 'border-neon-magenta bg-neon-magenta'
                       : 'border-neon-magenta/30'
@@ -109,7 +109,7 @@ export default function StreamingClientModal({
               </button>
             </div>
 
-            <div className="border-t-2 border-neon-cyan/30 p-6 flex justify-end gap-3">
+            <div className="border-t border-neon-cyan/30 p-6 flex justify-end gap-3">
               <button
                 onClick={onClose}
                 className="px-6 py-2 rounded font-mono border border-neon-cyan/50 text-neon-cyan hover:border-neon-cyan transition-all"

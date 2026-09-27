@@ -76,7 +76,7 @@ export default function SetupStatusMonitor({
     return (
       <div className="p-8 text-center">
         <div className="inline-block">
-          <div className="animate-spin h-10 w-10 border-2 border-neon-cyan border-t-transparent rounded-full mb-4"></div>
+          <div className="animate-spin h-10 w-10 border border-neon-cyan/30 border-t-transparent rounded-full mb-4"></div>
           <p className="font-mono text-neon-cyan">
             {'> INITIALIZING_SETUP_MONITOR...'}
           </p>
@@ -111,7 +111,7 @@ export default function SetupStatusMonitor({
   return (
     <div className="space-y-6">
       {/* Status Header */}
-      <div className={`p-6 rounded-lg border-2 ${
+      <div className={`p-6 rounded-lg border ${
         isFailed ? 'border-neon-pink/50 bg-pink-950/20' :
         isComplete ? 'border-neon-lime/50 bg-green-950/20' :
         'border-neon-cyan/50 bg-cyan-950/20'
@@ -156,7 +156,7 @@ export default function SetupStatusMonitor({
 
       {/* Sunshine PIN - shown when setup is complete */}
       {isComplete && status.sunshinePin && (
-        <div className="p-6 rounded-lg border-2 border-neon-lime/50 bg-green-950/20 space-y-4">
+        <div className="p-6 rounded-lg border border-neon-lime/50 bg-green-950/20 space-y-4">
           <div>
             <p className="text-xs font-mono text-gray-400 mb-2">SUNSHINE_PIN</p>
             <div className="flex items-center gap-2">
@@ -168,7 +168,7 @@ export default function SetupStatusMonitor({
                 className={`px-4 py-2 rounded font-mono text-sm font-bold whitespace-nowrap transition-all ${
                   copied
                     ? 'bg-neon-lime text-slate-900'
-                    : 'border-2 border-neon-lime text-neon-lime hover:bg-neon-lime/10'
+                    : 'border border-neon-lime text-neon-lime hover:bg-neon-lime/10'
                 }`}
               >
                 {copied ? '✓ COPIED' : 'COPY'}
@@ -183,7 +183,7 @@ export default function SetupStatusMonitor({
 
       {/* Sunshine URL - shown when setup is complete */}
       {isComplete && status.sunshineUrl && (
-        <div className="p-6 rounded-lg border-2 border-neon-cyan/50 bg-cyan-950/20">
+        <div className="p-6 rounded-lg border border-neon-cyan/50 bg-cyan-950/20">
           <p className="text-xs font-mono text-gray-400 mb-2">SUNSHINE_WEB_UI</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 font-mono text-neon-cyan text-sm break-all bg-slate-900/50 p-3 rounded border border-neon-cyan/30">
@@ -201,7 +201,7 @@ export default function SetupStatusMonitor({
 
       {/* Error Message */}
       {isFailed && status.error && (
-        <div className="p-6 rounded-lg border-2 border-neon-pink/50 bg-pink-950/20">
+        <div className="p-6 rounded-lg border border-neon-pink/50 bg-pink-950/20">
           <p className="text-xs font-mono text-gray-400 mb-2">ERROR</p>
           <p className="font-mono text-neon-pink text-sm">
             {status.error}

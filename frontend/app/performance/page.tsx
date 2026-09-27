@@ -174,7 +174,7 @@ export default function PerformancePage() {
     <div>
       <div className="mb-8 flex flex-col sm:flex-row justify-between items-start gap-4">
         <div>
-          <h1 className="text-4xl font-bold neon-text mb-2 font-mono">[ PERFORMANCE_PORTAL ]</h1>
+          <h1 className="text-xl font-bold neon-text mb-2 font-mono">[ PERFORMANCE_PORTAL ]</h1>
           <p className="font-mono text-neon-lime text-sm">
             {'> realtime_cpu_gpu_network_streaming_monitoring'.toUpperCase()}
           </p>
@@ -195,14 +195,14 @@ export default function PerformancePage() {
 
       {/* Machine Selection */}
       {machines.length > 1 && (
-        <div className="neon-card rounded-lg p-4 mb-6 border-2 border-neon-cyan">
+        <div className="neon-card rounded-lg p-4 mb-6 border border-neon-cyan/30">
           <p className="text-xs text-neon-cyan mb-3 font-mono font-bold">[ SELECT_MACHINE ]</p>
           <div className="flex gap-2 flex-wrap">
             {machines.map((machine) => (
               <button
                 key={machine.id}
                 onClick={() => setSelectedMachineId(machine.id)}
-                className={`px-4 py-2 rounded font-mono font-bold text-sm transition border-2 ${
+                className={`px-4 py-2 rounded font-mono font-bold text-sm transition border ${
                   selectedMachineId === machine.id
                     ? 'border-neon-magenta bg-magenta-950/30 text-neon-magenta'
                     : 'border-neon-cyan/50 text-neon-cyan/70 hover:border-neon-cyan hover:text-neon-cyan'
@@ -228,30 +228,30 @@ export default function PerformancePage() {
       )}
 
       {/* Performance Tips */}
-      <div className="mt-12 neon-card rounded-lg border-2 border-neon-cyan p-6">
-        <h3 className="text-lg font-bold neon-text mb-4 font-mono">[ PERFORMANCE_TIPS ]</h3>
+      <div className="mt-12 neon-card rounded-lg border border-neon-cyan/30 p-6">
+        <h3 className="text-sm font-bold neon-text mb-4 font-mono">[ PERFORMANCE_TIPS ]</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="neon-card-cyan rounded p-4 border border-neon-cyan">
+          <div className="neon-card-cyan rounded p-4 border border-neon-cyan/30">
             <h4 className="font-bold text-neon-cyan mb-2 font-mono text-sm">💻 CPU_USAGE</h4>
             <p className="text-xs text-neon-lime font-mono">Keep below 80% for stable perf. High usage → stuttering + frame drops.</p>
           </div>
-          <div className="neon-card-magenta rounded p-4 border border-neon-magenta">
+          <div className="neon-card-magenta rounded p-4 border border-neon-magenta/30">
             <h4 className="font-bold text-neon-magenta mb-2 font-mono text-sm">🎮 GPU_USAGE</h4>
             <p className="text-xs text-neon-cyan font-mono">Gaming: 80-95% normal. Above 95% = thermal throttling risk.</p>
           </div>
-          <div className="neon-card-lime rounded p-4 border border-neon-lime">
+          <div className="neon-card-lime rounded p-4 border border-neon-lime/30">
             <h4 className="font-bold text-neon-lime mb-2 font-mono text-sm">📊 FRAME_RATE</h4>
             <p className="text-xs text-neon-magenta font-mono">Target 60 FPS. Below 50 FPS = investigate performance.</p>
           </div>
-          <div className="neon-card-pink rounded p-4 border border-neon-pink">
+          <div className="neon-card-pink rounded p-4 border border-neon-pink/30">
             <h4 className="font-bold text-neon-pink mb-2 font-mono text-sm">🌐 NETWORK</h4>
             <p className="text-xs text-neon-cyan font-mono">Packet loss above 1% or latency above 100ms = quality issues. Use wired.</p>
           </div>
-          <div className="neon-card rounded p-4 border border-neon-cyan">
+          <div className="neon-card rounded p-4 border border-neon-cyan/30">
             <h4 className="font-bold text-neon-cyan mb-2 font-mono text-sm">🌡️ TEMPERATURE</h4>
             <p className="text-xs text-neon-lime font-mono">CPU below 80°C, GPU below 75°C. High temps = throttle. Check cooling.</p>
           </div>
-          <div className="neon-card-magenta rounded p-4 border border-neon-magenta">
+          <div className="neon-card-magenta rounded p-4 border border-neon-magenta/30">
             <h4 className="font-bold text-neon-magenta mb-2 font-mono text-sm">💾 STORAGE</h4>
             <p className="text-xs text-neon-cyan font-mono">Disk I/O bottlenecks impact load times. SSD beats HDD for gaming.</p>
           </div>

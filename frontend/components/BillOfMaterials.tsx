@@ -41,12 +41,12 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
     { name: 'Streaming', value: parseFloat(streaming.costPerHour.toFixed(2)) },
   ];
 
-  const COLORS = ['#00ffff', '#ff00ff'];
+  const COLORS = ['#5fd7e0', '#d487e8'];
 
   return (
-    <div className="w-full max-w-5xl mx-auto neon-card rounded-lg p-8 border-2 border-neon-cyan">
+    <div className="w-full max-w-5xl mx-auto neon-card rounded-lg p-8 border border-neon-cyan/30">
       <div className="mb-8">
-        <h2 className="text-4xl font-bold neon-text mb-2 font-mono">[ BILL_OF_MATERIALS ]</h2>
+        <h2 className="text-sm tracking-label font-bold neon-text mb-2 font-mono">[ BILL_OF_MATERIALS ]</h2>
         <p className="font-mono text-neon-lime text-sm">
           {machine.provider.toUpperCase()} // {machine.instance_type} // {machine.region}
         </p>
@@ -54,10 +54,10 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Compute Component */}
-        <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan">
+        <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan/30">
           <div className="flex items-center mb-4">
             <div className="w-3 h-3 bg-neon-cyan rounded-full mr-3 animate-pulse"></div>
-            <h3 className="text-lg font-bold text-neon-cyan font-mono">COMPUTE</h3>
+            <h3 className="text-sm font-bold text-neon-cyan font-mono">COMPUTE</h3>
           </div>
           <p className="text-xs text-neon-lime mb-4 font-mono">{compute.component}</p>
           <div className="space-y-2 text-sm font-mono">
@@ -79,10 +79,10 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
         </div>
 
         {/* Streaming Component */}
-        <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta">
+        <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta/30">
           <div className="flex items-center mb-4">
             <div className="w-3 h-3 bg-neon-magenta rounded-full mr-3 animate-pulse"></div>
-            <h3 className="text-lg font-bold text-neon-magenta font-mono">STREAMING</h3>
+            <h3 className="text-sm font-bold text-neon-magenta font-mono">STREAMING</h3>
           </div>
           <p className="text-xs text-neon-cyan mb-4 font-mono">{streaming.resolution} @ {streaming.fps}fps</p>
           <div className="space-y-2 text-sm font-mono">
@@ -108,16 +108,16 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
         </div>
 
         {/* Total Component */}
-        <div className="neon-card-lime rounded-lg p-6 border border-neon-lime">
+        <div className="neon-card-lime rounded-lg p-6 border border-neon-lime/30">
           <div className="flex items-center mb-4">
             <div className="w-3 h-3 bg-neon-lime rounded-full mr-3 animate-pulse"></div>
-            <h3 className="text-lg font-bold text-neon-lime font-mono">TOTAL_COST</h3>
+            <h3 className="text-sm font-bold text-neon-lime font-mono">TOTAL_COST</h3>
           </div>
           <p className="text-xs text-neon-cyan mb-6 font-mono">aggregated_pricing</p>
           <div className="space-y-4 font-mono text-sm">
             <div className="flex justify-between items-center">
               <span className="text-neon-lime/70">Per Hour:</span>
-              <span className="text-3xl font-bold text-neon-lime">${total.costPerHour.toFixed(2)}</span>
+              <span className="text-xl font-bold text-neon-lime">${total.costPerHour.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-neon-lime/70">Per Day:</span>
@@ -132,8 +132,8 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
       </div>
 
       {/* Cost Distribution Chart */}
-      <div className="neon-card rounded-lg p-6 border border-neon-cyan mb-6">
-        <h3 className="text-lg font-bold text-neon-cyan mb-6 font-mono">[ COST_DISTRIBUTION ]</h3>
+      <div className="neon-card rounded-lg p-6 border border-neon-cyan/30 mb-6">
+        <h3 className="text-sm font-bold text-neon-cyan mb-6 font-mono">[ COST_DISTRIBUTION ]</h3>
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
             <Pie
@@ -156,7 +156,7 @@ export default function BillOfMaterials({ machine, billOfMaterials }: BillOfMate
       </div>
 
       {/* Breakdown Summary */}
-      <div className="border-2 border-neon-magenta rounded-lg p-6 bg-magenta-950/10 font-mono text-sm text-neon-magenta">
+      <div className="border border-neon-magenta/30 rounded-lg p-6 bg-magenta-950/10 font-mono text-sm text-neon-magenta">
         <p className="leading-relaxed">
           {'> '}Running this configuration costs <span className="font-bold text-neon-cyan">${total.costPerMonth.toFixed(2)}</span> monthly (continuous).
           Streaming egress comprises <span className="font-bold text-neon-magenta">{((streaming.costPerHour / total.costPerHour) * 100).toFixed(0)}%</span> of total cost.

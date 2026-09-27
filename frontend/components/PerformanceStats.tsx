@@ -49,19 +49,19 @@ const StatCard = ({ label, value, unit, threshold }: any) => {
   const isWarning = threshold && value > threshold.warning;
   const isCritical = threshold && value > threshold.critical;
 
-  const bgColor = isCritical ? 'bg-red-50' : isWarning ? 'bg-yellow-50' : 'bg-blue-50';
-  const textColor = isCritical ? 'text-red-600' : isWarning ? 'text-yellow-600' : 'text-blue-600';
-  const borderColor = isCritical ? 'border-red-200' : isWarning ? 'border-yellow-200' : 'border-blue-200';
+  const bgColor = isCritical ? 'bg-[#e5484d]/[0.08]' : isWarning ? 'bg-neon-amber/[0.07]' : 'bg-neon-cyan/[0.05]';
+  const textColor = isCritical ? 'text-[#f07178]' : isWarning ? 'text-neon-amber' : 'text-neon-cyan';
+  const borderColor = isCritical ? 'border-[#e5484d]/40' : isWarning ? 'border-neon-amber/35' : 'border-neon-cyan/20';
 
   return (
     <div className={`${bgColor} rounded-lg border ${borderColor} p-4`}>
-      <p className="text-sm text-gray-600 mb-1">{label}</p>
-      <p className={`text-3xl font-bold ${textColor}`}>
+      <p className="text-sm text-slate-400 mb-1">{label}</p>
+      <p className={`text-xl font-bold ${textColor}`}>
         {typeof value === 'number' ? value.toFixed(1) : value}
         <span className="text-lg ml-1">{unit}</span>
       </p>
-      {isCritical && <p className="text-xs text-red-600 mt-1">⚠️ Critical</p>}
-      {isWarning && !isCritical && <p className="text-xs text-yellow-600 mt-1">⚠️ Warning</p>}
+      {isCritical && <p className="text-xs text-[#f07178] mt-1">⚠️ Critical</p>}
+      {isWarning && !isCritical && <p className="text-xs text-neon-amber mt-1">⚠️ Warning</p>}
     </div>
   );
 };
@@ -95,39 +95,39 @@ export default function PerformanceStats({
       {/* Health Status Banner */}
       <div className={`rounded-lg p-6 ${
         healthStatus === 'healthy'
-          ? 'bg-green-50 border border-green-200'
+          ? 'bg-neon-lime/[0.06] border border-neon-lime/25'
           : healthStatus === 'warning'
-          ? 'bg-yellow-50 border border-yellow-200'
-          : 'bg-red-50 border border-red-200'
+          ? 'bg-neon-amber/[0.07] border border-neon-amber/35'
+          : 'bg-[#e5484d]/[0.08] border border-[#e5484d]/40'
       }`}>
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">System Health</h2>
+            <h2 className="text-sm tracking-label font-bold text-slate-200 mb-1">System Health</h2>
             <p className={`text-lg font-semibold ${
               healthStatus === 'healthy'
-                ? 'text-green-700'
+                ? 'text-neon-lime'
                 : healthStatus === 'warning'
-                ? 'text-yellow-700'
-                : 'text-red-700'
+                ? 'text-neon-amber'
+                : 'text-[#f07178]'
             }`}>
               {healthStatus === 'healthy' ? '✓ Healthy' : healthStatus === 'warning' ? '⚠ Warning' : '✕ Critical'}
             </p>
           </div>
           <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
             healthStatus === 'healthy'
-              ? 'bg-green-200'
+              ? 'bg-neon-lime/20'
               : healthStatus === 'warning'
-              ? 'bg-yellow-200'
-              : 'bg-red-200'
+              ? 'bg-neon-amber/20'
+              : 'bg-[#e5484d]/20'
           }`}>
-            <span className="text-3xl">{healthStatus === 'healthy' ? '✓' : '!'}</span>
+            <span className="text-xl">{healthStatus === 'healthy' ? '✓' : '!'}</span>
           </div>
         </div>
       </div>
 
       {/* Current Metrics Grid */}
       <div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-4">Real-Time Metrics</h3>
+        <h3 className="text-sm font-bold text-slate-200 mb-4">Real-Time Metrics</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard
             label="CPU Usage"
@@ -175,7 +175,7 @@ export default function PerformanceStats({
 
       {/* Temperature and Memory */}
       <div>
-        <h3 className="text-xl font-bold text-gray-900 mb-4">System Resources</h3>
+        <h3 className="text-sm font-bold text-slate-200 mb-4">System Resources</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="CPU Temp"
@@ -205,44 +205,44 @@ export default function PerformanceStats({
       </div>
 
       {/* Network Performance */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4">Network Performance</h3>
+      <div className="neon-card rounded-lg shadow p-6">
+        <h3 className="text-sm font-bold text-slate-200 mb-4">Network Performance</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="space-y-3">
-            <h4 className="font-semibold text-gray-800">Bandwidth</h4>
+            <h4 className="font-semibold text-slate-300">Bandwidth</h4>
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Upload (Current)</span>
+              <span className="text-slate-400">Upload (Current)</span>
               <span className="font-bold">{current.networkBandwidthUp.toFixed(2)} Mbps</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Upload (Peak)</span>
+              <span className="text-slate-400">Upload (Peak)</span>
               <span className="font-bold">{peak.networkBandwidthUp.toFixed(2)} Mbps</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Download (Current)</span>
+              <span className="text-slate-400">Download (Current)</span>
               <span className="font-bold">{current.networkBandwidthDown.toFixed(2)} Mbps</span>
             </div>
             <div className="flex justify-between items-center py-2">
-              <span className="text-gray-600">Download (Peak)</span>
+              <span className="text-slate-400">Download (Peak)</span>
               <span className="font-bold">{peak.networkBandwidthDown.toFixed(2)} Mbps</span>
             </div>
           </div>
           <div className="space-y-3">
-            <h4 className="font-semibold text-gray-800">Connection Quality</h4>
+            <h4 className="font-semibold text-slate-300">Connection Quality</h4>
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Latency (Current)</span>
+              <span className="text-slate-400">Latency (Current)</span>
               <span className="font-bold">{current.networkLatency.toFixed(1)} ms</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Latency (Average)</span>
+              <span className="text-slate-400">Latency (Average)</span>
               <span className="font-bold">{average.networkLatency.toFixed(1)} ms</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Packet Loss</span>
+              <span className="text-slate-400">Packet Loss</span>
               <span className="font-bold">{current.networkPacketLoss.toFixed(2)}%</span>
             </div>
             <div className="flex justify-between items-center py-2">
-              <span className="text-gray-600">Packet Loss (Avg)</span>
+              <span className="text-slate-400">Packet Loss (Avg)</span>
               <span className="font-bold">{average.networkPacketLoss.toFixed(2)}%</span>
             </div>
           </div>
@@ -250,51 +250,51 @@ export default function PerformanceStats({
       </div>
 
       {/* CPU & GPU Usage Chart */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4">CPU & GPU Usage</h3>
+      <div className="neon-card rounded-lg shadow p-6">
+        <h3 className="text-sm font-bold text-slate-200 mb-4">CPU & GPU Usage</h3>
         <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <stop offset="5%" stopColor="#5fd7e0" stopOpacity={0.8} />
+                <stop offset="95%" stopColor="#5fd7e0" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="colorGpu" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#a855f7" stopOpacity={0.8} />
-                <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                <stop offset="5%" stopColor="#d487e8" stopOpacity={0.8} />
+                <stop offset="95%" stopColor="#d487e8" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" />
-            <YAxis domain={[0, 100]} label={{ value: '%', angle: -90, position: 'insideLeft' }} />
-            <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
-            <Legend />
-            <Area type="monotone" dataKey="cpu" stroke="#3b82f6" fillOpacity={1} fill="url(#colorCpu)" name="CPU %" />
-            <Area type="monotone" dataKey="gpu" stroke="#a855f7" fillOpacity={1} fill="url(#colorGpu)" name="GPU %" />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} />
+            <YAxis stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} domain={[0, 100]} label={{ value: '%', angle: -90, position: 'insideLeft' }} />
+            <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} contentStyle={{ background: '#0c1018', border: '1px solid rgba(95,215,224,0.25)', fontSize: 12 }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#7d8a9a' }} />
+            <Area type="monotone" dataKey="cpu" stroke="#5fd7e0" fillOpacity={1} fill="url(#colorCpu)" name="CPU %" />
+            <Area type="monotone" dataKey="gpu" stroke="#d487e8" fillOpacity={1} fill="url(#colorGpu)" name="GPU %" />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
       {/* Frame Rate & Packet Loss */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4">Streaming Quality Indicators</h3>
+      <div className="neon-card rounded-lg shadow p-6">
+        <h3 className="text-sm font-bold text-slate-200 mb-4">Streaming Quality Indicators</h3>
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" />
-            <YAxis yAxisId="left" domain={[0, 65]} label={{ value: 'FPS', angle: -90, position: 'insideLeft' }} />
-            <YAxis yAxisId="right" orientation="right" domain={[0, 5]} label={{ value: 'Packet Loss %', angle: 90, position: 'insideRight' }} />
-            <Tooltip />
-            <Legend />
-            <Line yAxisId="left" type="monotone" dataKey="fps" stroke="#10b981" name="FPS" strokeWidth={2} />
-            <Bar yAxisId="right" dataKey="packetLoss" fill="#ef4444" name="Packet Loss %" />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} />
+            <YAxis stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} yAxisId="left" domain={[0, 65]} label={{ value: 'FPS', angle: -90, position: 'insideLeft' }} />
+            <YAxis stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} yAxisId="right" orientation="right" domain={[0, 5]} label={{ value: 'Packet Loss %', angle: 90, position: 'insideRight' }} />
+            <Tooltip contentStyle={{ background: '#0c1018', border: '1px solid rgba(95,215,224,0.25)', fontSize: 12 }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#7d8a9a' }} />
+            <Line yAxisId="left" type="monotone" dataKey="fps" stroke="#8fd694" name="FPS" strokeWidth={2} />
+            <Bar yAxisId="right" dataKey="packetLoss" fill="#e5484d" name="Packet Loss %" />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
       {/* Disk I/O */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4">Disk I/O Performance</h3>
+      <div className="neon-card rounded-lg shadow p-6">
+        <h3 className="text-sm font-bold text-slate-200 mb-4">Disk I/O Performance</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCard
             label="Disk Read (IOPS)"
@@ -319,50 +319,50 @@ export default function PerformanceStats({
         </div>
         <ResponsiveContainer width="100%" height={250}>
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" />
-            <YAxis label={{ value: 'MB/s', angle: -90, position: 'insideLeft' }} />
-            <Tooltip formatter={(value) => `${Number(value).toFixed(2)} MB/s`} />
-            <Legend />
-            <Line type="monotone" dataKey="diskRead" stroke="#0ea5e9" name="Read Speed" strokeWidth={2} />
-            <Line type="monotone" dataKey="diskWrite" stroke="#f59e0b" name="Write Speed" strokeWidth={2} />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} />
+            <YAxis stroke="#334155" tick={{ fill: '#7d8a9a', fontSize: 11 }} label={{ value: 'MB/s', angle: -90, position: 'insideLeft' }} />
+            <Tooltip formatter={(value) => `${Number(value).toFixed(2)} MB/s`} contentStyle={{ background: '#0c1018', border: '1px solid rgba(95,215,224,0.25)', fontSize: 12 }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#7d8a9a' }} />
+            <Line type="monotone" dataKey="diskRead" stroke="#7fb8e8" name="Read Speed" strokeWidth={2} />
+            <Line type="monotone" dataKey="diskWrite" stroke="#e8b863" name="Write Speed" strokeWidth={2} />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
       {/* Statistics Summary */}
-      <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200 p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4">Performance Summary (Last Hour)</h3>
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-neon-cyan/20 p-6">
+        <h3 className="text-sm font-bold text-slate-200 mb-4">Performance Summary (Last Hour)</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
           <div>
-            <p className="text-sm text-gray-600 mb-1">Avg CPU Usage</p>
-            <p className="text-2xl font-bold text-blue-600">{average.cpuUsage.toFixed(1)}%</p>
-            <p className="text-xs text-gray-500 mt-1">Peak: {peak.cpuUsage.toFixed(1)}%</p>
+            <p className="text-sm text-slate-400 mb-1">Avg CPU Usage</p>
+            <p className="text-2xl font-bold text-neon-cyan">{average.cpuUsage.toFixed(1)}%</p>
+            <p className="text-xs text-slate-500 mt-1">Peak: {peak.cpuUsage.toFixed(1)}%</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600 mb-1">Avg GPU Usage</p>
-            <p className="text-2xl font-bold text-purple-600">{average.gpuUsage.toFixed(1)}%</p>
-            <p className="text-xs text-gray-500 mt-1">Peak: {peak.gpuUsage.toFixed(1)}%</p>
+            <p className="text-sm text-slate-400 mb-1">Avg GPU Usage</p>
+            <p className="text-2xl font-bold text-neon-magenta">{average.gpuUsage.toFixed(1)}%</p>
+            <p className="text-xs text-slate-500 mt-1">Peak: {peak.gpuUsage.toFixed(1)}%</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600 mb-1">Avg FPS</p>
-            <p className="text-2xl font-bold text-green-600">{average.streamingFps.toFixed(1)}</p>
-            <p className="text-xs text-gray-500 mt-1">Drops: {peak.streamingFrameDrops}</p>
+            <p className="text-sm text-slate-400 mb-1">Avg FPS</p>
+            <p className="text-2xl font-bold text-neon-lime">{average.streamingFps.toFixed(1)}</p>
+            <p className="text-xs text-slate-500 mt-1">Drops: {peak.streamingFrameDrops}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600 mb-1">Avg Latency</p>
-            <p className="text-2xl font-bold text-orange-600">{average.networkLatency.toFixed(1)}ms</p>
-            <p className="text-xs text-gray-500 mt-1">Stability: Good</p>
+            <p className="text-sm text-slate-400 mb-1">Avg Latency</p>
+            <p className="text-2xl font-bold text-neon-amber">{average.networkLatency.toFixed(1)}ms</p>
+            <p className="text-xs text-slate-500 mt-1">Stability: Good</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600 mb-1">Avg Packet Loss</p>
-            <p className="text-2xl font-bold text-red-600">{average.networkPacketLoss.toFixed(2)}%</p>
-            <p className="text-xs text-gray-500 mt-1">Quality: Excellent</p>
+            <p className="text-sm text-slate-400 mb-1">Avg Packet Loss</p>
+            <p className="text-2xl font-bold text-[#f07178]">{average.networkPacketLoss.toFixed(2)}%</p>
+            <p className="text-xs text-slate-500 mt-1">Quality: Excellent</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600 mb-1">Peak Bandwidth</p>
+            <p className="text-sm text-slate-400 mb-1">Peak Bandwidth</p>
             <p className="text-2xl font-bold text-cyan-600">{peak.networkBandwidthDown.toFixed(2)}Mbps</p>
-            <p className="text-xs text-gray-500 mt-1">Download</p>
+            <p className="text-xs text-slate-500 mt-1">Download</p>
           </div>
         </div>
       </div>

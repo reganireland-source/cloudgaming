@@ -112,7 +112,7 @@ export default function Dashboard() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-4xl font-bold neon-text mb-2">
+        <h1 className="text-xl font-bold neon-text mb-2">
           ▲ GAMING_INFRASTRUCTURE_DASH
         </h1>
         <p className="font-mono text-sm text-neon-lime">
@@ -121,7 +121,7 @@ export default function Dashboard() {
       </div>
 
       {error && (
-        <div className="mb-4 p-4 border-l-4 border-neon-pink bg-red-950/30 rounded text-neon-pink font-mono text-sm">
+        <div className="mb-4 p-4 border-l-4 border-neon-pink/30 bg-red-950/30 rounded text-neon-pink font-mono text-sm">
           <span className="font-bold">⚠ ERROR:</span> {error}
         </div>
       )}
@@ -129,7 +129,7 @@ export default function Dashboard() {
       {machines.length > 0 ? (
         <div className="space-y-8">
           <div className="neon-card rounded-lg p-6">
-            <h2 className="text-2xl font-bold neon-text mb-6 font-mono">
+            <h2 className="text-sm tracking-label font-bold neon-text mb-6 font-mono">
               [ ACTIVE_INSTANCES ]
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -139,7 +139,7 @@ export default function Dashboard() {
                   onClick={() => {
                     setSelectedMachine(machine.id);
                   }}
-                  className={`p-4 rounded-lg border-2 transition font-mono text-sm ${
+                  className={`p-4 rounded-lg border transition font-mono text-sm ${
                     selectedMachine === machine.id
                       ? 'neon-card-magenta border-neon-magenta'
                       : 'neon-card border-neon-cyan hover:border-neon-magenta'
@@ -169,27 +169,27 @@ export default function Dashboard() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan font-mono">
+            <div className="neon-card-cyan rounded-lg p-6 border border-neon-cyan/30 font-mono">
               <p className="text-xs text-neon-lime mb-2 font-bold">COST_PROJECTION_MONTHLY</p>
-              <p className="text-4xl font-bold text-neon-cyan">
+              <p className="text-2xl font-bold text-neon-cyan">
                 ${boM ? boM.billOfMaterials.total.costPerMonth.toFixed(2) : '0.00'}
               </p>
               <p className="text-xs text-neon-cyan/60 mt-2">1 active_machine</p>
             </div>
-            <div className="neon-card-lime rounded-lg p-6 border border-neon-lime font-mono">
+            <div className="neon-card-lime rounded-lg p-6 border border-neon-lime/30 font-mono">
               <p className="text-xs text-neon-cyan mb-2 font-bold">CURRENT_SPEND_MONTH</p>
-              <p className="text-4xl font-bold text-neon-lime">$0.00</p>
+              <p className="text-2xl font-bold text-neon-lime">$0.00</p>
               <p className="text-xs text-neon-lime/60 mt-2">awaiting_api_integration</p>
             </div>
-            <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta font-mono">
+            <div className="neon-card-magenta rounded-lg p-6 border border-neon-magenta/30 font-mono">
               <p className="text-xs text-neon-cyan mb-2 font-bold">ACTIVE_INSTANCES</p>
-              <p className="text-4xl font-bold text-neon-magenta">{machines.length}</p>
+              <p className="text-2xl font-bold text-neon-magenta">{machines.length}</p>
               <p className="text-xs text-neon-magenta/60 mt-2">{machines.filter(m => m.status === 'running').length} running</p>
             </div>
           </div>
         </div>
       ) : (
-        <div className="neon-card rounded-lg p-12 text-center border border-neon-cyan">
+        <div className="neon-card rounded-lg p-12 text-center border border-neon-cyan/30">
           <p className="font-mono text-neon-lime mb-6">
             {'> NO_MACHINES_DETECTED'}
           </p>

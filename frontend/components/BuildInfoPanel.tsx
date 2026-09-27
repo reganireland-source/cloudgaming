@@ -78,11 +78,11 @@ export default function BuildInfoPanel({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="bg-cyber-dark border-2 border-neon-cyan rounded-lg max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+        className="bg-cyber-dark border border-neon-cyan/30 rounded-lg max-w-2xl w-full max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="border-b-2 border-neon-cyan/30 p-5 flex items-center justify-between">
-          <h2 className="text-lg font-bold font-mono neon-text">[ BUILD_&_VERSION_INFO ]</h2>
+        <div className="border-b border-neon-cyan/30 p-5 flex items-center justify-between">
+          <h2 className="text-sm tracking-label font-bold font-mono neon-text">[ BUILD_&_VERSION_INFO ]</h2>
           <button
             onClick={onClose}
             className="text-neon-cyan/60 hover:text-neon-cyan font-mono text-sm"

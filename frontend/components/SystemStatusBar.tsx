@@ -37,27 +37,30 @@ function Light({
   latencyMs?: number;
 }) {
   const color = loading
-    ? 'bg-gray-500'
+    ? 'bg-slate-600'
     : connected
     ? 'bg-neon-lime'
-    : 'bg-red-500';
+    : 'bg-[#e5484d]';
 
   const glow = loading
     ? ''
     : connected
-    ? 'shadow-[0_0_6px_2px_rgba(0,255,65,0.6)]'
-    : 'shadow-[0_0_6px_2px_rgba(239,68,68,0.6)]';
+    ? 'shadow-[0_0_6px_1px_rgba(143,214,148,0.55)]'
+    : 'shadow-[0_0_6px_1px_rgba(229,72,77,0.55)]';
 
   return (
     <div className="flex items-center gap-1.5" title={latencyMs !== undefined ? `${latencyMs}ms` : undefined}>
       <span
-        className={`inline-block w-2 h-2 rounded-full ${color} ${glow} ${
+        className={`inline-block w-1.5 h-1.5 rounded-full ${color} ${glow} ${
           loading ? 'animate-pulse' : ''
         }`}
       />
-      <span className="text-[10px] font-mono tracking-wide text-gray-400 uppercase">
+      <span className="text-[0.66rem] tracking-label text-slate-400 uppercase">
         {label}
       </span>
+      {!loading && connected && latencyMs !== undefined && (
+        <span className="text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
+      )}
     </div>
   );
 }
@@ -99,7 +102,7 @@ export default function SystemStatusBar() {
   }, []);
 
   return (
-    <div className="sticky top-20 z-40 border-b border-neon-cyan/20 bg-black/70 backdrop-blur-sm">
+    <div className="sticky top-12 z-40 border-b border-white/[0.05] bg-cyber-darker/95 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-4 overflow-x-auto">
         <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
           <Light label="Backend" connected={backendReachable} loading={loading} />
@@ -138,9 +141,9 @@ export default function SystemStatusBar() {
 
         <button
           onClick={() => setPanelOpen(true)}
-          className="text-[10px] font-mono text-neon-cyan/60 hover:text-neon-cyan transition-colors flex-shrink-0"
+          className="text-[0.66rem] tracking-label uppercase text-slate-500 hover:text-neon-cyan transition-colors flex-shrink-0"
         >
-          [ BUILD_INFO ]
+          Build info ›
         </button>
       </div>
 

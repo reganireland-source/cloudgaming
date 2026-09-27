@@ -113,7 +113,7 @@ export default function QualitySelector({
     return (
       <div className="space-y-6">
         <div className="mb-6">
-          <h3 className="font-bold font-mono text-neon-cyan mb-2 text-lg">
+          <h3 className="font-bold font-mono text-neon-cyan mb-2 text-sm">
             [ STREAMING_QUALITY ]
           </h3>
           <p className="font-mono text-sm text-gray-400">
@@ -126,7 +126,7 @@ export default function QualitySelector({
             <button
               key={option.value}
               onClick={() => handleSelect(option.value)}
-              className={`p-4 rounded-lg border-2 transition-all text-left ${
+              className={`p-4 rounded-lg border transition-all text-left ${
                 selected === option.value
                   ? 'border-neon-cyan bg-cyan-950/30'
                   : 'border-neon-cyan/30 bg-slate-800/50 hover:border-neon-cyan/60'
@@ -141,7 +141,7 @@ export default function QualitySelector({
                   <p className="text-xs text-gray-400">{option.description}</p>
                 </div>
                 <div
-                  className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                  className={`w-5 h-5 rounded border flex items-center justify-center ${
                     selected === option.value
                       ? 'border-neon-cyan bg-neon-cyan'
                       : 'border-neon-cyan/30'
@@ -217,7 +217,7 @@ export default function QualitySelector({
             <button
               key={option.value}
               onClick={() => handleSelect(option.value)}
-              className={`p-3 rounded border-2 transition-all text-center font-mono text-xs font-bold ${
+              className={`p-3 rounded border transition-all text-center font-mono text-xs font-bold ${
                 selected === option.value
                   ? 'border-neon-cyan bg-cyan-950/30 text-neon-cyan'
                   : 'border-neon-cyan/30 text-gray-400 hover:border-neon-cyan/60'

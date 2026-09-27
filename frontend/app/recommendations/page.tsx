@@ -78,14 +78,14 @@ export default function RecommendationsPage() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-4xl font-bold neon-text mb-2 font-mono">[ GAME_RECON ]</h1>
+        <h1 className="text-xl font-bold neon-text mb-2 font-mono">[ GAME_RECON ]</h1>
         <p className="font-mono text-neon-lime text-sm">
           {'> find_optimal_region_and_instance_for_location_budget'.toUpperCase()}
         </p>
       </div>
 
       {/* Search Form */}
-      <form onSubmit={handleSearch} className="neon-card rounded-lg p-6 mb-8 border-2 border-neon-cyan">
+      <form onSubmit={handleSearch} className="neon-card rounded-lg p-6 mb-8 border border-neon-cyan/30">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
             <label className="block text-xs font-bold text-neon-cyan mb-2 font-mono">GAME_TITLE</label>
@@ -151,7 +151,7 @@ export default function RecommendationsPage() {
       {recommendations.length > 0 ? (
         <div className="space-y-4">
           {recommendations.map((rec, idx) => (
-            <div key={idx} className={`rounded-lg p-6 transition border-2 ${idx === 0 ? 'neon-card-magenta border-neon-magenta' : 'neon-card border-neon-cyan'}`}>
+            <div key={idx} className={`rounded-lg p-6 transition border ${idx === 0 ? 'neon-card-magenta border-neon-magenta' : 'neon-card border-neon-cyan'}`}>
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-center">
                 <div>
                   <h3 className={`font-bold text-lg font-mono ${idx === 0 ? 'text-neon-magenta' : 'text-neon-cyan'}`}>{rec.provider.toUpperCase()}</h3>
@@ -197,7 +197,7 @@ export default function RecommendationsPage() {
           ))}
         </div>
       ) : (
-        <div className="neon-card rounded-lg border-2 border-dashed border-neon-cyan p-12 text-center">
+        <div className="neon-card rounded-lg border border-dashed border-neon-cyan/30 p-12 text-center">
           <p className="text-neon-cyan font-mono mb-4">[ SEARCH_FOR_GAME_RECOMMENDATIONS ]</p>
           <p className="text-sm text-neon-lime font-mono">optimal_instance_region_quality_budgetfinder</p>
         </div>
