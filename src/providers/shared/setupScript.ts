@@ -149,7 +149,10 @@ UNIT
 fi
 
 exec >> /var/log/cloudgaming-setup.log 2>&1
-say() { echo "$1"; echo "$1" > /dev/ttyS0 2>/dev/null || true; echo "$1" > /dev/console 2>/dev/null || true; }
+# To the log, and ONCE to the serial port the app reads. (On Google Cloud
+# /dev/console IS the serial port, so writing to both printed every line
+# twice; /dev/console is only a fallback when there's no ttyS0.)
+say() { echo "$1"; echo "$1" > /dev/ttyS0 2>/dev/null || echo "$1" > /dev/console 2>/dev/null || true; }
 stage() { say "CLOUDGAMING_STAGE $1 $2 $3"; }
 fail()  { say "CLOUDGAMING_STAGE $1 failed $2"; exit 1; }
 done_step() { touch "$STATE/$1.done"; }
@@ -537,7 +540,13 @@ export function parseSetupStages(serialOutput: string): SetupStage[] {
   const re = /CLOUDGAMING_STAGE (\d+) ([a-z_]+) ([^\r\n]*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(serialOutput)) !== null) {
-    stages.push({ percent: Number(m[1]), key: m[2], message: m[3].trim() });
+    const stage = { percent: Number(m[1]), key: m[2], message: m[3].trim() };
+    // Skip a line identical to the one just before it: older setup scripts
+    // printed every line twice on Google Cloud. (A real repeat, such as
+    // "Machine booted" after the driver reboot, has other lines in between.)
+    const prev = stages[stages.length - 1];
+    if (prev && prev.percent === stage.percent && prev.key === stage.key && prev.message === stage.message) continue;
+    stages.push(stage);
   }
   return stages;
 }

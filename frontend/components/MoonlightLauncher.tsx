@@ -190,8 +190,10 @@ export default function MoonlightLauncher({
       <div className="space-y-2">
         <p className="label">1 · Pair this device (once)</p>
         {!pairing ? (
-          <button type="button" onClick={startPairing} disabled={pairBusy} className="btn-neon text-xs disabled:opacity-50">
-            {pairBusy ? 'Preparing…' : 'Pair Moonlight (one click)'}
+          // Disabled until setup reaches "Ready to stream": Sunshine isn't
+          // running before that, and pairing gives up after 3 minutes.
+          <button type="button" onClick={startPairing} disabled={pairBusy || !ready} className="btn-neon text-xs disabled:opacity-50 disabled:cursor-not-allowed">
+            {pairBusy ? 'Preparing…' : ready ? 'Pair Moonlight (one click)' : 'Pair Moonlight (available when setup is ready)'}
           </button>
         ) : (
           <>
