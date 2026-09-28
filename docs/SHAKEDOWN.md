@@ -178,6 +178,15 @@ Then close Lutris completely and start Battle.net again. (It's kept across
 reboots: the home folder lives on the disk.) Alternatively, in the installer's
 Wine version list pick a non-Proton build (e.g. `wine-ge-8-26`).
 
+**Battle.net installer stops with "The 'DXVK' runtime component is not
+installed"?** Lutris 0.5.20 only downloads its components (DXVK, VKD3D...)
+when its main window opens; the Battle.net shortcut went straight to the
+installer. Machines launched after 28 Sep 2026 (image recipe v6) fetch them at
+container start and before the first install. On an older machine: Abort,
+open **Lutris** from the dock, wait for the component download (bottom of the
+window) or use ☰ → Preferences → Updates → *Check for updates*, then start
+Battle.net again.
+
 **Won't launch?** Games with kernel anti-cheat (Valorant, Fortnite, Apex,
 PUBG, Call of Duty…) are blocked on Linux. Check <https://www.protondb.com>.
 

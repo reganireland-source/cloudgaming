@@ -306,7 +306,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=5
+APPS_VERSION=6
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -461,6 +461,10 @@ RUN apt-get update \
 # Battle.net icon for the dock/menu (best-effort; falls back to Lutris's).
 RUN curl -fsL -o /usr/share/pixmaps/battlenet.png https://lutris.net/games/icon/battlenet.png || echo "WARNING: Battle.net icon skipped"
 COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
+COPY lutris-runtime-update.py /cloudy/bin/lutris-runtime-update.py
+COPY lutris-runtime.supervisor.conf /tmp/lutris-runtime.supervisor.conf
+RUN chmod 755 /cloudy/bin/lutris-runtime-update.py \
+ && cat /tmp/lutris-runtime.supervisor.conf >> /cloudy/conf/supervisor/supervisord.conf && rm /tmp/lutris-runtime.supervisor.conf
 COPY add-apps.py /tmp/add-apps.py
 RUN chmod 755 /cloudy/bin/battlenet-start.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
  && chown -R cloudy:cloudy /cloudy/bin /cloudy/conf/sunshine /cloudy/conf/xfce4-default
@@ -669,9 +673,49 @@ LUTRIS=/usr/games/lutris
 if "$LUTRIS" --list-games --installed --json 2>/dev/null | grep -Eq '"slug": ?"battlenet"'; then
   exec "$LUTRIS" lutris:rungame/battlenet
 else
+  # Lutris only downloads its components (DXVK, VKD3D...) when its main
+  # window opens; going straight to the installer skips that and the
+  # install stops with "The 'DXVK' runtime component is not installed".
+  # Fetch them first (usually already done at container start).
+  command -v notify-send >/dev/null && notify-send "Battle.net" "Preparing Lutris components (first time only, 1-2 minutes)..." 2>/dev/null
+  flock /tmp/lutris-runtime.lock python3 /cloudy/bin/lutris-runtime-update.py
   exec "$LUTRIS" lutris:battlenet
 fi
 BNET
+
+# Lutris's components (DXVK, VKD3D, ...) live in the home folder, which is
+# kept on the disk, so they're fetched at run time rather than baked into
+# the image: at every container start (quick when up to date) and before
+# the first Battle.net install. Uses Lutris's own updater, headless.
+cat > "$SUN_DIR/project/lutris-runtime-update.py" <<'LRT'
+#!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/usr/lib/python3/dist-packages")
+from lutris.runtime import RuntimeUpdater
+updater = RuntimeUpdater(force=True)
+components = updater.create_component_updaters()
+print("Lutris components to fetch:", [getattr(c, "name", str(c)) for c in components], flush=True)
+for c in components:
+    try:
+        c.install_update(updater)
+        c.join()
+        print("fetched", getattr(c, "name", c), flush=True)
+    except Exception as e:  # keep going: one failed component shouldn't block the rest
+        print("failed", getattr(c, "name", c), e, flush=True)
+LRT
+cat > "$SUN_DIR/project/lutris-runtime.supervisor.conf" <<'SUPV'
+
+[program:lutris-runtime]
+priority=70
+autostart=true
+autorestart=false
+startsecs=0
+user=%(ENV_CLOUDYPAD_USER)s
+command=flock /tmp/lutris-runtime.lock python3 /cloudy/bin/lutris-runtime-update.py
+environment=HOME="%(ENV_CLOUDYPAD_USER_HOME)s",XDG_DATA_HOME="%(ENV_XDG_DATA_HOME)s",XDG_CONFIG_HOME="%(ENV_XDG_CONFIG_HOME)s",XDG_CACHE_HOME="%(ENV_XDG_CACHE_HOME)s"
+stdout_logfile=%(ENV_CLOUDYPAD_LOG_DIR)s/lutris-runtime.log
+stderr_logfile=%(ENV_CLOUDYPAD_LOG_DIR)s/lutris-runtime.err.log
+SUPV
 
 # Add Chrome, Discord and Battle.net to the apps Moonlight shows, to the
 # desktop's dock (next to Lutris) and to the app menu. Runs once, while
