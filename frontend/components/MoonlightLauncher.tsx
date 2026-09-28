@@ -25,6 +25,10 @@
  *    "ultra" is capped at 2560x1440 because the machines use datacenter GPUs
  *    (T4/L4/A10G/A10), whose virtual screen is limited to 2560x1600 — the
  *    streaming container is configured with that same cap.
+ *    "Your screen" reshapes the stream to your display (MacBook 16:10 or
+ *    full-notch, ultrawide 21:9/32:9, tablets): same pixel budget as the
+ *    preset, the display's aspect ratio, within 2560x1600 (lib/screens.ts).
+ *    The machine builds a matching virtual screen for any size requested.
  *    The app names ("Desktop", "Steam (Big Picture)"…) are the ones defined
  *    in the Sunshine container on the machine.
  *
@@ -37,6 +41,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
+import { SCREENS, fitResolution, detectScreen, MAX_W, MAX_H } from '@/lib/screens';
 
 type OS = 'windows' | 'macos' | 'linux';
 
@@ -117,16 +122,35 @@ export default function MoonlightLauncher({
   const [app, setApp] = useState('Desktop');
   const [preset, setPreset] = useState(PRESETS[quality] ? quality : 'high');
   const [fullscreen, setFullscreen] = useState(true);
+  // Screen shape: 'auto' = this device's display; else a SCREENS preset id.
+  const [screenId, setScreenId] = useState('16x9');
+  const [detected, setDetected] = useState<{ w: number; h: number } | null>(null);
   const [pairing, setPairing] = useState<{ operationId: string; pin: string; host: string } | null>(null);
   const [pairError, setPairError] = useState<ApiError | null>(null);
   const [pairBusy, setPairBusy] = useState(false);
   const mobile = typeof window !== 'undefined' && isMobile();
 
   useEffect(() => setOs(detectOS()), []);
+  useEffect(() => {
+    // Default to this device's shape when it isn't plain 16:9 (e.g. a MacBook).
+    const d = detectScreen();
+    setDetected(d);
+    try { const saved = localStorage.getItem('moonlight.screen'); if (saved) { setScreenId(saved); return; } } catch { /* no storage */ }
+    if (d && Math.abs(d.w / d.h - 16 / 9) > 0.02) setScreenId('auto');
+  }, []);
+  const pickScreen = (id: string) => { setScreenId(id); try { localStorage.setItem('moonlight.screen', id); } catch { /* no storage */ } };
   useEffect(() => { if (PRESETS[quality]) setPreset(quality); }, [quality]);
 
-  const p = PRESETS[preset];
+  const base = PRESETS[preset];
   const exe = MOONLIGHT_EXE[os];
+  // The stream's size: the preset's pixel budget in the chosen screen's shape.
+  const screen = screenId === 'auto' ? detected : SCREENS.find((x) => x.id === screenId) || null;
+  const [bw, bh] = base.resolution.split('x').map(Number);
+  const fitted = screen && screenId !== '16x9' ? fitResolution(screen, bw * bh) : { w: bw, h: bh };
+  // Bitrate follows the pixel count (within ±40% of the preset's).
+  const scale = Math.min(1.4, Math.max(0.6, (fitted.w * fitted.h) / (bw * bh)));
+  const p = { ...base, resolution: `${fitted.w}x${fitted.h}`, bitrateKbps: Math.round((base.bitrateKbps * scale) / 500) * 500 };
+  const capped = !!screen && (screen.w > MAX_W || screen.h > MAX_H) && fitted.w * fitted.h < screen.w * screen.h && (fitted.w === MAX_W || fitted.h === MAX_H);
 
   const streamCommand = useMemo(() => [
     exe, 'stream', host, quote(app, os),
@@ -222,10 +246,33 @@ export default function MoonlightLauncher({
               {Object.entries(PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </label>
-          <label className="text-xs text-slate-400 flex items-end gap-2 pb-2">
+          <label className="text-xs text-slate-400 space-y-1">
+            <span className="block">Your screen</span>
+            <select value={screenId} onChange={(e) => pickScreen(e.target.value)} className="input-neon w-full px-2 py-1.5">
+              <option value="auto" disabled={!detected}>This screen{detected ? ` (${detected.w}×${detected.h})` : ''}</option>
+              {Array.from(new Set(SCREENS.map((x) => x.group))).map((g) => (
+                <optgroup key={g} label={g}>
+                  {SCREENS.filter((x) => x.group === g).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+          <span>Stream: <span className="font-mono text-slate-200">{fitted.w}×{fitted.h}</span> @ {p.fps} fps · {(p.bitrateKbps / 1000).toFixed(1)} Mbps</span>
+          <span className="text-slate-500">In the Moonlight app instead: Settings → Resolution → Custom → {fitted.w}×{fitted.h}</span>
+          <label className="flex items-center gap-2">
             <input type="checkbox" checked={fullscreen} onChange={(e) => setFullscreen(e.target.checked)} /> Full screen
           </label>
         </div>
+        {screen && screenId !== '16x9' && (
+          <p className="text-[0.7rem] text-slate-500 leading-relaxed">
+            The machine makes its screen exactly this shape, so games and the desktop fill your display with no black bars.
+            {capped && <> Your screen is bigger than the {MAX_W}×{MAX_H} a datacenter GPU can drive, so the stream keeps its shape at up to that size and Moonlight scales it up to fill the display.</>}
+            {/* Notched MacBooks are ~1.54:1 across the whole panel (16:10 below the notch). */}
+            {Math.abs(screen.w / screen.h - 1.543) < 0.008 && <> Using the whole screen puts the top strip behind the notch; pick “below the notch” if the menu bar of games gets hidden.</>}
+          </p>
+        )}
         <CopyBox text={streamCommand} />
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={launcherFile} className="btn-neon-magenta text-xs">
