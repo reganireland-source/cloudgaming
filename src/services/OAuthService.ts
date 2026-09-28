@@ -217,7 +217,8 @@ export async function handleCallback(
   });
   const tokens: any = await tokenRes.json().catch(() => ({}));
   if (!tokenRes.ok || !tokens.id_token) {
-    console.error(`[OAuth] ${provider} token exchange failed:`, tokenRes.status, tokens);
+    // Log only the error fields: a partly successful answer could hold an access token.
+    console.error(`[OAuth] ${provider} token exchange failed:`, tokenRes.status, tokens?.error || '', String(tokens?.error_description || '').slice(0, 200));
     throw new AuthError(502, 'OAUTH_EXCHANGE', `${label} didn't confirm the sign-in.`,
       tokens.error === 'invalid_client'
         ? 'The app\'s sign-in settings look wrong — tell whoever runs this app (client id/secret).'

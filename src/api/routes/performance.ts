@@ -61,7 +61,7 @@ router.get('/:machineId', async (req: Request, res: Response) => {
     res.json(stats);
   } catch (error) {
     console.error('Get performance stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch performance stats', details: String(error) });
+    res.status(500).json({ error: 'Failed to fetch performance stats' });
   }
 });
 
@@ -83,7 +83,7 @@ router.get('/:machineId/realtime', async (req: Request, res: Response) => {
     res.json(metric);
   } catch (error) {
     console.error('Get realtime performance error:', error);
-    res.status(500).json({ error: 'Failed to fetch realtime performance', details: String(error) });
+    res.status(500).json({ error: 'Failed to fetch realtime performance' });
   }
 });
 
@@ -100,7 +100,7 @@ router.get('/:machineId/health', async (req: Request, res: Response) => {
     res.json(health);
   } catch (error) {
     console.error('Get health status error:', error);
-    res.status(500).json({ error: 'Failed to fetch health status', details: String(error) });
+    res.status(500).json({ error: 'Failed to fetch health status' });
   }
 });
 

@@ -16,7 +16,7 @@ try {
 
     # Download monitoring agent
     # This would be hosted in your repository or S3 bucket
-    $agentUrl = 'https://github.com/reganireland-source/cloudgaming/releases/download/latest/monitoring-agent.exe'
+    $agentUrl = 'https://github.com/<your-org>/<your-repo>/releases/download/latest/monitoring-agent.exe'
 
     Write-Host "Downloading monitoring agent..."
     # Uncomment when agent is available

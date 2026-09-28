@@ -61,13 +61,9 @@ export const env = {
   // REQUIRED — checked at the bottom of this file.
   JWT_SECRET: process.env.JWT_SECRET || '',
 
-  // ---- Cloud providers --------------------------------------------------
-  // Default AWS region: Singapore, the primary region for this project.
-  AWS_REGION: process.env.AWS_REGION || 'ap-southeast-1',
-  AZURE_SUBSCRIPTION_ID: process.env.AZURE_SUBSCRIPTION_ID || '',
-  // Legacy/unused for launching: each user now adds their own Google Cloud
-  // project + key on the Config page (stored encrypted in the database).
-  GCP_PROJECT_ID: process.env.GCP_PROJECT_ID || '',
+  // ---- Cloud accounts -----------------------------------------------------
+  // None here: each user adds their own cloud keys on the Config page (stored
+  // encrypted in the database, see CREDENTIALS_ENCRYPTION_KEY below).
 
   // ---- Encrypting users' cloud keys --------------------------------------
   // Master key used to encrypt every user's cloud credentials before they
@@ -107,29 +103,6 @@ export const env = {
   APPLE_KEY_ID: process.env.APPLE_KEY_ID || '',
   APPLE_PRIVATE_KEY: (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
 
-  // ---- Gaming machine image ---------------------------------------------
-  // An AMI ("Amazon Machine Image") is a saved disk template that new AWS
-  // servers boot from. Ours is built with Packer (infrastructure/packer/)
-  // and has GPU drivers + Sunshine pre-installed, so machines start faster.
-  // The default here is only a placeholder — set your real AMI ID.
-  CLOUDGAMING_AMI_ID: process.env.CLOUDGAMING_AMI_ID || 'ami-0c55b159cbfafe1f0',
-
-  // ---- SSH settings used by CloudyPadSetup ------------------------------
-  // SSH is a secure remote command line. After launching a Windows gaming
-  // machine, the backend SSHes into it to finish configuring it.
-  // Path to the PRIVATE KEY file that proves who we are to that machine.
-  SSH_KEY_PATH: process.env.SSH_KEY_PATH || '/root/.ssh/cloudgaming-key.pem',
-  // Windows' built-in admin account name.
-  SSH_USERNAME: process.env.SSH_USERNAME || 'Administrator',
-  // How long to keep trying before giving up (300000 ms = 5 minutes).
-  SSH_TIMEOUT_MS: parseInt(process.env.SSH_TIMEOUT_MS || '300000', 10), // 5 minutes
-  // How long to wait between attempts while the machine is still booting.
-  SSH_RETRY_DELAY_MS: parseInt(process.env.SSH_RETRY_DELAY_MS || '10000', 10), // 10 seconds
-
-  // ---- Email (for future alerts; not wired up yet) ----------------------
-  MAIL_SERVICE: process.env.MAIL_SERVICE || 'smtp',
-  MAIL_FROM: process.env.MAIL_FROM || 'noreply@cloudgaming.dev',
-
   // ---- Logging -----------------------------------------------------------
   // Intended to control how chatty logs are. Currently only printed at
   // startup; nothing filters log output by it yet.
@@ -150,4 +123,15 @@ for (const key of requiredEnvs) {
   if (!process.env[key]) {
     throw new Error(`Missing required environment variable: ${key}`);
   }
+}
+
+// Warn (don't stop) about weak or missing secrets, so they show in the
+// Railway logs. The values themselves are never printed.
+if (env.JWT_SECRET.length < 32) {
+  console.warn('[security] JWT_SECRET is shorter than 32 characters — use a long random value (openssl rand -hex 32). Changing it signs everyone out once.');
+}
+if (!env.CREDENTIALS_ENCRYPTION_KEY) {
+  console.warn('[security] CREDENTIALS_ENCRYPTION_KEY is not set — saving cloud keys and launching machines will be refused until it is.');
+} else if (env.CREDENTIALS_ENCRYPTION_KEY === env.JWT_SECRET) {
+  console.warn('[security] CREDENTIALS_ENCRYPTION_KEY is the same as JWT_SECRET — use two different random values.');
 }

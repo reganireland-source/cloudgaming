@@ -16,9 +16,9 @@
  * Each progress update is a NEW ROW in the `setup_status` table (a history),
  * and GET returns only the newest one.
  *
- * NOTE: CloudyPadSetup (src/utils/CloudyPadSetup.ts) can report progress
- * through a callback, but MachineService doesn't yet pass one in, so today
- * nothing automatically POSTs updates here during a real launch.
+ * NOTE: machines report their setup progress through the cloud's serial
+ * console instead (see providers/shared/setupScript.ts), so today nothing
+ * automatically POSTs updates here during a real launch.
  * ============================================================================
  */
 

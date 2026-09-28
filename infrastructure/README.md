@@ -278,7 +278,7 @@ See `packer/scripts/07-cleanup-optimize.ps1` for:
 ## Support
 
 Issues or improvements? Open an issue at:
-https://github.com/reganireland-source/cloudgaming/issues
+your repository's Issues page on GitHub
 
 For streaming setup help:
 - Sunshine: https://github.com/LizardByte/Sunshine/discussions

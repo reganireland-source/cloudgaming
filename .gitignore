@@ -11,3 +11,16 @@ dist/
 build/
 coverage/
 .env.*.local
+
+# Secrets must never be committed (they live in Railway variables / the DB)
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+id_rsa*
+*service-account*.json
+*-credentials.json
+oci_api_key*

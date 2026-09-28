@@ -29,7 +29,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiUrl } from '@/lib/api';
-import { apiFetch } from '@/lib/auth';
+import { apiFetch, getToken } from '@/lib/auth';
 import { useAuth } from './AuthProvider';
 
 export type LightKey = 'backend' | 'database' | 'aws' | 'azure' | 'gcp' | 'oracle';
@@ -233,12 +233,15 @@ export default function StatusDetailPanel({ initial, onClose }: { initial: Light
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch(apiUrl('/status/details'), { cache: 'no-store' });
+        // Server internals are for signed-in users only.
+        const token = getToken();
+        const res = await fetch(apiUrl('/status/details'), { cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (res.status === 401) throw new Error('signin');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!cancelled) { setDetails(data); setError(null); }
       } catch (e: any) {
-        if (!cancelled) setError(e.message === 'HTTP 404'
+        if (!cancelled) setError(e.message === 'signin' ? 'Sign in to see the numbers behind these lights.' : e.message === 'HTTP 404'
           ? 'The backend is reachable but is an older version without this endpoint — redeploy the backend on Railway.'
           : `Couldn't reach the backend (${e.message}). Check the BACKEND light and NEXT_PUBLIC_API_URL.`);
       }

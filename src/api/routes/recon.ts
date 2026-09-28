@@ -38,7 +38,7 @@ router.get('/', async (req: Request, res: Response) => {
     }));
   } catch (error) {
     console.error('Recon error:', error);
-    res.status(500).json({ error: 'Could not work out recommendations', details: String(error) });
+    res.status(500).json({ error: 'Could not work out recommendations' });
   }
 });
 

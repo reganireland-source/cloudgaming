@@ -68,7 +68,7 @@ Configuration:
 
 Ready for Gints Global Gaming Hubjob deployment
 
-For support: https://github.com/reganireland-source/cloudgaming
+For support: your repository on GitHub
 "@
 
 Set-Content -Path "C:\cloudgaming-build-info.txt" -Value $buildInfo

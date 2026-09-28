@@ -24,6 +24,7 @@ import { getMetrics } from '../../services/Metrics';
 import { CATALOGS } from '../../providers/registry';
 import { env } from '../../config/env';
 import { runPreflight } from '../../services/PreflightService';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
@@ -87,7 +88,7 @@ router.get('/preflight', async (req: Request, res: Response) => {
     res.set('Cache-Control', 'no-store');
     res.json(await runPreflight({ origin: req.headers.origin, authorization: req.headers.authorization }));
   } catch (error) {
-    res.status(500).json({ error: 'Pre-flight check crashed', details: String(error) });
+    res.status(500).json({ error: 'Pre-flight check crashed' });
   }
 });
 
@@ -152,7 +153,7 @@ router.get('/catalog', (_req: Request, res: Response) => {
 });
 
 /**
- * GET /api/status/details — the numbers behind each status light.
+ * GET /api/status/details — the numbers behind each status light (sign-in required).
  *
  * Opened when you click a light in the status bar. PUBLIC like the lights
  * themselves, so it only returns aggregate, non-personal information:
@@ -162,7 +163,9 @@ router.get('/catalog', (_req: Request, res: Response) => {
  * Each section is computed independently, so one failure (e.g. the
  * database being down) doesn't hide the others.
  */
-router.get('/details', async (_req: Request, res: Response) => {
+// Signed-in users only: server internals (versions, sizes, per-route traffic)
+// are nobody else's business.
+router.get('/details', authMiddleware, async (_req: Request, res: Response) => {
   // Refresh the lights first, so the history includes a check from right now.
   const status = await getSystemStatus(false).catch(() => null);
 

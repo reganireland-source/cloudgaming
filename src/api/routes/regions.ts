@@ -67,7 +67,7 @@ router.get('/access', async (req: Request, res: Response) => {
     res.json(await getRegionAccess(req.userId!, req.query.refresh === 'true'));
   } catch (error) {
     console.error('Region access error:', error);
-    res.status(500).json({ error: 'Couldn\'t check your cloud regions', details: String(error) });
+    res.status(500).json({ error: 'Couldn\'t check your cloud regions' });
   }
 });
 
@@ -166,7 +166,7 @@ router.get('/recommend', async (req: Request, res: Response) => {
     res.json(recommendations);
   } catch (error) {
     console.error('Get recommendation error:', error);
-    res.status(500).json({ error: 'Failed to get recommendation', details: String(error) });
+    res.status(500).json({ error: 'Failed to get recommendation' });
   }
 });
 

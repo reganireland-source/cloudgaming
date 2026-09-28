@@ -187,13 +187,13 @@ POST /api/machines {
    # Response:
    {
      "type": "sunshine-web-ui",
-     "url": "http://54.123.45.67:47990",
+     "url": "http://203.0.113.10:47990",
      "instructions": [...]
    }
    ```
 
 2. **Open in browser:**
-   - Navigate to: `http://54.123.45.67:47990`
+   - Navigate to: `http://203.0.113.10:47990`
    - Wait for Sunshine to load (~5 seconds)
    - Login with default credentials (shown in setup)
    - Select game to stream
@@ -209,9 +209,9 @@ POST /api/machines {
    # Response:
    {
      "protocol": "moonlight",
-     "host": "54.123.45.67",
+     "host": "203.0.113.10",
      "port": 47998,
-     "format": "moonlight://admin@54.123.45.67:47998",
+     "format": "moonlight://admin@203.0.113.10:47998",
      "instructions": [...]
    }
    ```
@@ -223,7 +223,7 @@ POST /api/machines {
 3. **Add PC:**
    - Open Moonlight
    - Click "Add Host"
-   - Enter: `54.123.45.67:47998`
+   - Enter: `203.0.113.10:47998`
    - Follow PIN pairing (shown in Sunshine)
 
 4. **Stream game:**
@@ -456,7 +456,7 @@ Extend `infrastructure/packer/scripts/06-install-monitoring-agent.ps1` to:
 - **Sunshine Docs**: https://docs.lizardbyte.dev/projects/sunshine/
 - **Moonlight Project**: https://github.com/moonlight-stream/moonlight-qt
 - **CloudyPad**: https://github.com/ReplayCoding/cloudy-pad
-- **GitHub Issues**: https://github.com/reganireland-source/cloudgaming/issues
+- **GitHub Issues**: your repository's Issues page on GitHub
 
 ---
 
