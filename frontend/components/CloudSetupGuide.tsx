@@ -47,6 +47,8 @@ interface Guide {
   timeNeeded: string;
   beforeYouStart: string[];
   steps: Step[];
+  /** The same setup as one script for the cloud's browser shell (instead of clicking through the steps). */
+  setupCli?: { shell: string; href: string; code: string; note?: string };
   fields: { field: string; value: string; example: string }[]; // form field -> what to paste
   quota: {
     summary: string;
@@ -140,6 +142,27 @@ gcloud beta quotas preferences create --project=$P --service=compute.googleapis.
       { title: '(Optional) Let the app read your actual bill', detail: 'Add an inline policy to the user allowing ce:GetCostAndUsage and ce:UpdateCostAllocationTagsStatus (the app switches on the "app" cost allocation tag so it can report only its own resources). AWS charges USD 0.01 per Cost Explorer request; the app asks at most every 6 hours.' },
       { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → AWS → Add keys → paste both → "Check & save". The check signs in, does a dry-run launch to confirm permissions, reads your GPU quota and checks the default VPC. Regions are chosen per machine in the launch form.' },
     ],
+    setupCli: {
+      shell: 'CloudShell', href: 'https://console.aws.amazon.com/cloudshell/home',
+      note: 'Does steps 1–5 in one go. Run it as an administrator. The last line prints the Access key ID and Secret access key, tab-separated; the secret is shown only this once. Re-running is safe apart from the key: an IAM user can have at most 2 access keys.',
+      code: `U=cloudgaming-hub
+
+# 1. The app's own user (no console login)
+aws iam create-user --user-name $U
+
+# 2. Permissions: machines, disks, snapshots, security group + reading GPU quota
+aws iam attach-user-policy --user-name $U --policy-arn arn:aws:iam::aws:policy/AmazonEC2FullAccess
+aws iam attach-user-policy --user-name $U --policy-arn arn:aws:iam::aws:policy/ServiceQuotasReadOnlyAccess
+
+# 5. (Optional) Read the actual bill from Cost Explorer
+aws iam put-user-policy --user-name $U --policy-name cloudgaming-billing --policy-document '{
+  "Version": "2012-10-17",
+  "Statement": [{ "Effect": "Allow", "Action": ["ce:GetCostAndUsage", "ce:UpdateCostAllocationTagsStatus"], "Resource": "*" }]
+}'
+
+# 3-4. The access key: paste both values into the form
+aws iam create-access-key --user-name $U --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text`,
+    },
     fields: [
       { field: 'Access key ID', value: 'From step 4', example: 'AKIAIOSFODNN7EXAMPLE' },
       { field: 'Secret access key', value: 'From step 4 (shown once)', example: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY…' },
@@ -418,6 +441,7 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
             </li>
           ))}
         </ol>
+        {guide.setupCli && <CliBlock {...guide.setupCli} />}
       </section>
 
       {/* ---- Which value goes in which form field ---- */}
