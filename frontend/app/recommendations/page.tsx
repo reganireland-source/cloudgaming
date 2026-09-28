@@ -36,6 +36,7 @@ import { usd } from '@/lib/money';
 import CloudLogo from '@/components/CloudLogo';
 import { apiFetch, ApiError } from '@/lib/auth';
 import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
+import { GPU_COMPARE, TIER_CONSUMER } from '@/lib/gpuCompare';
 import { useAuth } from '@/components/AuthProvider';
 import LaunchMachineModal, { type LaunchPreset } from '@/components/LaunchMachineModal';
 import { placeLabel, type Place } from '@/lib/places';
@@ -369,6 +370,7 @@ export default function RecommendationsPage() {
                   <span className={`block font-mono font-bold text-sm tracking-label ${selected ? 'text-neon-cyan' : 'text-slate-200'}`}>{t.label.toUpperCase()}</span>
                   <span className="block text-[0.7rem] text-slate-400">{t.resolution}{t.fps}</span>
                   <span className="block text-[0.7rem] text-slate-500 truncate" title={t.gpuClass}>{t.gpuShort}</span>
+                  <span className="block text-[0.66rem] text-slate-500 truncate" title="Rough gaming-PC equivalent (datacenter GPUs differ)">{TIER_CONSUMER[t.id]}</span>
                   <span className="block mt-1 text-sm text-slate-100 tabular-nums">{pick ? <>{money(pick.totalPerHour)}<span className="text-slate-500 text-[0.7rem]">/h</span></> : <span className="text-slate-500 text-xs">over budget</span>}</span>
                   {pick && <span className={`block text-[0.7rem] tabular-nums ${RATING[pick.latencyRating].className}`}>~{pick.latencyMs} ms</span>}
                   {spot && pick?.spotOffer && pick.spot ? (
@@ -394,6 +396,7 @@ export default function RecommendationsPage() {
                 </p>
                 {loading && <span className="text-[0.7rem] text-neon-cyan animate-pulse">updating…</span>}
               </div>
+              <GpuCompareNote />
 
               {access && tier.options.length > 0 && (() => {
                 const ok = (o: Option) => { const a = access[`${o.provider}:${o.region}`]; return !!a && statusFor(a, o.gpuModel) === 'ready'; };
@@ -453,7 +456,7 @@ function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot, access
             {o.regionName} <span className="text-slate-500 text-xs">· {o.providerLabel}</span>
             {tags.map((t) => <span key={t} className="ml-1.5 align-middle whitespace-nowrap text-[0.6rem] uppercase tracking-label rounded border border-neon-magenta/40 text-neon-magenta px-1">{t}</span>)}
           </p>
-          <p className="text-[0.7rem] text-slate-500 truncate">{o.region} · {o.shapeLabel}</p>
+          <p className="text-[0.7rem] text-slate-500 truncate">{o.region} · {o.shapeLabel}{GPU_COMPARE[o.gpuModel] && <span className="text-slate-400" title={`Rough gaming-PC equivalent of the ${o.gpuModel}: ${GPU_COMPARE[o.gpuModel].consumer}. Datacenter GPUs run lower clocks and differ in drivers; an idea only.`}> · {GPU_COMPARE[o.gpuModel].short}</span>}</p>
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs tabular-nums">
             <span><span className={RATING[o.latencyRating].className}>~{o.latencyMs} ms</span> <span className="text-slate-500">{RATING[o.latencyRating].label}</span></span>
             <span className="text-slate-100 font-semibold">{money(o.totalPerHour)}/h</span>
@@ -661,5 +664,38 @@ function GoLarge({ tiers, tierId, spot, onSwitch }: { tiers: Tier[]; tierId: Tie
         {spot ? `Switch to ${bigger.label}` : `Use spot ${bigger.label}`}
       </button>
     </div>
+  );
+}
+
+/** "How does this compare to a gaming PC?" — rough consumer equivalents. */
+function GpuCompareNote() {
+  return (
+    <details className="rounded border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-slate-400">
+      <summary className="cursor-pointer text-slate-300">How do these GPUs compare to a gaming PC? <span className="text-slate-500">(rough idea)</span></summary>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-left tabular-nums">
+          <thead className="text-[0.62rem] uppercase tracking-label text-slate-500">
+            <tr><th className="py-1 pr-3 font-normal">Cloud GPU</th><th className="py-1 pr-3 font-normal">≈ Gaming card</th><th className="py-1 pr-3 font-normal">vs RTX 3080 Ti</th><th className="py-1 pr-3 font-normal">Memory · power</th><th className="py-1 font-normal">Where</th></tr>
+          </thead>
+          <tbody>
+            {Object.values(GPU_COMPARE).map((g) => (
+              <tr key={g.gpu} className="border-t border-white/5">
+                <td className="py-1 pr-3 text-slate-200 whitespace-nowrap">{g.gpu} <span className="text-slate-500">{g.chip}</span></td>
+                <td className="py-1 pr-3 text-neon-cyan whitespace-nowrap">{g.consumer}</td>
+                <td className="py-1 pr-3">{g.vs3080Ti}</td>
+                <td className="py-1 pr-3 whitespace-nowrap">{g.vram} · {g.power}</td>
+                <td className="py-1 text-slate-500">{g.clouds}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 leading-relaxed">
+        Datacenter cards aren’t gaming cards: they run lower clocks within a tight power limit, have more memory, no monitor output (the machine streams a
+        virtual screen) and server drivers, and cloud vCPUs are usually slower per core than a gaming PC’s. So these are ballpark equivalents from public
+        benchmarks of the same chips — real results vary by game. None of the GPUs these clouds rent for gaming reaches an RTX 3080 Ti; the A10 / A10G
+        come closest at roughly two-thirds of one. Streaming also adds a little lag and compression on top.
+      </p>
+    </details>
   );
 }
