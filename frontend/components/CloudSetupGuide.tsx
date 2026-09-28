@@ -178,7 +178,7 @@ aws iam create-access-key --user-name $U --query 'AccessKey.[AccessKeyId,SecretA
       summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge needs 8.',
       steps: [
         'Service Quotas → AWS services → Amazon EC2, in the region you\'ll use.',
-        'Find "Running On-Demand G and VT instances" (quota code L-DB2E81BA) → Request increase at account level → 8.',
+        'Find "Running On-Demand G and VT instances" (quota code L-DB2E81BA) → Request increase at account level → 8. "Account level" is just AWS\'s name for your account\'s limit: it still applies only to the region selected.',
         'For spot machines, also request "All G and VT Spot Instance Requests" (quota code L-3819A6DF) → 8.',
         'Or use the direct links below: each opens that quota in the region currently selected in the console (top right), so check the region before requesting.',
         'Quota is per region: switch region (top right) and repeat for each place you travel to.',
