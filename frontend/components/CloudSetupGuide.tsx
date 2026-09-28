@@ -53,6 +53,8 @@ interface Guide {
   quota: {
     summary: string;
     steps: string[];
+    /** Direct links to the quota pages in the cloud console. */
+    links?: { href: string; label: string }[];
     /** The same request from the command line, for the cloud's browser shell. */
     cli?: { shell: string; href: string; code: string; note?: string };
   };
@@ -168,11 +170,17 @@ aws iam create-access-key --user-name $U --query 'AccessKey.[AccessKeyId,SecretA
       { field: 'Secret access key', value: 'From step 4 (shown once)', example: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY…' },
     ],
     quota: {
+      links: [
+        { href: 'https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas/L-DB2E81BA', label: 'On-demand G and VT (L-DB2E81BA)' },
+        { href: 'https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas/L-3819A6DF', label: 'Spot G and VT (L-3819A6DF)' },
+        { href: 'https://console.aws.amazon.com/servicequotas/home/requests', label: 'Your quota requests' },
+      ],
       summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge needs 8.',
       steps: [
         'Service Quotas → AWS services → Amazon EC2, in the region you\'ll use.',
-        'Find "Running On-Demand G and VT instances" → Request increase → 8.',
-        'For spot machines, also request "All G and VT Spot Instance Requests" → 8.',
+        'Find "Running On-Demand G and VT instances" (quota code L-DB2E81BA) → Request increase at account level → 8.',
+        'For spot machines, also request "All G and VT Spot Instance Requests" (quota code L-3819A6DF) → 8.',
+        'Or use the direct links below: each opens that quota in the region currently selected in the console (top right), so check the region before requesting.',
         'Quota is per region: switch region (top right) and repeat for each place you travel to.',
         'Hong Kong (ap-east-1) is an opt-in region: Account → AWS Regions → Enable it first, and wait a few minutes. Until then AWS answers as if your key were wrong.',
         'Region names: ap-southeast-1 = Singapore, ap-east-1 = Hong Kong, ap-northeast-1 = Tokyo, ap-northeast-2 = Seoul, ap-south-1 = Mumbai, ap-southeast-2 = Sydney, us-west-2 = Oregon, us-west-1 = N. California.',
@@ -479,6 +487,15 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
             <li key={i}>{s}</li>
           ))}
         </ol>
+        {!!guide.quota.links?.length && (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {guide.quota.links.map((l) => (
+              <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer" className="text-[0.72rem] text-neon-cyan hover:underline">
+                Open {l.label} ↗
+              </a>
+            ))}
+          </div>
+        )}
         {guide.quota.cli && <CliBlock {...guide.quota.cli} />}
         <p className="mt-3 text-xs text-slate-300 leading-relaxed">
           <span className="text-neon-amber">Shortcut:</span> once your keys are saved, the <a href="/regions" className="text-neon-cyan hover:underline">Regions</a> page runs these checks for you across every region and cloud, and shows Ready / No quota / Not enabled with the exact fix for each.
