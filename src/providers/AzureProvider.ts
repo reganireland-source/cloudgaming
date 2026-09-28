@@ -441,8 +441,29 @@ export class AzureProvider extends CloudProvider {
   private async ensureNetwork(rg: string, location: string): Promise<{ subnetId: string; nsgId: string }> {
     // Firewall (NSG)
     let nsgId: string | undefined;
+    const ruleFor = (p: (typeof SUNSHINE_PORT_RANGES)[number], i: number) => ({
+      name: `sunshine-${p.protocol}-${p.from}${p.to !== p.from ? `-${p.to}` : ''}`,
+      description: 'Gints Global Gaming Hubjob: Sunshine/Moonlight streaming',
+      priority: 1000 + i * 10,   // lower number = checked first; any value 100–4096 works
+      direction: 'Inbound' as const,
+      access: 'Allow' as const,
+      protocol: p.protocol === 'tcp' ? 'Tcp' as const : 'Udp' as const,
+      sourceAddressPrefix: 'Internet',
+      sourcePortRange: '*',
+      destinationAddressPrefix: '*',
+      destinationPortRange: p.from === p.to ? String(p.from) : `${p.from}-${p.to}`,
+    });
     try {
-      nsgId = (await this.network.networkSecurityGroups.get(rg, NSG_NAME)).id;
+      const nsg = await this.network.networkSecurityGroups.get(rg, NSG_NAME);
+      nsgId = nsg.id;
+      // Created before newer ports (e.g. browser access) were added? Add their rules.
+      const names = new Set((nsg.securityRules || []).map((r) => r.name));
+      const wanted = SUNSHINE_PORT_RANGES.map(ruleFor).filter((r) => !names.has(r.name));
+      for (const r of wanted) {
+        await this.report('info', `Opening ${r.protocol.toUpperCase()} ${r.destinationPortRange} in firewall "${NSG_NAME}"…`);
+        const { name, ...rule } = r;
+        await this.network.securityRules.beginCreateOrUpdateAndWait(rg, NSG_NAME, name, rule);
+      }
       await this.report('info', `Firewall "${NSG_NAME}" already exists — streaming ports are open.`);
     } catch (error) {
       if (!isAzureNotFound(error)) throw error;
@@ -453,18 +474,7 @@ export class AzureProvider extends CloudProvider {
       const nsg = await this.network.networkSecurityGroups.beginCreateOrUpdateAndWait(rg, NSG_NAME, {
         location,
         tags: TAGS,
-        securityRules: SUNSHINE_PORT_RANGES.map((p, i) => ({
-          name: `sunshine-${p.protocol}-${p.from}${p.to !== p.from ? `-${p.to}` : ''}`,
-          description: 'Gints Global Gaming Hubjob: Sunshine/Moonlight streaming',
-          priority: 1000 + i * 10,   // lower number = checked first; any value 100–4096 works
-          direction: 'Inbound',
-          access: 'Allow',
-          protocol: p.protocol === 'tcp' ? 'Tcp' : 'Udp',
-          sourceAddressPrefix: 'Internet',
-          sourcePortRange: '*',
-          destinationAddressPrefix: '*',
-          destinationPortRange: p.from === p.to ? String(p.from) : `${p.from}-${p.to}`,
-        })),
+        securityRules: SUNSHINE_PORT_RANGES.map(ruleFor),
       });
       nsgId = nsg.id;
       await this.report('success', 'Firewall created.');

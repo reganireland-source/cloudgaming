@@ -129,6 +129,20 @@ yours). The GCP ones:
 
 ## 5. Stream  (≈5 min)
 
+Machine card → **Connect** shows three ways in:
+
+| Way | What it's for | Needs |
+|---|---|---|
+| **Moonlight app** | Games: full quality, lowest lag, controllers | Moonlight installed once per device |
+| **Use the desktop** (KasmVNC) | Desktop work in a browser tab: installing things, signing in to launchers, **copy & paste** between your computer and the machine. ~30 fps, not for games | Any browser |
+| **Play in browser** (Moonlight Web) — *experimental* | The full GPU stream in Chrome/Edge with no app | Chrome or Edge; UDP 40000–40030 reachable |
+
+Both browser options sign in with the machine's username/password (shown on
+the card) and warn once about the machine's own certificate (Advanced →
+Proceed). Play in browser is paired with Sunshine automatically during setup;
+in the player pick the machine, then an app. Machines set up before browser
+access existed show "Not on this machine" — launch a new one.
+
 Machine card → **Play with Moonlight**:
 
 1. **Pair Moonlight (one click)**: once per device.

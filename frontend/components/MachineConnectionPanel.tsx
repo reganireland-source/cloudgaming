@@ -38,6 +38,62 @@ export interface ConnectionInfo {
     failed: boolean;
     error?: string;
   };
+  /** Browser access (machines set up since it was added); `checked` = the ports were probed. */
+  browser?: {
+    checked: boolean;
+    desktop: { url: string | null; available: boolean };
+    play: { url: string | null; available: boolean };
+  };
+}
+
+/**
+ * The three ways into a machine, side by side, so it's obvious which to use:
+ *   Moonlight app    best for games (install once)
+ *   Use the desktop  KasmVNC in a browser tab: reliable, ~30 fps, clipboard
+ *   Play in browser  Moonlight Web: GPU-quality stream in Chrome/Edge — experimental
+ */
+function WaysToConnect({ info }: { info: ConnectionInfo }) {
+  const b = info.browser;
+  const ready = info.setup.ready;
+  const missing = (x?: { available: boolean }) => !!b?.checked && !x?.available;
+  const Option = ({ title, badge, badgeCls, children, href, cta, available, note }: {
+    title: string; badge: string; badgeCls: string; children: React.ReactNode; href?: string | null; cta?: string; available?: boolean; note?: string;
+  }) => (
+    <div className="rounded-md border border-white/10 bg-white/[0.02] p-3 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-sm font-semibold text-slate-100">{title}</span>
+        <span className={`text-[0.6rem] uppercase tracking-label rounded border px-1.5 py-px ${badgeCls}`}>{badge}</span>
+      </div>
+      <p className="text-xs text-slate-400 leading-relaxed flex-1">{children}</p>
+      {href !== undefined && (available && href
+        ? <a href={href} target="_blank" rel="noopener noreferrer" className="btn-neon text-xs text-center">{cta} ↗</a>
+        : <span className="text-[0.7rem] text-slate-500">{note}</span>)}
+    </div>
+  );
+  const unavailable = !ready ? 'Available once setup is ready.' : 'Not on this machine: it was set up before browser access was added. Launch a new machine to get it.';
+  return (
+    <div className="space-y-2">
+      <p className="label">Three ways to connect</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Option title="Moonlight app" badge="Best for games" badgeCls="border-neon-lime/50 text-neon-lime">
+          Full quality and the lowest lag, with controllers. Install Moonlight once on each device, then pair below.
+        </Option>
+        <Option title="Use the desktop" badge="Desktop mode" badgeCls="border-neon-cyan/50 text-neon-cyan"
+          href={b?.desktop.url} cta="Open desktop" available={ready && b?.desktop.available} note={missing(b?.desktop) ? unavailable : 'Available once setup is ready.'}>
+          The machine&apos;s desktop in any browser tab: install things, sign in to launchers, copy &amp; paste between your computer and the machine. About 30 fps: fine for desktop work, not for games.
+        </Option>
+        <Option title="Play in browser" badge="High performance · Experimental" badgeCls="border-neon-amber/50 text-neon-amber"
+          href={b?.play.url} cta="Open player" available={ready && b?.play.available} note={missing(b?.play) ? unavailable : 'Available once setup is ready.'}>
+          The full GPU stream, sound and controller in Chrome or Edge — no app to install. New and less proven than the Moonlight app: if it stutters or won&apos;t connect, use the app.
+        </Option>
+      </div>
+      <p className="text-[0.7rem] text-slate-500 leading-relaxed">
+        Both browser options sign in with this machine&apos;s <strong className="text-slate-300">username and password</strong> below.
+        The first time, your browser warns about the certificate: choose <em>Advanced → Proceed</em>. It&apos;s the machine&apos;s own certificate and the connection is still encrypted.
+        {' '}In the player, pick the machine, then an app (e.g. Desktop or Steam).
+      </p>
+    </div>
+  );
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -142,6 +198,9 @@ export default function MachineConnectionPanel({
           )}
         </div>
       )}
+
+      {/* ---- Which way to connect ---- */}
+      {info.ipAddress && info.status === 'running' && <WaysToConnect info={info} />}
 
       {/* ---- Connection details ---- */}
       <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-2 text-xs">

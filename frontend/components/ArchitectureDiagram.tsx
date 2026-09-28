@@ -392,7 +392,7 @@ export default function ArchitectureDiagram({
                   health={vmHealth} active={selected === 'vm'} onSelect={setSelected} />
                 <div className="pl-3 border-l border-white/10 grid sm:grid-cols-2 gap-2">
                   <Node id="gpu" icon="gpu" label="NVIDIA GPU" sub={t.gpuAttach} health={!created ? 'unknown' : softwareHealth === 'ok' ? 'ok' : vmHealth === 'ok' ? 'busy' : vmHealth} active={selected === 'gpu'} onSelect={setSelected} />
-                  <Node id="sunshine" icon="sunshine" label="Container: Sunshine · desktop · Steam"
+                  <Node id="sunshine" icon="sunshine" label="Container: Sunshine · desktop · Steam · KasmVNC"
                     sub={setupStage ? `${setupStage.percent}% · ${setupStage.message}` : ms === 'running' ? 'setup status unknown yet' : created ? 'installed by the setup script' : 'not created (the launch failed)'}
                     health={softwareHealth} active={selected === 'sunshine'} onSelect={setSelected} />
                 </div>
@@ -404,6 +404,7 @@ export default function ArchitectureDiagram({
         </Layer>
         <div className="mt-2 rounded border border-neon-lime/30 bg-neon-lime/[0.04] px-3 py-2 text-[0.7rem] text-neon-lime">
           ⇅ Game stream: Moonlight ⇄ Sunshine directly over the internet (UDP) — it does NOT pass through Vercel or Railway.
+          {' '}Browser access is direct too: <strong>Use the desktop</strong> (KasmVNC, HTTPS port 48200, inside the container) and <strong>Play in browser</strong> (Moonlight Web, experimental: HTTPS 48300 + WebRTC UDP 40000–40030, its own container next to Sunshine).
         </div>
         <div className="mt-2 flex flex-wrap gap-3 text-[0.64rem] text-slate-500">
           {(['ok', 'busy', 'idle', 'bad', 'unknown'] as Health[]).map((h) => (

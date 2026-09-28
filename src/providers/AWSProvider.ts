@@ -297,6 +297,17 @@ export class AWSProvider extends CloudProvider {
     }).promise();
     const found = existing.SecurityGroups?.[0]?.GroupId;
     if (found) {
+      // Created before newer ports (e.g. browser access) were added? Open them.
+      const perms = existing.SecurityGroups?.[0]?.IpPermissions || [];
+      const missing = SUNSHINE_PORT_RANGES.filter((p) => !perms.some((q) => q.IpProtocol === p.protocol && q.FromPort === p.from && q.ToPort === p.to
+        && (q.IpRanges || []).some((r) => r.CidrIp === '0.0.0.0/0')));
+      if (missing.length) {
+        await this.report('info', `Opening new ports in security group ${found}: ${missing.map((p) => `${p.protocol.toUpperCase()} ${p.from === p.to ? p.from : `${p.from}-${p.to}`}`).join(', ')}…`);
+        await ec2.authorizeSecurityGroupIngress({
+          GroupId: found,
+          IpPermissions: missing.map((p) => ({ IpProtocol: p.protocol, FromPort: p.from, ToPort: p.to, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'Gints Global Gaming Hubjob' }] })),
+        }).promise().catch((e: any) => { if (e?.code !== 'InvalidPermission.Duplicate') throw e; });
+      }
       await this.report('info', `Security group "${STREAMING_FIREWALL_NAME}" already exists (${found}) — streaming ports are open.`);
       return found;
     }

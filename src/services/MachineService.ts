@@ -43,6 +43,8 @@
 import { getSpotInfo } from './SpotPriceService';
 import crypto from 'crypto';
 import https from 'https';
+import net from 'net';
+import { BROWSER_PORTS } from '../providers/shared/streaming';
 import { query } from '../config/database';
 import { CATALOGS, isProviderName } from '../providers/registry';
 import { FriendlyCloudError } from '../providers/errors';
@@ -590,12 +592,26 @@ export class MachineService {
     }
     const current = stages[stages.length - 1];
 
+    // Browser access (machines set up since it was added): is each port answering?
+    const ip = machine.ip_address as string | null;
+    const probeable = !!ip && machine.status === 'running' && current?.key === 'ready';
+    const [desktopUp, playUp] = probeable
+      ? await Promise.all([portOpen(ip!, BROWSER_PORTS.kasmvnc), portOpen(ip!, BROWSER_PORTS.moonlightWeb)])
+      : [false, false];
+
     return {
       machineId,
       provider: machine.provider,
       status: machine.status,
       ipAddress: machine.ip_address,
       sunshineUrl: machine.ip_address ? `https://${machine.ip_address}:47990` : null,
+      browser: {
+        checked: probeable,
+        // "Use the desktop": KasmVNC, scaled to the browser window.
+        desktop: { url: ip ? `https://${ip}:${BROWSER_PORTS.kasmvnc}/?resize=scale` : null, available: desktopUp },
+        // "Play in browser" (experimental): Moonlight Web.
+        play: { url: ip ? `https://${ip}:${BROWSER_PORTS.moonlightWeb}/` : null, available: playUp },
+      },
       username: login.username,
       password: login.password,
       setup: {
@@ -717,20 +733,36 @@ export { AlreadyRecorded };
  * POST the PIN to Sunshine's API. Never throws: returns ok, or a short
  * description of why not (so the pairing loop can keep retrying).
  */
-function sendSunshinePin(host: string, username: string, password: string, pin: string): Promise<{ ok: boolean; status?: number; problem: string }> {
+/**
+ * Is ip:port accepting connections? (2.5 s; answers cached 60 s per address,
+ * because the connection panel refreshes often.)
+ */
+const portCache = new Map<string, { at: number; open: boolean }>();
+function portOpen(ip: string, port: number): Promise<boolean> {
+  const key = `${ip}:${port}`;
+  const hit = portCache.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return Promise.resolve(hit.open);
   return new Promise((resolve) => {
-    const body = JSON.stringify({ pin, name: 'Gints Global Gaming Hubjob' });
+    const socket = net.connect({ host: ip, port, timeout: 2500 });
+    const done = (open: boolean) => { socket.destroy(); portCache.set(key, { at: Date.now(), open }); resolve(open); };
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false));
+  });
+}
+
+/** One HTTPS call to Sunshine's admin API (self-signed certificate; the admin login protects it). */
+function sunshineApi(host: string, username: string, password: string, method: 'GET' | 'POST', path: string, body?: unknown)
+  : Promise<{ statusCode?: number; json: any; error?: NodeJS.ErrnoException | Error; timedOut?: boolean }> {
+  return new Promise((resolve) => {
+    const data = body === undefined ? undefined : JSON.stringify(body);
     const req = https.request(
       {
-        host,
-        port: 47990,
-        path: '/api/pin',
-        method: 'POST',
+        host, port: 47990, path, method,
         rejectUnauthorized: false, // Sunshine's certificate is self-signed (see pair())
         timeout: 8000,
         headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
+          ...(data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {}),
           Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
         },
       },
@@ -738,16 +770,35 @@ function sendSunshinePin(host: string, username: string, password: string, pin: 
         let text = '';
         res.on('data', (chunk) => { text += chunk; });
         res.on('end', () => {
-          let status: unknown;
-          try { status = JSON.parse(text).status; } catch { /* not JSON */ }
-          // Sunshine answers {"status": true} or {"status": "true"} on success.
-          if (res.statusCode === 200 && (status === true || status === 'true')) return resolve({ ok: true, problem: '' });
-          resolve({ ok: false, status: res.statusCode, problem: res.statusCode === 200 ? 'no device is waiting to pair yet' : `Sunshine answered HTTP ${res.statusCode}` });
+          let json: any = null;
+          try { json = JSON.parse(text); } catch { /* not JSON */ }
+          resolve({ statusCode: res.statusCode, json });
         });
       }
     );
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, problem: 'Sunshine didn\'t answer (is setup finished?)' }); });
-    req.on('error', (e) => resolve({ ok: false, problem: `can't reach Sunshine yet (${(e as NodeJS.ErrnoException).code || e.message})` }));
-    req.end(body);
+    req.on('timeout', () => { req.destroy(); resolve({ json: null, timedOut: true }); });
+    req.on('error', (e) => resolve({ json: null, error: e }));
+    req.end(data);
   });
+}
+
+/**
+ * Enter a pairing PIN into Sunshine. Newer Sunshine versions list waiting
+ * pairing requests (GET /api/pin) and want the request's id with the PIN;
+ * older ones (like the one in CloudyPad's container today) take just the PIN.
+ */
+async function sendSunshinePin(host: string, username: string, password: string, pin: string): Promise<{ ok: boolean; status?: number; problem: string }> {
+  const body: Record<string, string> = { pin, name: 'Gints Global Gaming Hubjob' };
+  const pending = await sunshineApi(host, username, password, 'GET', '/api/pin');
+  if (pending.statusCode === 200 && Array.isArray(pending.json?.pairings)) {
+    if (!pending.json.pairings.length) return { ok: false, status: 200, problem: 'no device is waiting to pair yet' };
+    body.pairing_id = pending.json.pairings[pending.json.pairings.length - 1].id; // the newest request
+  }
+  const res = await sunshineApi(host, username, password, 'POST', '/api/pin', body);
+  if (res.timedOut) return { ok: false, problem: 'Sunshine didn\'t answer (is setup finished?)' };
+  if (res.error) return { ok: false, problem: `can't reach Sunshine yet (${(res.error as NodeJS.ErrnoException).code || res.error.message})` };
+  const status = res.json?.status;
+  // Sunshine answers {"status": true} or {"status": "true"} on success.
+  if (res.statusCode === 200 && (status === true || status === 'true')) return { ok: true, problem: '' };
+  return { ok: false, status: res.statusCode, problem: res.statusCode === 200 ? 'no device is waiting to pair yet' : `Sunshine answered HTTP ${res.statusCode}` };
 }

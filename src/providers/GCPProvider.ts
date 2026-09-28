@@ -278,8 +278,20 @@ export class GCPProvider extends CloudProvider {
    * Created once per project; machines opt in via their network tag.
    */
   private async ensureFirewall(): Promise<void> {
+    const allowed = [
+      { IPProtocol: 'tcp', ports: SUNSHINE_TCP_PORTS },
+      { IPProtocol: 'udp', ports: SUNSHINE_UDP_PORTS },
+    ];
     try {
-      await this.firewalls.get({ project: this.projectId, firewall: FIREWALL_RULE_NAME });
+      const [rule] = await this.firewalls.get({ project: this.projectId, firewall: FIREWALL_RULE_NAME });
+      // Created before newer ports (e.g. browser access) were added? Update it.
+      const has = (proto: string, port: string) => (rule.allowed || []).some((a: any) => a.IPProtocol === proto && (a.ports || []).includes(port));
+      const missing = [...SUNSHINE_TCP_PORTS.filter((p) => !has('tcp', p)).map((p) => `TCP ${p}`), ...SUNSHINE_UDP_PORTS.filter((p) => !has('udp', p)).map((p) => `UDP ${p}`)];
+      if (missing.length) {
+        await this.report('info', `Adding ports to firewall rule "${FIREWALL_RULE_NAME}": ${missing.join(', ')}…`);
+        const [lro] = await this.firewalls.patch({ project: this.projectId, firewall: FIREWALL_RULE_NAME, firewallResource: { allowed } });
+        await this.waitGlobalOp(lro);
+      }
       await this.report('info', `Firewall rule "${FIREWALL_RULE_NAME}" already exists — streaming ports are open.`);
       return;
     } catch (error) {
@@ -296,10 +308,7 @@ export class GCPProvider extends CloudProvider {
         description: 'Gints Global Gaming Hubjob: Sunshine/Moonlight streaming ports',
         sourceRanges: ['0.0.0.0/0'],
         targetTags: [NETWORK_TAG],
-        allowed: [
-          { IPProtocol: 'tcp', ports: SUNSHINE_TCP_PORTS },
-          { IPProtocol: 'udp', ports: SUNSHINE_UDP_PORTS },
-        ],
+        allowed,
       },
     });
     await this.waitGlobalOp(lro);
