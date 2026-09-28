@@ -55,6 +55,10 @@ export interface ProviderCatalog {
   estimateHourly(shapeId: string, regionId: string, spot: boolean): number;
   /** Approx $/GB/month for the machine's disk while it exists (also when stopped). */
   diskPerGbMonth: number;
+  /** Approx $/GB/month for a snapshot, billed on the data actually stored (not the disk's size). */
+  snapshotPerGbMonth: number;
+  /** Can a shelved machine come back in a DIFFERENT region? (GCP: snapshots are global; AWS: copied automatically.) */
+  restoreAnyRegion: boolean;
   priceNote: string;          // e.g. 'Estimates from list prices; excludes tax.'
 }
 

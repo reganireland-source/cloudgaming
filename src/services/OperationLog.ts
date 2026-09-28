@@ -221,15 +221,60 @@ export async function listOperations(userId: string, limit = 20, machineId?: str
  * Is some operation still running on this machine? Used to refuse a second
  * start/stop/delete while the first is in progress.
  */
+/**
+ * How long an action may reasonably run before we assume it's lost (the
+ * server died mid-way, or a cloud call hung). Snapshots of big disks are slow.
+ */
+export const OPERATION_LIMIT_SQL = `CASE action WHEN 'shelve' THEN INTERVAL '150 minutes' WHEN 'restore' THEN INTERVAL '90 minutes'
+  WHEN 'launch' THEN INTERVAL '60 minutes' ELSE INTERVAL '30 minutes' END`;
+
 export async function hasRunningOperation(machineId: string): Promise<boolean> {
   const result = await query(
     `SELECT 1 FROM cloud_operations
      WHERE machine_id = $1 AND status = 'running'
        AND action <> 'pair'   -- waiting for Moonlight to pair doesn't block other actions
-       AND created_at > NOW() - INTERVAL '30 minutes'`,
+       AND created_at > NOW() - ${OPERATION_LIMIT_SQL}`,
     [machineId]
   );
   return result.rows.length > 0;
+}
+
+/**
+ * After an operation was lost (server restart, or it ran past its limit):
+ * put its machine in a state the 5-minute status check will re-read from the
+ * cloud, instead of leaving it "stopping…" forever.
+ */
+export async function releaseMachinesOf(machineIds: Array<string | null>): Promise<void> {
+  const ids = machineIds.filter(Boolean);
+  if (!ids.length) return;
+  // Never created at the cloud → it failed.
+  await query(`UPDATE machines SET status = 'failed' WHERE id = ANY($1::uuid[]) AND instance_id LIKE 'pending:%' AND status = 'creating'`, [ids]);
+  // Shelved (no machine at the cloud) and an interrupted restore/shelve → still shelved.
+  await query(`UPDATE machines SET status = 'shelved' WHERE id = ANY($1::uuid[]) AND instance_id LIKE 'shelved:%' AND status IN ('restoring', 'shelving', 'deleting')`, [ids]);
+  // Anything else mid-change → unknown, which the status job checks with the cloud.
+  await query(
+    `UPDATE machines SET status = 'unknown'
+     WHERE id = ANY($1::uuid[]) AND status IN ('creating', 'starting', 'stopping', 'deleting', 'shelving', 'restoring')`, [ids]);
+}
+
+/** Operations that ran past their limit: mark failed (the watchdog, every 5 min). */
+export async function expireStaleOperations(): Promise<number> {
+  const stale = await query(
+    `UPDATE cloud_operations SET status = 'failed', finished_at = NOW(), error = $1
+     WHERE status = 'running' AND action <> 'pair' AND created_at < NOW() - ${OPERATION_LIMIT_SQL}
+     RETURNING id, machine_id`,
+    [JSON.stringify({
+      code: 'OPERATION_TIMED_OUT',
+      title: 'This took far longer than it should, so the app stopped waiting',
+      explanation: 'The cloud never confirmed the action finished (or the app lost track of it). The machine\'s real state is being re-read from the cloud automatically.',
+      fixes: ['Wait a few minutes for the status to update, or press "Sync".', 'If it is in the wrong state, run the action again.'],
+    })]
+  );
+  for (const row of stale.rows) {
+    await query(`INSERT INTO cloud_operation_events (operation_id, level, message) VALUES ($1, 'error', 'Timed out: no confirmation from the cloud. Re-checking the machine''s real state.')`, [row.id]);
+  }
+  await releaseMachinesOf(stale.rows.map((r: any) => r.machine_id));
+  return stale.rows.length;
 }
 
 /**
@@ -245,7 +290,7 @@ export async function failOrphanedOperations(): Promise<void> {
        SET status = 'failed', finished_at = NOW(),
            error = $1
        WHERE status = 'running'
-       RETURNING id`,
+       RETURNING id, machine_id`,
       [
         JSON.stringify({
           code: 'SERVER_RESTARTED',
@@ -266,6 +311,8 @@ export async function failOrphanedOperations(): Promise<void> {
         [row.id]
       );
     }
+    // Their machines were left mid-change ("stopping…"): hand them to the status check.
+    await releaseMachinesOf(orphaned.rows.map((r: any) => r.machine_id));
     if (orphaned.rows.length > 0) {
       console.log(`[OperationLog] marked ${orphaned.rows.length} interrupted operation(s) as failed`);
     }

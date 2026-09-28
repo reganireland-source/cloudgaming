@@ -165,6 +165,8 @@ export const AWS_CATALOG: ProviderCatalog = {
   shapes: AWS_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: GP3_PER_GB_MONTH,
+  snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
+  restoreAnyRegion: true,
   priceNote:
     'Estimates from AWS\'s us-east-1 Linux list prices scaled per region (±15%); excludes tax, and data sent to you (~$0.09–0.12/GB) is extra. Spot prices move with demand — assumed ~35% of on-demand.',
 };

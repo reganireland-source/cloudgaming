@@ -32,7 +32,7 @@
 
 import crypto from 'crypto';
 import compute from '@google-cloud/compute';
-import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
+import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 import type { InventoryItem } from './shared/types';
 import { FriendlyCloudError, isZoneSpecificError, toFriendlyError } from './gcp/errors';
@@ -533,6 +533,7 @@ export class GCPProvider extends CloudProvider {
       id: snapshotId,
       sizeGb: Number(snap.diskSizeGb) || 0,
       state: status === 'READY' ? 'completed' : status === 'FAILED' ? 'failed' : 'pending',
+      storedGb: Number(snap.storageBytes) ? Math.round(Number(snap.storageBytes) / 1e8) / 10 : undefined,
     };
   }
 
@@ -547,14 +548,16 @@ export class GCPProvider extends CloudProvider {
     await this.report('success', `Snapshot ${snapshotId} deleted.`);
   }
 
-  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig): Promise<{ instanceId: string; ipAddress: string }> {
+  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig, opts: RestoreOptions = {}): Promise<{ instanceId: string; ipAddress: string }> {
     await this.report('info', `Creating a new machine from snapshot ${snapshotId}…`);
+    // Google snapshots are global, so this works in any region of the project.
     const { instanceId, ipAddress } = await this.createMachine(config, {
-      spot: false,
-      diskSizeGb: 150,
+      spot: !!opts.spot,
+      diskSizeGb: opts.diskSizeGb || 150,
       sourceSnapshot: `global/snapshots/${snapshotId}`,
-      sunshineUsername: 'gamer',
-      sunshinePassword: crypto.randomBytes(12).toString('base64url'),
+      sunshineUsername: opts.sunshineUsername || 'gamer',
+      sunshinePassword: opts.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
+      autoStopMinutes: opts.autoStopMinutes,
     });
     return { instanceId, ipAddress };
   }

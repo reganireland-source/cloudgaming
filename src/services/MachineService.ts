@@ -53,7 +53,7 @@ import { SnapshotService } from './SnapshotService';
 const VALID_QUALITIES = ['budget', 'good', 'high', 'ultra'];
 
 /** A machine is "busy" in these states — don't start another action. */
-const BUSY_STATES = ['creating', 'starting', 'stopping', 'deleting'];
+const BUSY_STATES = ['creating', 'starting', 'stopping', 'deleting', 'shelving', 'restoring'];
 
 export interface LaunchRequest {
   provider: string;
@@ -65,6 +65,19 @@ export interface LaunchRequest {
   diskSizeGb?: number;
   /** Shut down after this many idle minutes (no streaming); 0 = never. Default 15. */
   autoStopMinutes?: number;
+  /** Shelve automatically after this many days stopped; null/0 = off. */
+  autoShelveDays?: number | null;
+}
+
+/** Auto-shelve choices the UI offers (days stopped). */
+export const AUTO_SHELVE_CHOICES = [1, 3, 7, 14, 30];
+function validAutoShelve(v: unknown): number | null {
+  if (v === undefined || v === null || v === '' || Number(v) === 0) return null;
+  const n = Math.round(Number(v));
+  if (!AUTO_SHELVE_CHOICES.includes(n)) {
+    throw new MachineRequestError(400, `Auto-shelve must be one of ${AUTO_SHELVE_CHOICES.join(', ')} days, or off.`, 'A week (7 days) suits most people.');
+  }
+  return n;
 }
 
 /** A plain-English "you can't do that" (turned into HTTP 400/404/409 by the route). */
@@ -145,6 +158,7 @@ export class MachineService {
     if (!Number.isFinite(autoStopMinutes) || autoStopMinutes < 0 || autoStopMinutes > 1440) {
       throw new MachineRequestError(400, 'Auto-stop must be between 0 (off) and 1440 minutes.', 'The default, 15 minutes, suits most people.');
     }
+    const autoShelveDays = validAutoShelve(req.autoShelveDays);
     const diskSizeGb = Math.round(Number(req.diskSizeGb) || catalog.defaultDiskGb);
     if (diskSizeGb < catalog.minDiskGb || diskSizeGb > 2000) {
       throw new MachineRequestError(400, `Disk size must be between ${catalog.minDiskGb} and 2000 GB.`,
@@ -165,10 +179,10 @@ export class MachineService {
     const machineId = crypto.randomUUID();
     await query(
       `INSERT INTO machines (id, user_id, provider, region, instance_type, instance_id, status, cost_per_hour,
-                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, NOW())`,
+                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, NOW())`,
       [machineId, userId, req.provider, region.id, shape.id, `pending:${machineId}`, costPerHour, quality,
-       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine)]
+       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays]
     );
 
     // ---- 3. Create it in the background, narrating every step --------------
@@ -245,7 +259,7 @@ export class MachineService {
         await provider.startInstance(machine.instance_id);
         const status = await provider.getInstanceStatus(machine.instance_id);
         await setStatus(machineId, status.status === 'terminated' ? 'failed' : status.status, {
-          ip_address: status.ipAddress || null, last_started: new Date(), last_error: null, last_synced_at: new Date(),
+          ip_address: status.ipAddress || null, last_started: new Date(), last_error: null, last_synced_at: new Date(), stopped_at: null,
         });
         if (status.ipAddress && status.ipAddress !== machine.ip_address) {
           await op.warn(`The machine's public IP changed to ${status.ipAddress}. If Moonlight can't find it, add this new IP there.`);
@@ -282,8 +296,11 @@ export class MachineService {
           }
         }
         await provider.stopInstance(machine.instance_id);
-        await setStatus(machineId, 'stopped', { last_error: null, last_synced_at: new Date() });
-        await op.info('Compute billing has stopped. The disk is kept (a small monthly storage charge) so your games are still there next time.');
+        await setStatus(machineId, 'stopped', { last_error: null, last_synced_at: new Date(), stopped_at: new Date() });
+        const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+        const diskMonthly = (Number(machine.disk_size_gb) || catalog.defaultDiskGb) * catalog.diskPerGbMonth;
+        await op.info(`Compute billing has stopped. The ${machine.disk_size_gb || catalog.defaultDiskGb} GB disk is kept so your games are still there next time — about $${diskMonthly.toFixed(2)}/month while it exists. ` +
+          'Not playing for a while? "Shelve" it: snapshot + delete the disk, typically cutting that by 70–90%.');
         return { stopped: true };
       } catch (error) {
         await MachineService.resyncQuietly(userId, machine);
@@ -301,6 +318,27 @@ export class MachineService {
     if (neverCreated(machine)) {
       await query('DELETE FROM machines WHERE id = $1', [machineId]);
       return { operationId: null };
+    }
+
+    // Shelved → the machine only exists as its snapshot: delete that.
+    if (machine.status === 'shelved') {
+      const op = await Operation.start({ userId, provider: machine.provider, action: 'delete', machineId, title: `Delete shelved ${machine.instance_type} (${machine.region})` });
+      await setStatus(machineId, 'deleting');
+      op.runInBackground(async () => {
+        try {
+          if (machine.snapshot_id) {
+            await query('UPDATE machines SET snapshot_id = NULL, status = $2 WHERE id = $1', [machineId, 'deleting']);
+            await SnapshotService.deleteSnapshot(machine.snapshot_id, userId);
+          }
+          await query('DELETE FROM machines WHERE id = $1', [machineId]);
+          await op.info('The snapshot is deleted and the machine is gone for good. Nothing more will be billed for it.');
+          return { deleted: true };
+        } catch (error) {
+          await query('UPDATE machines SET snapshot_id = $2, status = $3 WHERE id = $1', [machineId, machine.snapshot_id, 'shelved']).catch(() => {});
+          throw error;
+        }
+      }, 'Shelved machine deleted.');
+      return { operationId: op.id };
     }
 
     const op = await Operation.start({ userId, provider: machine.provider, action: 'delete', machineId, title: `Delete ${machine.instance_type} in ${machine.region}` });
@@ -322,6 +360,169 @@ export class MachineService {
       }
     }, 'Machine deleted.');
     return { operationId: op.id };
+  }
+
+  // ==========================================================================
+  // Shelve / restore — cut the standing cost of a machine you aren't using
+  // ==========================================================================
+  //
+  //   Stopped  = no compute bill, but the whole DISK is billed every month
+  //              (e.g. 150 GB on Google ≈ $16/month), empty space included.
+  //   Shelved  = a SNAPSHOT of the disk is kept and the machine + disk are
+  //              deleted. Snapshots are billed only on the data actually
+  //              stored, at a lower per-GB price — typically 70–90% less.
+  //              Coming back takes a few minutes longer than Start (the
+  //              disk is rebuilt from the snapshot), with games, settings,
+  //              logins and Moonlight pairing intact.
+  //
+  // Safety: the disk is only deleted once the cloud reports the snapshot as
+  // complete. If that doesn't happen, nothing is deleted.
+
+  /** Snapshot the disk, then delete the machine and its disk. */
+  static async shelve(userId: string, machineId: string, reason: 'user' | 'auto' = 'user'): Promise<{ operationId: string }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    if (neverCreated(machine) || !['running', 'stopped'].includes(machine.status)) {
+      throw new MachineRequestError(409, `A ${machine.status} machine can't be shelved.`, 'Only running or stopped machines can be shelved. Use Sync if its status looks wrong.');
+    }
+    const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+    const diskGb = Number(machine.disk_size_gb) || catalog.defaultDiskGb;
+
+    const op = await Operation.start({
+      userId, provider: machine.provider, action: 'shelve', machineId,
+      title: `${reason === 'auto' ? 'Auto-shelve' : 'Shelve'} ${machine.instance_type} in ${machine.region}`,
+    });
+    await setStatus(machineId, 'shelving');
+    op.runInBackground(async () => {
+      let deleted = false;
+      try {
+        const provider = await providerFor(userId, machine.provider, op.reporter);
+        if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+        if (reason === 'auto') await op.info(`It has been stopped for ${machine.auto_shelve_days}+ days, so it is being shelved automatically (you chose this).`);
+        await op.info(`Today its ${diskGb} GB disk costs about $${(diskGb * catalog.diskPerGbMonth).toFixed(2)}/month even while stopped. Shelving keeps a snapshot instead.`);
+
+        // 1. Stopped disks give clean snapshots.
+        if (machine.status === 'running') {
+          await op.info('Stopping the machine first, so the snapshot is clean…');
+          await provider.stopInstance(machine.instance_id);
+        }
+
+        // 2. Snapshot, and wait until the cloud says it's complete.
+        await op.info('Taking the snapshot (games, settings and logins included)…');
+        const meta = await SnapshotService.createSnapshot({ machineId, userId, paths: ['/'], description: `Shelved ${machine.instance_type} (${machine.region})` });
+        const cloudSnapId = meta.snapshots[machine.provider].id;
+        const started = Date.now();
+        let info = await provider.getSnapshot(cloudSnapId);
+        while (info.state !== 'completed') {
+          if (info.state === 'failed') {
+            // A failed snapshot is useless: remove it (best effort) so it isn't billed or mistaken for a backup.
+            await query('UPDATE machines SET snapshot_id = NULL WHERE id = $1 AND snapshot_id = $2', [machineId, meta.id]);
+            await SnapshotService.deleteSnapshot(meta.id, userId).catch(() => undefined);
+            throw new FriendlyCloudError({ code: 'SNAPSHOT_FAILED', title: 'The snapshot failed at the cloud', explanation: 'Nothing was deleted: the machine is stopped with its disk intact.', fixes: ['Try Shelve again later, or just leave it stopped.'] });
+          }
+          if (Date.now() - started > 90 * 60_000) {
+            throw new FriendlyCloudError({ code: 'SNAPSHOT_SLOW', title: 'The snapshot is taking unusually long', explanation: 'To be safe nothing was deleted: the machine is stopped with its disk intact. The snapshot will finish on its own.', fixes: ['Try Shelve again in an hour — the finished snapshot makes the next attempt quick.', 'Or delete the extra snapshot on the Costs page if you decide to keep the machine as it is.'] });
+          }
+          await op.info(`Snapshot still being written by the cloud (${Math.round((Date.now() - started) / 60000)} min)…`);
+          await new Promise((r) => setTimeout(r, 20_000));
+          info = await provider.getSnapshot(cloudSnapId);
+        }
+        const storedGb = info.storedGb ?? null;
+        await query('UPDATE snapshots SET stored_gb = $1 WHERE id = $2', [storedGb, meta.id]);
+        await op.success(`Snapshot complete${storedGb ? ` — ${storedGb} GB of data actually stored` : ''}.`);
+
+        // 3. Now (and only now) delete the machine and its disk.
+        await op.info('Deleting the machine and its disk (the snapshot is kept)…');
+        await provider.terminateInstance(machine.instance_id);
+        deleted = true;
+        await setStatus(machineId, 'shelved', {
+          instance_id: `shelved:${machineId}`, ip_address: null, shelved_at: new Date(), stopped_at: null,
+          last_error: null, last_synced_at: new Date(),
+        });
+        const billedGb = storedGb ?? diskGb;
+        const shelfMonthly = billedGb * catalog.snapshotPerGbMonth;
+        await op.info(`Shelved. Standing cost now about $${shelfMonthly.toFixed(2)}/month${storedGb ? '' : ' at most (billed on the data stored, usually less)'}, ` +
+          `down from $${(diskGb * catalog.diskPerGbMonth).toFixed(2)}. Press Restore to play again — it takes a few minutes longer than Start.`);
+        return { shelved: true, storedGb };
+      } catch (error) {
+        if (!deleted) await MachineService.resyncQuietly(userId, machine);
+        throw error;
+      }
+    }, 'Machine shelved.');
+    return { operationId: op.id };
+  }
+
+  /**
+   * Bring a shelved machine back from its snapshot: same Sunshine login (so
+   * Moonlight stays paired), same auto-stop. Optionally in another region
+   * (clouds with restoreAnyRegion) or another size with the same GPU family.
+   */
+  static async restore(userId: string, machineId: string, opts: { region?: string; keepSnapshot?: boolean } = {}): Promise<{ operationId: string }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    if (machine.status !== 'shelved') throw new MachineRequestError(409, 'Only shelved machines can be restored.', 'Use Start for a stopped machine.');
+    const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+    const regionId = opts.region || machine.region;
+    const region = catalog.regions.find((r) => r.id === regionId);
+    if (!region) throw new MachineRequestError(400, `"${regionId}" isn't a ${catalog.label} region we launch in.`);
+    if (regionId !== machine.region && !catalog.restoreAnyRegion) {
+      throw new MachineRequestError(400, `${catalog.label} can only restore a snapshot in the region it was taken (${machine.region}).`, 'Restore it there, or launch a fresh machine in the new region.');
+    }
+    const shape = catalog.shapes.find((sh) => sh.id === machine.instance_type);
+    if (!shape) throw new MachineRequestError(409, `This machine's size (${machine.instance_type}) is no longer offered.`);
+    if (!region.gpus.includes(shape.gpuModel)) {
+      throw new MachineRequestError(400, `${shape.gpuModel} GPUs aren't offered in ${region.name}.`, `In ${region.name} you can use: ${region.gpus.join(', ')}.`);
+    }
+    const snap = machine.snapshot_id ? (await query('SELECT * FROM snapshots WHERE id = $1 AND user_id = $2', [machine.snapshot_id, userId])).rows[0] : null;
+    const cloudSnapId = snap?.snapshot_data?.[machine.provider]?.id || snap?.snapshot_provider_id;
+    if (!cloudSnapId) throw new MachineRequestError(409, 'This machine\'s snapshot record is missing.', 'Check the Costs page for its snapshot, or launch a fresh machine.');
+    let login: { username?: string; password?: string } = {};
+    try { login = decryptCredentials(userId, `sunshine:${machineId}`, machine.connection_secret); } catch { /* a fresh login is generated */ }
+
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'restore', machineId, title: `Restore ${shape.label} in ${region.name}` });
+    await setStatus(machineId, 'restoring');
+    op.runInBackground(async () => {
+      try {
+        const provider = await providerFor(userId, machine.provider, op.reporter);
+        if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+        if (regionId !== machine.region) await op.info(`Restoring in ${region.name} instead of ${machine.region} — your games come with it.`);
+        const result = await provider.restoreFromSnapshot(cloudSnapId, { region: regionId, instanceType: shape.id }, {
+          sunshineUsername: login.username, sunshinePassword: login.password,
+          autoStopMinutes: machine.auto_stop_minutes ?? 15, diskSizeGb: Number(machine.disk_size_gb) || undefined, spot: !!machine.spot,
+        });
+        const costPerHour = catalog.estimateHourly(shape.id, regionId, !!machine.spot) || Number(machine.cost_per_hour) || 0;
+        await setStatus(machineId, 'running', {
+          instance_id: result.instanceId, ip_address: result.ipAddress || null, region: regionId, cost_per_hour: costPerHour,
+          shelved_at: null, stopped_at: null, last_started: new Date(), last_error: null, last_synced_at: new Date(),
+        });
+        await op.success(`Machine is back${result.ipAddress ? ` at ${result.ipAddress}` : ''}. It runs its quick start-up check (a few minutes) before streaming.`);
+        if (result.ipAddress && result.ipAddress !== machine.ip_address) await op.info('Its IP address is new; Moonlight may need the new address (the pairing itself is kept).');
+        if (!opts.keepSnapshot) {
+          try {
+            await SnapshotService.deleteSnapshot(snap.id, userId);
+            await op.info('The snapshot was deleted — the machine\'s own disk now holds everything, so it would only have been a second bill.');
+          } catch (error) {
+            await op.warn('Couldn\'t delete the old snapshot; remove it on the Costs page to stop paying for it.', (error as Error).message);
+          }
+        } else {
+          await op.info('The snapshot is kept as a backup (it keeps a small monthly charge — delete it on the Costs page when you no longer need it).');
+        }
+        await op.info(`Billing: about $${costPerHour.toFixed(2)}/hour while running, plus the disk while it exists.`);
+        return { instanceId: result.instanceId, ipAddress: result.ipAddress };
+      } catch (error) {
+        await setStatus(machineId, 'shelved', { last_error: null }).catch(() => {});
+        throw error;
+      }
+    }, 'Machine restored.');
+    return { operationId: op.id };
+  }
+
+  /** Turn auto-shelve on (N days stopped) or off (null). */
+  static async setAutoShelve(userId: string, machineId: string, days: unknown): Promise<{ autoShelveDays: number | null }> {
+    await loadOwnedMachine(machineId, userId);
+    const value = validAutoShelve(days);
+    await query('UPDATE machines SET auto_shelve_days = $1 WHERE id = $2', [value, machineId]);
+    return { autoShelveDays: value };
   }
 
   /** Ask the cloud for the real state (e.g. after a change in the cloud console). */

@@ -43,6 +43,19 @@ export interface ProviderConfig {
 }
 
 /** Extra launch settings. */
+/**
+ * Restoring a SHELVED machine: keep its original Sunshine login (so the app's
+ * stored login and Moonlight's pairing still match), auto-stop and disk size.
+ * Omitted = the old behaviour (fresh random login, 150 GB, on-demand).
+ */
+export interface RestoreOptions {
+  sunshineUsername?: string;
+  sunshinePassword?: string;
+  autoStopMinutes?: number;
+  diskSizeGb?: number;
+  spot?: boolean;
+}
+
 export interface LaunchOptions {
   imageId: string;         // the disk template to boot from (for AWS, an AMI id)
   keyName: string;         // name of the SSH key pair allowed to log in
@@ -61,6 +74,8 @@ export interface SnapshotInfo {
   id: string;
   sizeGb: number;
   state: string;           // e.g. 'pending' while being created, 'completed' when ready
+  /** GB actually stored (what the cloud bills), where the cloud reports it. Usually far less than sizeGb. */
+  storedGb?: number;
 }
 
 export abstract class CloudProvider {
@@ -170,7 +185,8 @@ export abstract class CloudProvider {
    */
   abstract restoreFromSnapshot(
     snapshotId: string,
-    config: ProviderConfig
+    config: ProviderConfig,
+    options?: RestoreOptions
   ): Promise<{ instanceId: string; ipAddress: string }>;
 
   /**

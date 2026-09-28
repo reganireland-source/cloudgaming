@@ -181,5 +181,7 @@ export const GCP_CATALOG: ProviderCatalog = {
   shapes: GCP_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: BALANCED_DISK_PER_GB_MONTH,
+  snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
+  restoreAnyRegion: true,
   priceNote: 'Estimates from Google\'s list prices (±15%); excludes tax and discounts. Spot prices move daily.',
 };

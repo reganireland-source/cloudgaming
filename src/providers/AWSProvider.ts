@@ -62,7 +62,7 @@
 import crypto from 'crypto';
 import zlib from 'zlib';
 import AWS from 'aws-sdk';
-import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
+import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 import { AWS_CONSOLE, FriendlyCloudError, isAwsCapacityError, toFriendlyError } from './aws/errors';
 import {
@@ -714,6 +714,7 @@ export class AWSProvider extends CloudProvider {
       id: snapshotId,
       sizeGb: snap.VolumeSize || 0,
       state: state === 'completed' ? 'completed' : state === 'error' ? 'failed' : 'pending',
+      storedGb: Number((snap as any).FullSnapshotSizeInBytes) ? Math.round(Number((snap as any).FullSnapshotSizeInBytes) / 1e8) / 10 : undefined,
     };
   }
 
@@ -738,7 +739,7 @@ export class AWSProvider extends CloudProvider {
    * temporary image again (the snapshot itself is kept). If the snapshot is
    * in another region we first copy it there.
    */
-  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig): Promise<{ instanceId: string; ipAddress: string }> {
+  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig, opts: RestoreOptions = {}): Promise<{ instanceId: string; ipAddress: string }> {
     let { region: snapRegion, id: snapId } = this.splitId(snapshotId);
     const region = config.region || snapRegion;
 
@@ -778,10 +779,11 @@ export class AWSProvider extends CloudProvider {
       //    script runs again (cloud-init runs user data for every NEW
       //    machine), skips what's already installed, and sets the new login.
       const { instanceId, ipAddress } = await this.createMachine({ ...config, region }, {
-        spot: false,
-        diskSizeGb: sizeGb,
-        sunshineUsername: 'gamer',
-        sunshinePassword: crypto.randomBytes(12).toString('base64url'),
+        spot: !!opts.spot,
+        diskSizeGb: Math.max(sizeGb, opts.diskSizeGb || 0),
+        sunshineUsername: opts.sunshineUsername || 'gamer',
+        sunshinePassword: opts.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
+        autoStopMinutes: opts.autoStopMinutes,
         image: { imageId, rootDeviceName, label: `restore of ${snapId}` },
       });
       return { instanceId, ipAddress };

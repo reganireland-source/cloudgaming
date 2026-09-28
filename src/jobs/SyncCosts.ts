@@ -18,7 +18,9 @@
  * ============================================================================
  */
 
+import { MachineService } from '../services/MachineService';
 import { query } from '../config/database';
+import { expireStaleOperations } from '../services/OperationLog';
 import { providerFor } from '../services/CredentialService';
 import { CATALOGS, isProviderName } from '../providers/registry';
 import { CostService } from '../services/CostService';
@@ -37,7 +39,7 @@ export async function syncCostsJob() {
   try {
     // Get all active machines
     const machinesResult = await query(
-      `SELECT DISTINCT user_id, provider FROM machines WHERE status IN ('running', 'stopped')`
+      `SELECT DISTINCT user_id, provider FROM machines WHERE status IN ('running', 'stopped', 'shelved')`
     );
 
     // A Map is a key -> value collection. Only the KEYS matter here (a
@@ -89,19 +91,25 @@ async function syncCostsForUserProvider(userId: string, provider: string) {
   const catalog = CATALOGS[provider];
 
   const machinesResult = await query(
-    // Stopped machines too: their disk is still billed.
-    `SELECT id, status, cost_per_hour, disk_size_gb FROM machines
-     WHERE user_id = $1 AND provider = $2 AND status IN ('running', 'stopped')`,
+    // Stopped machines too: their disk is still billed. Shelved machines:
+    // their snapshot (actual stored GB when known, else the disk size).
+    `SELECT m.id, m.status, m.cost_per_hour, m.disk_size_gb, s.stored_gb FROM machines m
+     LEFT JOIN snapshots s ON s.id = m.snapshot_id
+     WHERE m.user_id = $1 AND m.provider = $2 AND m.status IN ('running', 'stopped', 'shelved')`,
     [userId, provider]
   );
 
   for (const machine of machinesResult.rows) {
+    const diskGb = Number(machine.disk_size_gb) || catalog.defaultDiskGb;
+    const monthly = machine.status === 'shelved'
+      ? (Number(machine.stored_gb) || diskGb) * catalog.snapshotPerGbMonth
+      : diskGb * catalog.diskPerGbMonth;
     await CostService.recordCosts(userId, {
       machineId: machine.id,
       provider,
       computeCost: machine.status === 'running' ? Number(machine.cost_per_hour) || 0 : 0,
       egressCost: 0,
-      storageCost: ((Number(machine.disk_size_gb) || catalog.defaultDiskGb) * catalog.diskPerGbMonth) / 730,
+      storageCost: monthly / 730,
     });
   }
 }
@@ -126,11 +134,20 @@ async function syncCostsForUserProvider(userId: string, provider: string) {
  */
 export async function checkIdleJob(_idleThresholdMinutes: number = 15) {
   try {
+    // Watchdog first: actions that ran far too long are marked failed and
+    // their machines released (see OperationLog.expireStaleOperations).
+    const expired = await expireStaleOperations();
+    if (expired) console.log(`[Job] Expired ${expired} stuck operation(s)`);
+
+    // Every machine not being changed by a live action — including ones left
+    // "starting"/"stopping" (e.g. Azure reports 'stopping' while it releases
+    // a VM that shut itself down; a lost action can leave any of these).
     const machines = await query(
       `SELECT m.id, m.user_id, m.provider, m.instance_id, m.status, m.ip_address
        FROM machines m
-       WHERE m.status IN ('running', 'stopped', 'unknown', 'missing')
+       WHERE m.status IN ('running', 'stopped', 'unknown', 'missing', 'starting', 'stopping', 'deleting', 'shelving', 'restoring')
          AND m.instance_id NOT LIKE 'pending:%'
+         AND m.instance_id NOT LIKE 'shelved:%'
          AND NOT EXISTS (SELECT 1 FROM cloud_operations o WHERE o.machine_id = m.id AND o.status = 'running')`
     );
     // One provider object per user+cloud (building one decrypts their keys).
@@ -147,7 +164,12 @@ export async function checkIdleJob(_idleThresholdMinutes: number = 15) {
           changed++;
           console.log(`[Job] Machine ${m.id}: ${m.status} -> ${newStatus} (reported by ${m.provider})`);
         }
-        await query('UPDATE machines SET status = $1, ip_address = $2, last_synced_at = NOW() WHERE id = $3', [newStatus, newIp, m.id]);
+        // stopped_at: when it (first) became stopped — e.g. by its own idle
+        // auto-stop — for the "stopped N days" advice and auto-shelve.
+        await query(
+          `UPDATE machines SET status = $1::varchar, ip_address = $2, last_synced_at = NOW(),
+             stopped_at = CASE WHEN $1::varchar = 'stopped' THEN COALESCE(stopped_at, NOW()) ELSE NULL END
+           WHERE id = $3`, [newStatus, newIp, m.id]);
       } catch (error) {
         // Missing/undecryptable keys or a cloud hiccup: leave the record as is.
         console.error(`[Job] Couldn't check machine ${m.id}:`, (error as Error).message);
@@ -156,6 +178,33 @@ export async function checkIdleJob(_idleThresholdMinutes: number = 15) {
     if (machines.rows.length) console.log(`[Job] Reconciled ${machines.rows.length} machines, ${changed} changed`);
   } catch (error) {
     console.error('[Job] Reconcile failed:', error);
+  }
+}
+
+/**
+ * Background job: auto-shelve (hourly). Machines whose owner turned
+ * auto-shelve on and that have been STOPPED for at least that many days get
+ * shelved (snapshot, then machine + disk deleted — see MachineService.shelve,
+ * which never deletes the disk unless the snapshot completed).
+ */
+export async function autoShelveJob() {
+  try {
+    const due = await query(
+      `SELECT id, user_id FROM machines
+       WHERE status = 'stopped' AND auto_shelve_days IS NOT NULL AND stopped_at IS NOT NULL
+         AND stopped_at < NOW() - make_interval(days => auto_shelve_days)
+         AND NOT EXISTS (SELECT 1 FROM cloud_operations o WHERE o.machine_id = machines.id AND o.status = 'running')`
+    );
+    for (const m of due.rows) {
+      try {
+        console.log(`[Job] Auto-shelving machine ${m.id}`);
+        await MachineService.shelve(m.user_id, m.id, 'auto');
+      } catch (error) {
+        console.error(`[Job] Couldn't auto-shelve ${m.id}:`, (error as Error).message);
+      }
+    }
+  } catch (error) {
+    console.error('[Job] Auto-shelve failed:', error);
   }
 }
 

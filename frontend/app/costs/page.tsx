@@ -11,6 +11,9 @@
  *   - Daily chart:                 /api/costs/daily — one bar per day,
  *                                  split into machine time and disk
  *   - By cloud:                    /api/costs/monthly
+ *   - Standing costs (#standing):  /api/inventory/standing — everything
+ *                                  billed while idle, with advice and
+ *                                  Shelve / delete-snapshot actions
  * Costs are the app's hourly ESTIMATES (the hourly cost job records each
  * machine's price while running, and its disk while it exists), not your
  * cloud bill. Data streamed to you isn't included yet.
@@ -24,6 +27,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import CloudLogo from '@/components/CloudLogo';
+import StandingCosts from '@/components/StandingCosts';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
@@ -48,6 +52,8 @@ export default function CostsPage() {
   const [monthly, setMonthly] = useState<Monthly | null>(null);
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // From the standing-costs section (live where clouds answer, estimated where they don't).
+  const [standing, setStanding] = useState<number | null>(null);
 
   const load = useCallback(() => {
     apiFetch<{ history: Day[] }>('/costs/daily?days=30').then((r) => setDays(r.history)).catch((e) => { setDays([]); setError(e?.message || 'Couldn’t load costs.'); });
@@ -98,11 +104,14 @@ export default function CostsPage() {
         <Tile label="This month so far" value={forecast ? money(forecast.totalSoFar) : '—'} sub={forecast ? `${forecast.daysElapsed} of ${forecast.daysInMonth} days` : 'estimated'} />
         <Tile label="Month projection" value={forecast ? money(forecast.projectedTotal) : '—'} sub={forecast ? `at ${money(forecast.dailyAverage)}/day so far` : 'at this month’s pace'} />
         <Tile label="Running now" value={t ? `${money(t.hourly)}/h` : '—'} sub={t ? `${t.runningMachines} machine${t.runningMachines === 1 ? '' : 's'} running` : 'live from your clouds'} />
-        <Tile label="Standing cost" value={t ? `${money(t.monthlyStanding)}/mo` : '—'} sub="disks, snapshots, IPs — billed even when stopped" />
+        <a href="#standing" className="block hover:opacity-90"><Tile label="Standing cost" value={standing != null ? `${money(standing)}/mo` : t ? `${money(t.monthlyStanding)}/mo` : '—'} sub="disks, snapshots, IPs — billed even when stopped · see below ↓" /></a>
       </div>
       {t && t.orphans > 0 && (
         <p className="text-xs text-neon-pink">⚠ {t.orphans} leftover resource{t.orphans === 1 ? '' : 's'} costing ≈{money(t.orphanMonthly)}/mo — see the <Link href="/map" className="underline">Map</Link>.</p>
       )}
+
+      {/* ---- Standing costs: the money spent while not playing ---- */}
+      <StandingCosts onTotal={setStanding} />
 
       {/* ---- Daily spend (single measure, stacked by what it's for) ---- */}
       <section className="rounded-lg border border-white/10 bg-white/[0.02] p-3 sm:p-4 space-y-2">

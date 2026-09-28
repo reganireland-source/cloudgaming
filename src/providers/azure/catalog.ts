@@ -175,6 +175,8 @@ export const AZURE_CATALOG: ProviderCatalog = {
   shapes: AZURE_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: PREMIUM_DISK_PER_GB_MONTH,
+  snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
+  restoreAnyRegion: false,
   priceNote:
     'Rough estimates from Azure\'s East US list prices × a region factor (±20%); excludes tax. ' +
     'Spot prices change constantly. Disks are billed by size tier rounded up (150 GB → 256 GB tier), even while stopped. ' +

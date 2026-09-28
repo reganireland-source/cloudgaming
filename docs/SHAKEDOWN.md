@@ -161,6 +161,38 @@ PUBG, Call of Duty…) are blocked on Linux. Check <https://www.protondb.com>.
 4. Done testing? **Delete** the machine, then confirm on the Map (and the
    GCP console → Compute Engine) that nothing is left billing.
 
+### Standing costs: shelve instead of leaving it stopped
+
+A stopped machine has no compute charge, but its **whole disk** is billed every
+month, empty space included (150 GB ≈ $16.50 on GCP, $14.40 AWS, $22.50 Azure,
+$6.40 Oracle). **Shelve** (Machines → a stopped machine) snapshots the disk and
+then deletes the machine and disk; snapshots bill only the data actually
+stored, typically **$1–5/month**. **Restore** rebuilds it (≈5–15 min plus a
+quick start-up check) with games, logins and Moonlight pairing kept; only the
+IP changes. On GCP and AWS you can restore in a **different region**, which is
+handy when travelling.
+
+- The disk is deleted **only after** the cloud confirms the snapshot is
+  complete. If the snapshot fails or stalls, nothing is deleted.
+- **Auto-shelve** (launch form, or each machine card) shelves a machine after
+  N days stopped. 7 days is the default for new machines.
+- **Costs → Standing costs** lists everything billed while idle, worst first:
+  leftovers (red), things that could be cheaper (amber, with one-click Shelve
+  or Delete snapshot), and things that are fine.
+
+**Test it once:** stop → Shelve → check the card says *shelved* and the
+standing cost dropped → Restore → Moonlight connects (new IP).
+
+### A machine stuck on "stopping" / "starting"
+
+The app re-reads every machine's real state from the cloud every 5 minutes,
+including ones mid-change, and gives up waiting on an action that runs far too
+long (30 min; shelve 150, restore 90). The Machines page also re-checks a
+machine automatically once it has been mid-change for 10+ minutes. **Sync**
+always works if you don't want to wait. (On Azure, a machine that shut itself
+down shows "stopping" for a few minutes while Azure releases it; that is
+what stops the billing.)
+
 ---
 
 ## 7. Optional second run: spot

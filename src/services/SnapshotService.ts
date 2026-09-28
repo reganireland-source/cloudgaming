@@ -343,11 +343,19 @@ export class SnapshotService {
       }
 
       const snapshot = snapshotResult.rows[0];
+      // A shelved machine lives ONLY in its snapshot: deleting it here would
+      // lose the machine without saying so. Delete the machine instead.
+      const shelved = await query(`SELECT 1 FROM machines WHERE snapshot_id = $1 AND status IN ('shelved', 'shelving', 'restoring')`, [snapshotId]);
+      if (shelved.rows.length) {
+        throw new Error('This snapshot IS a shelved machine. Delete the machine on the Machines page (that removes the snapshot too), or Restore it first.');
+      }
       // (JSONB: already an object.)
       const snapshots = snapshot.snapshot_data || {}; // pg already parses JSONB into an object
 
-      // Each copy is deleted in its own try/catch, so one failure doesn't
-      // stop the others from being deleted. Failures are only logged.
+      // Every copy is attempted; if any fails, our record is KEPT so the
+      // still-billed copy stays visible (and can be retried) instead of
+      // silently becoming an untracked cost.
+      const failures: string[] = [];
       for (const [provider, data] of Object.entries(snapshots)) {
         try {
           const cloudProvider = await providerFor(userId, provider);
@@ -355,12 +363,12 @@ export class SnapshotService {
           console.log(`[SnapshotService] Deleted snapshot from ${provider}`);
         } catch (error) {
           console.error(`Failed to delete snapshot from ${provider}:`, error);
+          failures.push(`${provider}: ${(error as Error).message}`);
         }
       }
+      if (failures.length) throw new Error(`Couldn't delete every copy (${failures.join('; ')}). Nothing was forgotten — try again.`);
 
-      // Remove our record. Note: this happens even if a cloud deletion
-      // failed above — that copy would then be orphaned (still billed, but
-      // no longer tracked here).
+      await query('UPDATE machines SET snapshot_id = NULL WHERE snapshot_id = $1', [snapshotId]);
       await query('DELETE FROM snapshots WHERE id = $1', [snapshotId]);
       console.log(`[SnapshotService] Snapshot metadata deleted`);
     } catch (error) {

@@ -35,7 +35,7 @@
  * ============================================================================
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { RequireAuth } from '@/components/AuthProvider';
 import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
@@ -62,7 +62,27 @@ interface Machine {
   created_at: string;
   last_started: string | null;
   last_synced_at: string | null;
+  shelved_at: string | null;
+  stopped_at: string | null;
+  auto_shelve_days: number | null;
+  standing: Standing | null;
 }
+
+/** Monthly cost while not playing (see standingFor in src/api/routes/machines.ts). */
+interface Standing {
+  diskGb: number;
+  diskMonthly: number;                     // the disk, billed while it exists (stopped too)
+  shelfMonthly: number | null;             // a shelved machine's snapshot
+  shelfExact: boolean;                     // shelfMonthly from the GB actually stored
+  storedGb: number | null;
+  shelfEstimate: { low: number; high: number }; // if shelved now: fresh install … full disk
+  restoreAnyRegion: boolean;
+}
+type Region = { id: string; name: string; gpus: string[] };
+type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete';
+const AUTO_SHELVE = [1, 3, 7, 14, 30];
+const money = (n: number) => `$${n.toFixed(2)}`;
+const daysSince = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null);
 
 interface OperationSummary {
   id: string;
@@ -78,7 +98,7 @@ interface OperationSummary {
 }
 
 const PROVIDER_LABEL: Record<string, string> = { gcp: 'Google Cloud', aws: 'AWS', azure: 'Azure', oracle: 'Oracle' };
-const BUSY = ['creating', 'starting', 'stopping', 'deleting'];
+const BUSY = ['creating', 'starting', 'stopping', 'deleting', 'shelving', 'restoring'];
 
 /** Colour + wording for each machine state. */
 function statusStyle(status: string): { text: string; cls: string; hint: string } {
@@ -89,6 +109,9 @@ function statusStyle(status: string): { text: string; cls: string; hint: string 
     case 'starting': return { text: 'starting', cls: 'border-neon-amber/60 text-neon-amber', hint: 'Powering on…' };
     case 'stopping': return { text: 'stopping', cls: 'border-neon-amber/60 text-neon-amber', hint: 'Powering off…' };
     case 'deleting': return { text: 'deleting', cls: 'border-neon-amber/60 text-neon-amber', hint: 'Being destroyed…' };
+    case 'shelved': return { text: 'shelved', cls: 'border-neon-purple/60 text-neon-purple', hint: 'Machine and disk deleted; your games are kept in a snapshot. Restore to play.' };
+    case 'shelving': return { text: 'shelving', cls: 'border-neon-amber/60 text-neon-amber', hint: 'Snapshotting the disk, then deleting the machine…' };
+    case 'restoring': return { text: 'restoring', cls: 'border-neon-amber/60 text-neon-amber', hint: 'Rebuilding the machine from its snapshot…' };
     case 'failed': return { text: 'failed', cls: 'border-neon-pink/60 text-neon-pink', hint: 'The last action failed — see below.' };
     case 'missing': return { text: 'missing', cls: 'border-neon-pink/60 text-neon-pink', hint: 'The cloud says it no longer exists.' };
     default: return { text: status, cls: 'border-white/20 text-slate-400', hint: 'State unknown — press Sync.' };
@@ -104,22 +127,62 @@ function timeAgo(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+/**
+ * Mid-change (starting/stopping…) with no action running here, and not
+ * confirmed with the cloud for 10+ minutes: something was lost (a redeploy,
+ * or the cloud is still finishing). The page re-checks such machines itself.
+ */
+function isStuck(m: Machine, activeOp: string | null): boolean {
+  if (activeOp || !['starting', 'stopping', 'deleting', 'shelving', 'restoring', 'unknown'].includes(m.status)) return false;
+  if (/^(pending|shelved):/.test(m.instance_id)) return false;
+  const last = new Date(m.last_synced_at || m.created_at).getTime();
+  return Date.now() - last > 10 * 60_000;
+}
+
+/** "Auto-shelve after N days stopped" — off by default for existing machines. */
+function AutoShelvePicker({ value, saving, onChange, inline }: { value: number | null; saving: boolean; onChange: (d: number | null) => void; inline?: boolean }) {
+  return (
+    <label className={`${inline ? 'inline-flex' : 'flex'} flex-wrap items-center gap-1.5 text-slate-400`}>
+      <span>Auto-shelve after</span>
+      <select value={value ?? 0} disabled={saving} onChange={(e) => onChange(Number(e.target.value) || null)}
+        className="input-neon px-1.5 py-0.5 text-xs">
+        <option value={0}>off</option>
+        {AUTO_SHELVE.map((d) => <option key={d} value={d}>{d} day{d === 1 ? '' : 's'} stopped</option>)}
+      </select>
+      {saving && <span className="text-neon-cyan animate-pulse">saving…</span>}
+    </label>
+  );
+}
+
 function MachineCard({
-  machine, activeOp, onAction, onOpFinished,
+  machine, activeOp, onAction, onOpFinished, regions,
 }: {
   machine: Machine;
   activeOp: string | null;
-  onAction: (machine: Machine, action: 'start' | 'stop' | 'stop-snapshot' | 'sync' | 'delete') => void;
+  onAction: (machine: Machine, action: Action, body?: Record<string, unknown>) => void;
   onOpFinished: () => void;
+  regions: Region[];
 }) {
   const [tab, setTab] = useState<'connect' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
-  const [confirm, setConfirm] = useState<'stop' | 'delete' | null>(null);
+  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | null>(null);
+  const [restoreRegion, setRestoreRegion] = useState(machine.region);
+  const [keepSnapshot, setKeepSnapshot] = useState(false);
+  const [autoShelve, setAutoShelve] = useState<number | null>(machine.auto_shelve_days);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const sd = machine.standing;
+  const changeAutoShelve = async (days: number | null) => {
+    setAutoSaving(true);
+    try { const r = await apiFetch<{ autoShelveDays: number | null }>(`/machines/${machine.id}/auto-shelve`, { method: 'POST', body: { days } }); setAutoShelve(r.autoShelveDays); }
+    catch { /* keep the old value */ } finally { setAutoSaving(false); }
+  };
   const [stage, setStage] = useState<ConnectionInfo['setup']['current']>(null);
   const [history, setHistory] = useState<OperationSummary[] | null>(null);
   const [openOp, setOpenOp] = useState<string | null>(null);
   const st = statusStyle(machine.status);
   const busy = BUSY.includes(machine.status) || !!activeOp;
-  const [zone, name] = machine.instance_id.startsWith('pending:') ? ['', ''] : machine.instance_id.split('/');
+  const stale = isStuck(machine, activeOp);
+  const placeholderId = /^(pending|shelved):/.test(machine.instance_id);
+  const [zone, name] = placeholderId ? ['', ''] : machine.instance_id.split('/');
 
   useEffect(() => {
     if (tab !== 'activity') return;
@@ -148,41 +211,136 @@ function MachineCard({
           </p>
         </div>
         <div className="flex items-center gap-6 text-xs">
-          <div><p className="label">Cost</p><p className="text-neon-lime tabular-nums">≈${machine.cost_per_hour.toFixed(2)}/h</p></div>
+          <div>
+            <p className="label">{machine.status === 'shelved' ? 'Restored cost' : 'Cost'}</p>
+            <p className={`tabular-nums ${machine.status === 'running' ? 'text-neon-lime' : 'text-slate-400'}`}>≈{money(machine.cost_per_hour)}/h</p>
+          </div>
+          {sd && (
+            <div title="Billed every month whether or not you play">
+              <p className="label">Standing</p>
+              <p className="tabular-nums text-slate-200">
+                {machine.status === 'shelved' ? `${sd.shelfExact ? '' : '≤'}${money(sd.shelfMonthly || 0)}/mo` : ['failed', 'missing'].includes(machine.status) || placeholderId ? '—' : `${money(sd.diskMonthly)}/mo`}
+              </p>
+            </div>
+          )}
           <div><p className="label">IP</p><p className="font-mono text-slate-200">{machine.ip_address || '—'}</p></div>
         </div>
         {/* ---- Actions that make sense for this state ---- */}
         <div className="flex flex-wrap gap-2">
           {machine.status === 'stopped' && (
-            <button type="button" disabled={busy} onClick={() => onAction(machine, 'start')} className="btn-neon-lime text-xs disabled:opacity-40">Start</button>
+            <>
+              <button type="button" disabled={busy} onClick={() => onAction(machine, 'start')} className="btn-neon-lime text-xs disabled:opacity-40">Start</button>
+              <button type="button" disabled={busy} onClick={() => setConfirm('shelve')} className="btn-neon text-xs disabled:opacity-40" title="Snapshot, then delete the machine and disk — much cheaper to keep">Shelve</button>
+            </>
+          )}
+          {machine.status === 'shelved' && (
+            <button type="button" disabled={busy} onClick={() => setConfirm('restore')} className="btn-neon-lime text-xs disabled:opacity-40">Restore</button>
           )}
           {machine.status === 'running' && (
             <button type="button" disabled={busy} onClick={() => setConfirm('stop')} className="btn-neon-pink text-xs disabled:opacity-40">Stop</button>
           )}
-          {!machine.instance_id.startsWith('pending:') && (
-            <button type="button" disabled={busy} onClick={() => onAction(machine, 'sync')} className="btn-neon text-xs disabled:opacity-40" title="Ask the cloud for the real state">Sync</button>
+          {!placeholderId && (
+            // Sync only reads the state, so it stays usable when a machine looks stuck mid-change.
+            <button type="button" disabled={!!activeOp} onClick={() => onAction(machine, 'sync')} className="btn-neon text-xs disabled:opacity-40" title="Ask the cloud for the real state">Sync</button>
           )}
           <button type="button" disabled={busy} onClick={() => setConfirm('delete')} className="text-xs border border-red-600/50 text-red-400 hover:border-red-500 rounded px-3 py-1.5 disabled:opacity-40">Delete</button>
         </div>
       </div>
 
+      {/* ---- Stuck mid-change with nothing running? Say so (the page also re-checks by itself). ---- */}
+      {stale && (
+        <p className="mt-3 rounded border border-neon-amber/30 bg-neon-amber/[0.04] px-3 py-2 text-xs text-neon-amber">
+          ! Still “{machine.status}” and last confirmed with the cloud {timeAgo(machine.last_synced_at || machine.created_at)} — longer than this should take.
+          Re-checking with the cloud automatically; press <strong>Sync</strong> to do it now. If Sync says it is stopped or running, you&apos;re all set.
+        </p>
+      )}
+
+      {/* ---- Standing cost: what this machine costs while you aren't playing ---- */}
+      {sd && machine.status === 'stopped' && (
+        <div className="mt-3 rounded border border-neon-amber/25 bg-neon-amber/[0.04] px-3 py-2 text-xs text-slate-300 space-y-1.5">
+          <p>
+            <span className="text-neon-amber">Stopped{daysSince(machine.stopped_at) ? ` ${daysSince(machine.stopped_at)} day${daysSince(machine.stopped_at) === 1 ? '' : 's'}` : ''}:</span>{' '}
+            no compute charge, but its {sd.diskGb} GB disk costs <span className="text-slate-100 tabular-nums">{money(sd.diskMonthly)}/month</span>, empty space included.
+            Shelved it would be about <span className="text-slate-100 tabular-nums">{money(sd.shelfEstimate.low)}–{money(sd.shelfEstimate.high)}/month</span>{' '}
+            (snapshots bill only the data stored: {money(sd.shelfEstimate.low)} for a fresh install, {money(sd.shelfEstimate.high)} if the disk is full).
+          </p>
+          <AutoShelvePicker value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} />
+        </div>
+      )}
+      {sd && machine.status === 'running' && (
+        <p className="mt-2 text-[0.7rem] text-slate-500">
+          When you stop, the {sd.diskGb} GB disk keeps costing {money(sd.diskMonthly)}/month; shelving cuts that to ≈{money(sd.shelfEstimate.low)}–{money(sd.shelfEstimate.high)}.{' '}
+          <AutoShelvePicker value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} inline />
+        </p>
+      )}
+      {sd && machine.status === 'shelved' && (
+        <div className="mt-3 rounded border border-neon-purple/30 bg-neon-purple/[0.04] px-3 py-2 text-xs text-slate-300">
+          Shelved {machine.shelved_at ? timeAgo(machine.shelved_at) : ''}: only its snapshot is billed —{' '}
+          <span className="text-slate-100 tabular-nums">{sd.shelfExact ? '' : 'at most '}{money(sd.shelfMonthly || 0)}/month</span>
+          {sd.storedGb ? <> for {sd.storedGb} GB of data</> : <> (billed on the data stored, usually less)</>}, instead of {money(sd.diskMonthly)} for the disk.
+          Restore brings it back with your games, settings, logins and Moonlight pairing.
+        </div>
+      )}
+
       {/* ---- Confirmations ---- */}
       {confirm === 'stop' && (
         <div className="mt-3 rounded border border-neon-pink/30 p-3 text-xs text-slate-300 space-y-2">
-          <p>Stop this machine? Compute billing stops; the disk (and your games) are kept. Anyone streaming will be disconnected.</p>
+          <p>Stop this machine? Compute billing stops; the disk (and your games) are kept{sd ? ` — about ${money(sd.diskMonthly)}/month` : ''}. Anyone streaming will be disconnected.</p>
+          <p className="text-slate-400">Not playing for a week or more? <strong className="text-slate-200">Stop &amp; shelve</strong> instead: it snapshots the disk and deletes it, so it costs {sd ? `≈${money(sd.shelfEstimate.low)}–${money(sd.shelfEstimate.high)}` : 'far less'}/month until you restore.</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-neon-pink text-xs" onClick={() => { setConfirm(null); onAction(machine, 'stop'); }}>Stop</button>
-            <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'stop-snapshot'); }}>Snapshot, then stop</button>
+            <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'stop-shelve'); }}>Stop &amp; shelve</button>
+            <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {confirm === 'shelve' && (
+        <div className="mt-3 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
+          <p><strong className="text-slate-100">Shelve this machine?</strong></p>
+          <ol className="list-decimal pl-4 space-y-0.5">
+            <li>The disk is snapshotted (a few minutes; the first snapshot of a big disk can take up to ~30).</li>
+            <li>Only once the cloud confirms the snapshot is complete, the machine and its disk are deleted. If anything goes wrong, nothing is deleted.</li>
+            <li>Standing cost drops from {sd ? money(sd.diskMonthly) : 'the disk'}/month to ≈{sd ? `${money(sd.shelfEstimate.low)}–${money(sd.shelfEstimate.high)}` : 'a fraction'}/month.</li>
+          </ol>
+          <p className="text-slate-400">To play again, press Restore: it rebuilds the disk from the snapshot, which takes several minutes longer than Start. Games, settings, logins and Moonlight pairing are kept; the IP address changes.</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'shelve'); }}>Shelve it</button>
+            <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {confirm === 'restore' && (
+        <div className="mt-3 rounded border border-neon-lime/30 p-3 text-xs text-slate-300 space-y-2">
+          <p><strong className="text-slate-100">Restore this machine?</strong> A new machine is built from the snapshot (typically 5–15 minutes, then its quick start-up check). Billing then resumes at ≈{money(machine.cost_per_hour)}/hour while running, plus the disk.</p>
+          {sd?.restoreAnyRegion && regions.length > 0 ? (
+            <label className="block">
+              <span className="text-slate-400">Region — this cloud can restore your games anywhere, handy when you travel:</span>
+              <select value={restoreRegion} onChange={(e) => setRestoreRegion(e.target.value)} className="input-neon w-full mt-1 px-2 py-1.5">
+                {regions.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.id}){r.id === machine.region ? ' · where it was' : ''}</option>)}
+              </select>
+            </label>
+          ) : <p className="text-slate-400">It comes back in {machine.region} (this cloud restores snapshots only where they were taken).</p>}
+          <label className="flex items-start gap-2">
+            <input type="checkbox" checked={keepSnapshot} onChange={(e) => setKeepSnapshot(e.target.checked)} className="mt-0.5" />
+            <span>Keep the snapshot as a backup afterwards <span className="text-slate-500">(off = deleted once the machine is back, so you don&apos;t pay twice; {sd?.shelfMonthly ? `≈${money(sd.shelfMonthly)}/month` : 'a small monthly charge'} if kept)</span></span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-neon-lime text-xs" onClick={() => { setConfirm(null); onAction(machine, 'restore', { region: restoreRegion, keepSnapshot }); }}>Restore</button>
             <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
           </div>
         </div>
       )}
       {confirm === 'delete' && (
         <div className="mt-3 rounded border border-red-600/40 p-3 text-xs text-slate-300 space-y-2">
-          <p>
-            <strong className="text-red-400">Delete permanently?</strong> The machine AND its disk (installed games, saves not in the cloud) are destroyed
-            at {PROVIDER_LABEL[machine.provider]}. This can&apos;t be undone. Snapshots you took are kept.
-          </p>
+          {machine.status === 'shelved' ? (
+            <p><strong className="text-red-400">Delete permanently?</strong> Its snapshot — the only copy of its installed games — is deleted at {PROVIDER_LABEL[machine.provider]}, and billing for it stops. This can&apos;t be undone.</p>
+          ) : (
+            <p>
+              <strong className="text-red-400">Delete permanently?</strong> The machine AND its disk (installed games, saves not in the cloud) are destroyed
+              at {PROVIDER_LABEL[machine.provider]}. This can&apos;t be undone. Snapshots you took are kept (see Costs → Standing costs).
+              {machine.status === 'stopped' && <> Want to keep your games cheaply instead? <strong className="text-slate-200">Shelve</strong> it.</>}
+            </p>
+          )}
           <div className="flex gap-2">
             <button type="button" className="text-xs border border-red-600 text-red-300 rounded px-3 py-1.5 hover:bg-red-950/40" onClick={() => { setConfirm(null); onAction(machine, 'delete'); }}>Yes, delete it</button>
             <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
@@ -215,7 +373,9 @@ function MachineCard({
       </div>
       {tab === 'connect' && (
         <div className="pt-4">
-          {['running', 'stopped', 'starting'].includes(machine.status)
+          {machine.status === 'shelved'
+            ? <p className="text-xs text-slate-500">Shelved — restore it to connect. Moonlight&apos;s pairing is kept; only the IP address changes.</p>
+            : ['running', 'stopped', 'starting'].includes(machine.status)
             ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} />
             : <p className="text-xs text-slate-500">Connection details appear once the machine exists and is running.</p>}
         </div>
@@ -255,6 +415,19 @@ function MachinesPageInner() {
   const [actionError, setActionError] = useState<{ machineId: string; error: ApiError } | null>(null);
   const [recent, setRecent] = useState<OperationSummary[]>([]);
   const [showPlatform, setShowPlatform] = useState(false);
+  // Regions per cloud, for "restore in another region" (clouds that allow it).
+  const [regionsBy, setRegionsBy] = useState<Record<string, Region[]>>({});
+  const [gpuOf, setGpuOf] = useState<Record<string, string>>({});
+  // Regions this machine's GPU is offered in.
+  const regionsFor = (m: Machine) => (regionsBy[m.provider] || []).filter((r) => !gpuOf[`${m.provider}:${m.instance_type}`] || r.gpus.includes(gpuOf[`${m.provider}:${m.instance_type}`]));
+  useEffect(() => {
+    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: Array<{ id: string; gpuModel: string }> }> }>('/machines/options')
+      .then((o) => {
+        setRegionsBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.regions])));
+        setGpuOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh.gpuModel]))));
+      })
+      .catch(() => undefined);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -284,12 +457,14 @@ function MachinesPageInner() {
     return () => clearInterval(timer);
   }, [load, anyBusy]);
 
-  const runAction = async (machine: Machine, action: 'start' | 'stop' | 'stop-snapshot' | 'sync' | 'delete') => {
+  const runAction = async (machine: Machine, action: Action, body: Record<string, unknown> = {}) => {
     setActionError(null);
     try {
+      // "Stop & shelve" is just Shelve: it stops the machine first by itself.
+      const path = action === 'stop-shelve' ? 'shelve' : action;
       const res = await apiFetch<{ operationId: string | null }>(
-        action === 'delete' ? `/machines/${machine.id}` : `/machines/${machine.id}/${action === 'stop-snapshot' ? 'stop' : action}`,
-        { method: action === 'delete' ? 'DELETE' : 'POST', body: action === 'stop-snapshot' ? { snapshot: true } : action === 'delete' ? undefined : {} }
+        action === 'delete' ? `/machines/${machine.id}` : `/machines/${machine.id}/${path}`,
+        { method: action === 'delete' ? 'DELETE' : 'POST', body: action === 'delete' ? undefined : body }
       );
       if (res.operationId) setActiveOps((ops) => ({ ...ops, [machine.id]: res.operationId! }));
       load();
@@ -297,6 +472,18 @@ function MachinesPageInner() {
       setActionError({ machineId: machine.id, error: e as ApiError });
     }
   };
+
+  // Auto-poll: a machine stuck mid-change gets one automatic Sync per page
+  // view (the backend's 5-minute status check also catches it).
+  const autoSynced = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const m of machines || []) {
+      if (isStuck(m, activeOps[m.id] || null) && !autoSynced.current.has(m.id)) {
+        autoSynced.current.add(m.id);
+        runAction(m, 'sync');
+      }
+    }
+  }, [machines]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const finished = (machineId: string) => {
     // Leave the finished log visible a moment, then clear it and refresh.
@@ -307,7 +494,7 @@ function MachinesPageInner() {
   const running = (machines || []).filter((m) => m.status === 'running');
   // Status first, then newest first. A failed launch with an active
   // operation (e.g. being retried or deleted) stays with the live ones.
-  const RANK: Record<string, number> = { running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, stopped: 2 };
+  const RANK: Record<string, number> = { running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, shelving: 1, restoring: 1, stopped: 2, shelved: 3 };
   const isDead = (m: Machine) => ['failed', 'missing'].includes(m.status) && !activeOps[m.id];
   const byRank = (a: Machine, b: Machine) =>
     (RANK[a.status] ?? 3) - (RANK[b.status] ?? 3) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -316,6 +503,12 @@ function MachinesPageInner() {
     failed: (machines || []).filter(isDead).sort(byRank),
   };
   const hourly = running.reduce((sum, m) => sum + m.cost_per_hour, 0);
+  // Billed every month whether or not you play: disks of existing machines, snapshots of shelved ones.
+  const standing = (machines || []).reduce((sum, m) => sum + (!m.standing ? 0
+    : m.status === 'shelved' ? m.standing.shelfMonthly || 0
+    : ['running', 'stopped', 'starting', 'stopping', 'unknown'].includes(m.status) && !/^(pending|shelved):/.test(m.instance_id) ? m.standing.diskMonthly : 0), 0);
+  const idleDisks = (machines || []).filter((m) => m.status === 'stopped' && m.standing);
+  const couldSave = idleDisks.reduce((s, m) => s + m.standing!.diskMonthly - m.standing!.shelfEstimate.high, 0);
 
   return (
     <div className="space-y-6">
@@ -325,7 +518,13 @@ function MachinesPageInner() {
           <p className="text-sm text-slate-400">
             {machines ? `${machines.length} machine${machines.length === 1 ? '' : 's'} · ${running.length} running` : 'Loading…'}
             {running.length > 0 && <> · <span className="text-neon-lime tabular-nums">≈${hourly.toFixed(2)}/hour</span> right now</>}
+            {standing > 0 && <> · standing <Link href="/costs#standing" className="text-slate-200 tabular-nums hover:underline">≈{money(standing)}/month</Link></>}
           </p>
+          {couldSave > 1 && (
+            <p className="text-xs text-neon-amber mt-1">
+              {idleDisks.length} stopped machine{idleDisks.length === 1 ? '' : 's'} keep{idleDisks.length === 1 ? 's' : ''} a full disk billed. Shelving would save at least {money(couldSave)}/month — see <Link href="/costs#standing" className="underline">Standing costs</Link>.
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => setShowPlatform((v) => !v)} className="btn-neon text-xs">{showPlatform ? 'Hide' : 'How it works'}</button>
@@ -369,6 +568,7 @@ function MachinesPageInner() {
             activeOp={activeOps[m.id] || null}
             onAction={runAction}
             onOpFinished={() => finished(m.id)}
+            regions={regionsFor(m)}
           />
         ))}
       </div>
@@ -385,6 +585,7 @@ function MachinesPageInner() {
                 activeOp={activeOps[m.id] || null}
                 onAction={runAction}
                 onOpFinished={() => finished(m.id)}
+                regions={regionsFor(m)}
               />
             ))}
           </div>

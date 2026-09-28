@@ -152,6 +152,8 @@ export const ORACLE_CATALOG: ProviderCatalog = {
   shapes: ORACLE_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: BOOT_VOLUME_PER_GB_MONTH,
+  snapshotPerGbMonth: BACKUP_PER_GB_MONTH,
+  restoreAnyRegion: false,
   priceNote:
     'Approximate Oracle list prices (same in every region; GPU price includes CPU and memory), not fetched live. ' +
     'First 10 TB/month of internet egress is free, so streaming data is usually $0. ' +

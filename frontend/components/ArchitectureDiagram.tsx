@@ -38,6 +38,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiUrl } from '@/lib/api';
+import CloudLogo from './CloudLogo';
 
 type Health = 'ok' | 'bad' | 'busy' | 'idle' | 'unknown';
 
@@ -203,24 +204,70 @@ const DOT: Record<Health, string> = {
   unknown: 'bg-slate-700',
 };
 
+// ---------------------------------------------------------------------------
+// Icons — architecture-diagram style (stroke, 24×24), one per component type.
+// The cloud's control plane uses that cloud's own logo.
+// ---------------------------------------------------------------------------
+type IconName = 'browser' | 'moonlight' | 'vercel' | 'container' | 'database' | 'account' | 'network' | 'server' | 'vm' | 'gpu' | 'sunshine' | 'disk';
+const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  // Browser window: title bar with three dots, address bar.
+  browser: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 8.5h18" /><circle cx="6" cy="6.3" r=".6" fill="currentColor" /><circle cx="8" cy="6.3" r=".6" fill="currentColor" /><path d="M6 11.5h12" opacity=".5" /><path d="M6 14.5h8M6 17h5" opacity=".35" /></>,
+  // Moonlight: its crescent moon, on a screen.
+  moonlight: <><rect x="2.5" y="4" width="19" height="13" rx="1.5" /><path d="M9 20h6M12 17v3" /><path d="M13.6 7.4a3.6 3.6 0 1 0 2.8 5.2 3 3 0 0 1-2.8-5.2z" fill="currentColor" stroke="none" /></>,
+  // Vercel: the triangle.
+  vercel: <path d="M12 4.5 20.5 19h-17z" fill="currentColor" stroke="none" />,
+  // Container: a box of stacked layers (an app image running on a platform).
+  container: <><path d="M12 3 20 7v10l-8 4-8-4V7z" /><path d="M4 7l8 4 8-4M12 11v10" /><path d="M8 5l8 4" opacity=".45" /></>,
+  // Database: cylinder.
+  database: <><ellipse cx="12" cy="5.5" rx="7" ry="2.5" /><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13" /><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" /></>,
+  // Account / resource group: a dashed boundary with a folder tab.
+  account: <><path d="M3 7.5V18a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18V9a1.5 1.5 0 0 0-1.5-1.5H11L9 5H4.5A1.5 1.5 0 0 0 3 6.5z" /><rect x="7" y="11" width="10" height="5" rx=".8" strokeDasharray="1.6 1.4" /></>,
+  // Network + firewall: shield over a globe grid.
+  network: <><path d="M12 3 19.5 6v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z" /><circle cx="12" cy="11.5" r="3.6" /><path d="M8.4 11.5h7.2M12 7.9c1.2 1.1 1.2 6.1 0 7.2M12 7.9c-1.2 1.1-1.2 6.1 0 7.2" /></>,
+  // Physical host: a server rack.
+  server: <><rect x="4" y="3.5" width="16" height="5.5" rx="1" /><rect x="4" y="9.25" width="16" height="5.5" rx="1" /><rect x="4" y="15" width="16" height="5.5" rx="1" /><path d="M7 6.25h.01M7 12h.01M7 17.75h.01" strokeWidth="2.2" /><path d="M12 6.25h5M12 12h5M12 17.75h5" opacity=".5" /></>,
+  // Virtual machine: a window drawn inside a dashed (virtual) chassis.
+  vm: <><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="2.2 1.6" /><rect x="6.5" y="6.5" width="11" height="8" rx="1" /><path d="M9.5 17.5h5" /></>,
+  // GPU: a graphics card — shroud with two fans, PCIe fingers, bracket.
+  gpu: <><rect x="2.5" y="6" width="17" height="10" rx="1.2" /><circle cx="7.5" cy="11" r="2.6" /><circle cx="14.5" cy="11" r="2.6" /><path d="M7.5 8.4v5.2M4.9 11h5.2M14.5 8.4v5.2M11.9 11h5.2" opacity=".45" /><path d="M6 16v2.5h8V16" /><path d="M19.5 7v8h2" /></>,
+  // Sunshine (streaming host): its sun, with a stream signal.
+  sunshine: <><circle cx="12" cy="12" r="3.8" /><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6" /></>,
+  // Disk: an SSD/drive with a platter hint and activity light.
+  disk: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="12" cy="11" r="3.2" /><circle cx="12" cy="11" r=".7" fill="currentColor" /><path d="M6 16.5h4" opacity=".5" /><path d="M17.5 16.5h.01" strokeWidth="2.2" /></>,
+};
+
+function NodeIcon({ icon, cloud }: { icon: IconName | 'cloud'; cloud?: string }) {
+  return (
+    <span aria-hidden className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-md border border-neon-cyan/25 bg-neon-cyan/[0.06] text-neon-cyan">
+      {icon === 'cloud'
+        ? <CloudLogo provider={cloud || 'gcp'} size={22} />
+        : <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{ICON_PATHS[icon]}</svg>}
+    </span>
+  );
+}
+
 function Node({
-  id, label, sub, health, active, onSelect, className = '',
+  id, label, sub, health, active, onSelect, className = '', icon, cloud,
 }: {
   id: string; label: string; sub?: string; health: Health; active: boolean; onSelect: (id: string) => void; className?: string;
+  icon?: IconName | 'cloud'; cloud?: string;
 }) {
   return (
     <button
       type="button"
       onClick={() => onSelect(id)}
-      className={`text-left rounded border px-3 py-2 transition w-full ${
+      className={`text-left rounded border px-3 py-2 transition w-full flex items-start gap-2.5 ${
         active ? 'border-neon-cyan bg-neon-cyan/[0.07]' : 'border-white/10 bg-white/[0.02] hover:border-white/30'
       } ${className}`}
     >
-      <span className="flex items-center gap-2">
-        <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${DOT[health]}`} />
-        <span className="text-[0.78rem] text-slate-100 font-medium">{label}</span>
+      {icon && <NodeIcon icon={icon} cloud={cloud} />}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${DOT[health]}`} />
+          <span className="text-[0.78rem] text-slate-100 font-medium">{label}</span>
+        </span>
+        {sub && <span className="block text-[0.68rem] text-slate-500 mt-0.5 leading-snug break-words">{sub}</span>}
       </span>
-      {sub && <span className="block text-[0.68rem] text-slate-500 mt-0.5 leading-snug break-words">{sub}</span>}
     </button>
   );
 }
@@ -287,8 +334,8 @@ export default function ArchitectureDiagram({
   const ms = machine?.status;
   const vmHealth: Health = !machine ? 'unknown'
     : ms === 'running' ? 'ok'
-    : ['creating', 'starting', 'stopping', 'deleting'].includes(ms || '') ? 'busy'
-    : ms === 'stopped' ? 'idle' : 'bad';
+    : ['creating', 'starting', 'stopping', 'deleting', 'shelving', 'restoring'].includes(ms || '') ? 'busy'
+    : ms === 'stopped' || ms === 'shelved' ? 'idle' : 'bad';
   const softwareHealth: Health = !machine || machine.instance_id.startsWith('pending:') ? 'unknown'
     : ms !== 'running' ? (vmHealth === 'bad' ? 'bad' : 'unknown')
     : !setupStage ? 'busy'
@@ -310,48 +357,48 @@ export default function ArchitectureDiagram({
       <div className="space-y-0">
         <Layer name="You" note="your devices">
           <div className="grid sm:grid-cols-2 gap-2">
-            <Node id="browser" label="Browser — this page" sub="controls everything" health="ok" active={selected === 'browser'} onSelect={setSelected} />
-            <Node id="moonlight" label="Moonlight app" sub="plays the stream" health={softwareHealth === 'ok' ? 'ok' : 'unknown'} active={selected === 'moonlight'} onSelect={setSelected} />
+            <Node id="browser" icon="browser" label="Browser — this page" sub="controls everything" health="ok" active={selected === 'browser'} onSelect={setSelected} />
+            <Node id="moonlight" icon="moonlight" label="Moonlight app" sub="plays the stream" health={softwareHealth === 'ok' ? 'ok' : 'unknown'} active={selected === 'moonlight'} onSelect={setSelected} />
           </div>
         </Layer>
         <Link kind="control" label="HTTPS: page load (Vercel) · JSON API calls with your sign-in token (Railway)" />
         <Layer name="Vercel" note="website hosting · global CDN" tone="border-white/10">
-          <Node id="vercel" label="Next.js frontend" sub="static pages + /api/build-info" health="ok" active={selected === 'vercel'} onSelect={setSelected} />
+          <Node id="vercel" icon="vercel" label="Next.js frontend" sub="static pages + /api/build-info" health="ok" active={selected === 'vercel'} onSelect={setSelected} />
         </Layer>
         <Link kind="control" label="HTTPS → NEXT_PUBLIC_API_URL" />
         <Layer name="Railway" note="app platform · containers">
           <div className="grid sm:grid-cols-2 gap-2">
-            <Node id="railway" label="Express API container" sub="auth · encrypted key vault · orchestration · jobs"
+            <Node id="railway" icon="container" label="Express API container" sub="auth · encrypted key vault · orchestration · jobs"
               health={backendUp === null ? 'unknown' : backendUp ? 'ok' : 'bad'} active={selected === 'railway'} onSelect={setSelected} />
-            <Node id="postgres" label="Postgres database" sub={status?.database.latencyMs !== undefined ? `${status.database.latencyMs} ms` : 'accounts · machines · activity log'}
+            <Node id="postgres" icon="database" label="Postgres database" sub={status?.database.latencyMs !== undefined ? `${status.database.latencyMs} ms` : 'accounts · machines · activity log'}
               health={!status ? 'unknown' : status.database.connected ? 'ok' : 'bad'} active={selected === 'postgres'} onSelect={setSelected} />
           </div>
         </Layer>
         <Link kind="control" label={`HTTPS API calls signed with YOUR ${t.name} key (decrypted in memory only)`} />
         <Layer name={`${t.name} — control plane`} note="the cloud's management API">
-          <Node id="cloudapi" label={t.api} sub={cloudApi?.latencyMs !== undefined ? `reachable · ${cloudApi.latencyMs} ms` : 'create · start · stop · delete · snapshot'}
+          <Node id="cloudapi" icon="cloud" cloud={cloud} label={t.api} sub={cloudApi?.latencyMs !== undefined ? `reachable · ${cloudApi.latencyMs} ms` : 'create · start · stop · delete · snapshot'}
             health={!status ? 'unknown' : cloudApi?.connected ? 'ok' : 'bad'} active={selected === 'cloudapi'} onSelect={setSelected} />
         </Layer>
         <Link kind="control" label="schedules resources onto physical hardware" />
         <Layer name={`Your ${t.account.toLowerCase()} · ${machine ? machine.region : 'region'}${zone ? ` · ${t.locationUnit.toLowerCase()} ${zone}` : ''}`} note="billed to you" tone="border-neon-cyan/25">
           <div className="space-y-2">
-            <Node id="account" label={`${t.account}`} sub="everything below lives here" health={machine ? 'ok' : 'unknown'} active={selected === 'account'} onSelect={setSelected} />
-            <Node id="network" label="Network + firewall + public IP" sub={`${t.firewall}${machine?.ip_address ? ` · IP ${machine.ip_address}` : ''}`}
+            <Node id="account" icon="account" label={`${t.account}`} sub="everything below lives here" health={machine ? 'ok' : 'unknown'} active={selected === 'account'} onSelect={setSelected} />
+            <Node id="network" icon="network" label="Network + firewall + public IP" sub={`${t.firewall}${machine?.ip_address ? ` · IP ${machine.ip_address}` : ''}`}
               health={machine?.ip_address ? 'ok' : vmHealth === 'busy' ? 'busy' : 'unknown'} active={selected === 'network'} onSelect={setSelected} />
             <div className="rounded border border-white/10 p-2 space-y-2">
-              <Node id="hypervisor" label="Physical host · hypervisor" sub={t.hypervisor} health={created ? vmHealth : 'unknown'} active={selected === 'hypervisor'} onSelect={setSelected} />
+              <Node id="hypervisor" icon="server" label="Physical host · hypervisor" sub={t.hypervisor} health={created ? vmHealth : 'unknown'} active={selected === 'hypervisor'} onSelect={setSelected} />
               <div className="pl-3 border-l border-white/10 space-y-2">
-                <Node id="vm" label={`Virtual machine${name ? ` · ${name}` : ''}`} sub={machine ? `${machine.instance_type} · ${machine.status}${machine.spot ? ' · spot' : ''}` : 'Ubuntu 22.04'}
+                <Node id="vm" icon="vm" label={`Virtual machine${name ? ` · ${name}` : ''}`} sub={machine ? `${machine.instance_type} · ${machine.status}${machine.spot ? ' · spot' : ''}` : 'Ubuntu 22.04'}
                   health={vmHealth} active={selected === 'vm'} onSelect={setSelected} />
                 <div className="pl-3 border-l border-white/10 grid sm:grid-cols-2 gap-2">
-                  <Node id="gpu" label="NVIDIA GPU" sub={t.gpuAttach} health={!created ? 'unknown' : softwareHealth === 'ok' ? 'ok' : vmHealth === 'ok' ? 'busy' : vmHealth} active={selected === 'gpu'} onSelect={setSelected} />
-                  <Node id="sunshine" label="Container: Sunshine · desktop · Steam"
+                  <Node id="gpu" icon="gpu" label="NVIDIA GPU" sub={t.gpuAttach} health={!created ? 'unknown' : softwareHealth === 'ok' ? 'ok' : vmHealth === 'ok' ? 'busy' : vmHealth} active={selected === 'gpu'} onSelect={setSelected} />
+                  <Node id="sunshine" icon="sunshine" label="Container: Sunshine · desktop · Steam"
                     sub={setupStage ? `${setupStage.percent}% · ${setupStage.message}` : ms === 'running' ? 'setup status unknown yet' : created ? 'installed by the setup script' : 'not created (the launch failed)'}
                     health={softwareHealth} active={selected === 'sunshine'} onSelect={setSelected} />
                 </div>
               </div>
             </div>
-            <Node id="disk" label="Disk" sub={`${t.disk}${machine?.disk_size_gb ? ` · ${machine.disk_size_gb} GB` : ''}`}
+            <Node id="disk" icon="disk" label="Disk" sub={`${t.disk}${machine?.disk_size_gb ? ` · ${machine.disk_size_gb} GB` : ''}`}
               health={machine ? (vmHealth === 'bad' ? 'unknown' : 'ok') : 'unknown'} active={selected === 'disk'} onSelect={setSelected} />
           </div>
         </Layer>

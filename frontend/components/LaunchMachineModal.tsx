@@ -37,7 +37,7 @@ interface Shape {
 interface ProviderOption {
   provider: string; label: string; configured: boolean; lastCheckOk: boolean | null; lastCheckSummary: string | null;
   available: boolean; supportsSpot: boolean; spotLabel: string; spotOnReclaim?: string; defaultRegion: string; defaultDiskGb: number;
-  minDiskGb: number; diskPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
+  minDiskGb: number; diskPerGbMonth: number; snapshotPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
 }
 interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[] }
 
@@ -66,6 +66,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const presetPending = useRef(!!preset);
   const presetShape = useRef<string | null>(preset?.shapeId || null);
   const [autoStop, setAutoStop] = useState(15); // minutes without streaming before the machine shuts down; 0 = off
+  const [autoShelve, setAutoShelve] = useState(7); // days stopped before it's shelved automatically; 0 = off
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [operationId, setOperationId] = useState<string | null>(null);
@@ -121,6 +122,9 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const price = shape?.prices[region];
   const hourly = spot && price?.spot != null ? price.spot : price?.onDemand || 0;
   const diskMonthly = current ? diskGb * current.diskPerGbMonth : 0;
+  // Shelved: snapshot billed on data stored — ~30 GB fresh install … full disk.
+  const shelfLow = current ? Math.min(30, diskGb) * current.snapshotPerGbMonth : 0;
+  const shelfHigh = current ? diskGb * current.snapshotPerGbMonth : 0;
 
   const blocker = !current
     ? null
@@ -136,7 +140,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
     try {
       const res = await apiFetch<{ machineId: string; operationId: string }>('/machines', {
         method: 'POST',
-        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop },
+        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null },
       });
       setOperationId(res.operationId);
       onLaunched(); // show the new "creating" machine in the list straight away
@@ -327,12 +331,31 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     </p>
                   </div>
 
+                  {/* Auto-shelve */}
+                  <div>
+                    <label htmlFor="launch-autoshelve" className="label block mb-2">8 · Auto-shelve when unused</label>
+                    <select id="launch-autoshelve" value={autoShelve} onChange={(e) => setAutoShelve(Number(e.target.value))} className="input-neon w-full sm:w-1/2 px-3 py-2">
+                      <option value={1}>After 1 day stopped</option>
+                      <option value={3}>After 3 days stopped</option>
+                      <option value={7}>After 7 days stopped (recommended)</option>
+                      <option value={14}>After 14 days stopped</option>
+                      <option value={30}>After 30 days stopped</option>
+                      <option value={0}>Never — keep the disk</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">
+                      A stopped machine still pays for its whole disk (≈${diskMonthly.toFixed(2)}/month here). Shelving snapshots the disk and deletes it,
+                      cutting that to ≈${shelfLow.toFixed(2)}–${shelfHigh.toFixed(2)}/month; Restore brings it back with your games (a few minutes longer than Start).
+                      The disk is only deleted once the snapshot is confirmed complete. You can change this on the machine at any time.
+                    </p>
+                  </div>
+
                   {/* Summary + launch */}
                   <div className="rounded border border-neon-cyan/20 bg-neon-cyan/[0.03] p-4 text-sm">
                     <p className="text-slate-200">
                       <span className="text-neon-lime font-semibold tabular-nums">≈ ${hourly.toFixed(2)}/hour</span> while running
-                      {' '}+ <span className="tabular-nums">${diskMonthly.toFixed(2)}/month</span> for the disk.
+                      {' '}+ <span className="tabular-nums">${diskMonthly.toFixed(2)}/month</span> for the disk (also while stopped).
                     </p>
+                    <p className="text-xs text-slate-400 mt-1">Shelved when you&apos;re not using it: ≈${shelfLow.toFixed(2)}–${shelfHigh.toFixed(2)}/month.</p>
                     <p className="text-xs text-slate-500 mt-1">{current.priceNote} Billed by {current.label} to your account — stop the machine when you're done playing.</p>
                   </div>
 

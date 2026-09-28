@@ -31,6 +31,8 @@
  * - checkIdleJob (every 5 min): despite its name, reconciles every machine's
  *   status/IP with what its cloud reports (idle shutdown happens ON the
  *   machine itself — see providers/shared/setupScript.ts auto-stop).
+ * - autoShelveJob (hourly): shelves machines stopped longer than their
+ *   auto-shelve setting (snapshot, then delete machine + disk).
  * - budgetAlertJob (daily): logs users over their budget threshold.
  * - collectPerformanceMetricsJob is NOT scheduled: it only invented random
  *   numbers, which would be misleading on the Performance page. Re-enable
@@ -39,7 +41,7 @@
  */
 
 import cron from 'node-cron';
-import { syncCostsJob, checkIdleJob, budgetAlertJob } from './SyncCosts';
+import { syncCostsJob, checkIdleJob, budgetAlertJob, autoShelveJob } from './SyncCosts';
 import { collectPerformanceMetricsJob } from './CollectPerformance';
 
 /**
@@ -56,6 +58,13 @@ export function initializeJobs() {
   // Every 5 minutes: re-check each machine's real status/IP with its cloud
   cron.schedule('*/5 * * * *', () => {
     checkIdleJob(15).catch(err => console.error('Idle check job error:', err));
+  });
+
+  // Hourly (at :30): shelve machines stopped longer than their owner's
+  // auto-shelve setting (snapshot first; the disk is only deleted once the
+  // snapshot is complete).
+  cron.schedule('30 * * * *', () => {
+    autoShelveJob().catch(err => console.error('Auto-shelve job error:', err));
   });
 
   // Budget alerts daily at 9 AM (UTC on Railway). Only logs for now — no email is sent.

@@ -58,7 +58,7 @@ import { ComputeManagementClient } from '@azure/arm-compute';
 import type { VirtualMachine, Snapshot } from '@azure/arm-compute';
 import { NetworkManagementClient } from '@azure/arm-network';
 import { ResourceManagementClient } from '@azure/arm-resources';
-import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
+import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 // Shared errors module FIRST (it loads every cloud's rule list), then ours.
 import { FriendlyCloudError } from './errors';
@@ -889,7 +889,7 @@ export class AzureProvider extends CloudProvider {
     await this.report('success', `Snapshot ${name} deleted.`);
   }
 
-  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig): Promise<{ instanceId: string; ipAddress: string }> {
+  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig, opts: RestoreOptions = {}): Promise<{ instanceId: string; ipAddress: string }> {
     const { rg, name } = this.splitId(snapshotId);
     const snap = await this.compute.snapshots.get(rg, name);
     const snapLocation = String(snap.location || '').toLowerCase();
@@ -916,7 +916,7 @@ export class AzureProvider extends CloudProvider {
     }
     await this.report('info', `Creating a new machine from snapshot ${name}. It keeps the games, settings and Sunshine login of the original machine.`);
     const { instanceId, ipAddress } = await this.createMachine({ ...config, region: snapLocation }, {
-      spot: false,
+      spot: !!opts.spot,
       diskSizeGb: Number(snap.diskSizeGB) || 150,
       sunshineUsername: 'gamer',
       sunshinePassword: crypto.randomBytes(12).toString('base64url'), // unused: the restored disk keeps its own login

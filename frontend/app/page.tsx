@@ -104,7 +104,7 @@ export default function Dashboard() {
       {/* ---- Headline numbers ---- */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         <Tile label="Running now" value={`${money(hourly)}/h`} sub={`${t?.runningMachines ?? running.length} machine${(t?.runningMachines ?? running.length) === 1 ? '' : 's'} running`} />
-        <Tile label="Standing cost" value={t ? `${money(t.monthlyStanding)}/mo` : '—'} sub="disks, snapshots, IPs — billed even when stopped" />
+        <Link href="/costs#standing" className="block hover:opacity-90"><Tile label="Standing cost" value={t ? `${money(t.monthlyStanding)}/mo` : '—'} sub="disks & snapshots, billed even when stopped — how to cut it →" /></Link>
         <Tile label="This month" value={month != null ? money(month) : '—'} sub="estimated so far" />
         <Tile label="Leftovers" value={t ? String(t.orphans) : '—'} sub={t && t.orphans ? `≈${money(t.orphanMonthly)}/mo wasted — see Map` : 'nothing orphaned'} warn={!!t?.orphans} href={t?.orphans ? '/map' : undefined} />
       </div>
@@ -124,7 +124,7 @@ export default function Dashboard() {
             <ul className="space-y-1.5">
               {[...machines].sort((a, b) => {
                 // Live machines first (running → busy → stopped), failed last; newest first within each.
-                const rank = (s: string) => ({ running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, stopped: 2 } as Record<string, number>)[s] ?? 3;
+                const rank = (s: string) => ({ running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, shelving: 1, restoring: 1, stopped: 2, shelved: 3 } as Record<string, number>)[s] ?? 3;
                 return rank(a.status) - rank(b.status) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
               }).slice(0, 8).map((m) => {
                 const c = CLOUD[m.provider] || { color: '#94a3b8', letter: '?', label: m.provider };

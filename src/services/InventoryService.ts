@@ -30,7 +30,13 @@ import { listCredentialSummaries, providerFor } from './CredentialService';
 export interface MapItem extends InventoryItem {
   machineId?: string;        // our machine id, when the item is (or belongs to) a tracked machine
   source: 'cloud' | 'app';   // 'app' = only known from our records (not returned by the cloud)
+  /** For snapshots the app made: 'shelf' = it IS a shelved machine; 'backup' = an extra copy. */
+  snapshotRole?: 'shelf' | 'backup';
+  snapshotRecordId?: string; // our snapshots.id, so the UI can delete it
 }
+
+/** Last path segment of a cloud id ("rg/name", "region/ocid", ARM ids…), for matching. */
+const tail = (id: string) => String(id || '').split('/').filter(Boolean).pop() || '';
 
 const CACHE_MS = 60_000;
 const cache = new Map<string, { at: number; items?: InventoryItem[]; error?: FriendlyError }>();
@@ -66,7 +72,7 @@ export async function getInventory(userId: string, refresh = false) {
 
   // 2. Merge the app's machine records.
   const machines = await query(
-    `SELECT id, provider, region, instance_type, instance_id, status, cost_per_hour, disk_size_gb, ip_address, spot, game_title
+    `SELECT id, provider, region, instance_type, instance_id, status, cost_per_hour, disk_size_gb, ip_address, spot, game_title, snapshot_id
      FROM machines WHERE user_id = $1`,
     [userId]
   );
@@ -77,9 +83,17 @@ export async function getInventory(userId: string, refresh = false) {
       tracked.add(`${vm.provider}:${vm.instanceId}`);
       vm.machineId = m.id;
       // The app's status words ('creating', 'deleting'...) are more precise mid-action.
-      if (['creating', 'starting', 'stopping', 'deleting'].includes(m.status)) vm.status = m.status;
+      if (['creating', 'starting', 'stopping', 'deleting', 'shelving', 'restoring'].includes(m.status)) vm.status = m.status;
       vm.hourlyCost = Number(m.cost_per_hour) || vm.hourlyCost;
       vm.name = `${m.instance_type}${m.game_title ? ` · ${m.game_title}` : ''}`;
+    } else if (m.status === 'shelved') {
+      // Shelved: no machine at the cloud on purpose — only its snapshot
+      // (listed separately below). Shown so the map/costs know it exists.
+      items.push({
+        provider: m.provider, type: 'vm', source: 'app', machineId: m.id,
+        id: m.instance_id, instanceId: m.instance_id, name: `${m.instance_type}${m.game_title ? ` · ${m.game_title}` : ''}`,
+        region: m.region, status: 'shelved', hourlyCost: 0,
+      });
     } else {
       // Known to the app but not (or no longer) at the cloud.
       const cloudListed = results.some((r) => r.provider === m.provider && r.items);
@@ -94,6 +108,23 @@ export async function getInventory(userId: string, refresh = false) {
     }
     // Resources attached to a tracked machine belong to it.
     for (const it of items) if (it.attachedTo && it.attachedTo === m.instance_id && it.provider === m.provider) it.machineId = m.id;
+  }
+
+  // 2b. Snapshots the app made are deliberate, not leftovers — even when the
+  //     disk they came from is gone (that's what shelving does).
+  const snaps = await query('SELECT id, machine_id, provider, snapshot_provider_id, snapshot_data FROM snapshots WHERE user_id = $1', [userId]);
+  const shelfOf = new Map(machines.rows.filter((m: any) => m.snapshot_id && ['shelved', 'shelving', 'restoring'].includes(m.status)).map((m: any) => [m.snapshot_id, m.id]));
+  for (const it of items) {
+    if (it.type !== 'snapshot') continue;
+    const rec = snaps.rows.find((r: any) => r.provider === it.provider && [r.snapshot_provider_id, ...Object.values(r.snapshot_data || {}).map((d: any) => d?.id)]
+      .some((sid: string) => sid && tail(sid) === tail(it.id)));
+    if (!rec) continue;
+    it.snapshotRecordId = rec.id;
+    it.orphan = false;
+    it.orphanReason = undefined;
+    const shelfMachine = shelfOf.get(rec.id);
+    it.snapshotRole = shelfMachine ? 'shelf' : 'backup';
+    it.machineId = shelfMachine || rec.machine_id || it.machineId;
   }
 
   // 3. Machines at the cloud that the app doesn't track: they still bill.

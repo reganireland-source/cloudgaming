@@ -82,7 +82,7 @@ function vmState(status: string): GroupStatus {
   if (s === 'running') return 'running';
   if (/fail|missing|unknown|error/.test(s)) return 'problem';
   if (/still billed|creat|start|stopp|delet|provision|staging|deallocating|pending|repair|suspending/.test(s)) return 'changing';
-  if (/stopped|deallocated|terminated|suspended/.test(s)) return 'stopped';
+  if (/stopped|deallocated|terminated|suspended|^shelved$/.test(s)) return 'stopped';
   return 'changing';
 }
 const STATE_RANK: GroupStatus[] = ['problem', 'changing', 'running', 'stopped', 'resources'];

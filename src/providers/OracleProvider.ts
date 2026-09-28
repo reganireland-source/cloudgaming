@@ -52,7 +52,7 @@ import * as common from 'oci-common';
 import * as core from 'oci-core';
 import * as identity from 'oci-identity';
 import * as limits from 'oci-limits';
-import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo } from './Provider';
+import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 // Shared errors FIRST: it registers the Oracle rules from oracle/errors.
 import { FriendlyCloudError, toFriendlyError } from './errors';
@@ -1040,6 +1040,7 @@ export class OracleProvider extends CloudProvider {
       id: snapshotId,
       sizeGb: Number(b.sizeInGBs) || 0,
       state: state === 'AVAILABLE' ? 'completed' : state === 'FAULTY' || state === 'TERMINATED' ? 'failed' : 'pending',
+      storedGb: Number(b.uniqueSizeInGBs) || undefined,
     };
   }
 
@@ -1054,7 +1055,7 @@ export class OracleProvider extends CloudProvider {
     await this.report('success', 'Snapshot deleted — it no longer costs anything.');
   }
 
-  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig): Promise<{ instanceId: string; ipAddress: string }> {
+  async restoreFromSnapshot(snapshotId: string, config: ProviderConfig, opts: RestoreOptions = {}): Promise<{ instanceId: string; ipAddress: string }> {
     const { region, ocid } = this.splitId(snapshotId);
     const target = config.region || region;
     if (target !== region) {
@@ -1070,7 +1071,7 @@ export class OracleProvider extends CloudProvider {
     // the setup service and the Sunshine login you set before.
     const { instanceId, ipAddress } = await this.createMachine(
       { region, instanceType: config.instanceType || DEFAULT_SHAPE },
-      { spot: false, diskSizeGb: 150, backupOcid: ocid }
+      { spot: !!opts.spot, diskSizeGb: opts.diskSizeGb || 150, backupOcid: ocid }
     );
     return { instanceId, ipAddress };
   }
