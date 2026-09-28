@@ -18,11 +18,11 @@
  * ============================================================================
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import CloudLogo from '@/components/CloudLogo';
 import { useAuth } from '@/components/AuthProvider';
-import { ACCESS_STYLE, fetchRegionAccess, type AccessReport, type AccessStatus, type RegionAccess } from '@/lib/regionAccess';
+import { ACCESS_STYLE, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type CheckLine } from '@/lib/regionAccess';
 
 const CLOUDS = [
   { id: 'gcp', short: 'GCP', color: '#3987e5' },
@@ -70,9 +70,13 @@ export default function RegionsPage() {
   const [open, setOpen] = useState<{ place: string; provider: string } | null>(null);
   const [me, setMe] = useState<{ lat: number; lng: number; label: string } | null>(null);
 
+  // Live log of the check: every cloud API call as it happens.
+  const [lines, setLines] = useState<CheckLine[]>([]);
+  const [showLog, setShowLog] = useState(false);
   const load = useCallback(async (refresh = false) => {
     setBusy(true);
-    try { setReport(await fetchRegionAccess(refresh)); setError(null); }
+    setLines([]);
+    try { setReport(await runRegionCheck(refresh, (l) => setLines((prev) => [...prev, ...l]))); setError(null); }
     catch (e: any) { setError(e?.message || 'Couldn’t check your clouds.'); }
     finally { setBusy(false); }
   }, []);
@@ -117,8 +121,19 @@ export default function RegionsPage() {
 
       {error && <p className="text-sm text-neon-amber">⚠ {error}</p>}
 
+      {report && (busy || lines.length > 0) && (
+        busy ? <CheckLog lines={lines} running /> : (
+          <div>
+            <button type="button" onClick={() => setShowLog((v) => !v)} className="text-[0.7rem] font-mono text-slate-500 hover:text-neon-cyan">
+              {showLog ? '▾' : '▸'} check log · {lines.filter((l) => l.level === 'call').length} API calls · {((lines[lines.length - 1]?.ms || 0) / 1000).toFixed(1)} s
+            </button>
+            {showLog && <div className="mt-2"><CheckLog lines={lines} running={false} /></div>}
+          </div>
+        )
+      )}
+
       {!report ? (
-        <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; ASKING_YOUR_CLOUDS… (up to 30 s the first time)</p>
+        <CheckLog lines={lines} running={busy} />
       ) : (
         <>
           {/* ---- Per-cloud summary ---- */}
@@ -291,6 +306,37 @@ function Cli({ text }: { text: string }) {
         onClick={() => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined)}>
         {copied ? 'Copied' : 'Copy'}
       </button>
+    </div>
+  );
+}
+
+const LINE_CLS: Record<CheckLine['level'], string> = {
+  info: 'text-slate-300', call: 'text-slate-500', ok: 'text-neon-lime', warn: 'text-neon-amber', err: 'text-[#ff6b6b]',
+};
+
+/** Terminal-style live log of the region check. */
+function CheckLog({ lines, running }: { lines: CheckLine[]; running: boolean }) {
+  const box = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  useEffect(() => { const el = box.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [lines]);
+  const calls = lines.filter((l) => l.level === 'call').length;
+  const answered = lines.filter((l) => l.level === 'ok' && l.text.includes(' ← ')).length + lines.filter((l) => l.level === 'err' && l.text.includes(' ✗ ')).length;
+  return (
+    <div className="rounded-lg border border-neon-cyan/20 bg-black/60 overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-white/10 text-[0.66rem] font-mono uppercase tracking-label text-slate-500">
+        <span>{running ? <span className="text-neon-cyan animate-pulse">● asking your clouds</span> : 'check log'}</span>
+        <span className="tabular-nums">{answered}/{calls} API calls answered · {((lines[lines.length - 1]?.ms || 0) / 1000).toFixed(1)} s</span>
+      </div>
+      <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}
+        className="h-72 overflow-auto px-3 py-2 font-mono text-[0.66rem] leading-relaxed" role="log" aria-live="polite">
+        {lines.length === 0 && <p className="text-neon-cyan animate-pulse">&gt; connecting…</p>}
+        {lines.map((l) => (
+          <p key={l.i} className={`whitespace-pre ${LINE_CLS[l.level]}`}>
+            <span className="text-slate-600 tabular-nums">{(l.ms / 1000).toFixed(2).padStart(6, ' ')}s </span>{l.text}
+          </p>
+        ))}
+        {running && lines.length > 0 && <p className="text-neon-cyan animate-pulse">&gt; _</p>}
+      </div>
     </div>
   );
 }

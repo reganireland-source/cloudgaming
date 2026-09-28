@@ -155,10 +155,41 @@ function AutoShelvePicker({ value, saving, onChange, inline }: { value: number |
   );
 }
 
+interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string }
+type TierId = 'good' | 'better' | 'best';
+
+/** Recon's hardware tiers (same rule as tierOf in src/services/ReconService.ts). */
+function tierOf(sh: ShapeInfo): TierId {
+  if (sh.gpuModel === 'T4') return 'good';
+  if (sh.gpuModel === 'A10') return 'best';
+  return sh.vcpus >= 8 ? 'best' : 'better';
+}
+const TIER_STYLE: Record<TierId, { label: string; cls: string; bars: number; note: string }> = {
+  good: { label: 'Good', cls: 'text-neon-cyan border-neon-cyan/40', bars: 1, note: '1080p60 · indie, esports, older AAA' },
+  better: { label: 'Better', cls: 'text-neon-lime border-neon-lime/40', bars: 2, note: '1440p60 · modern AAA' },
+  best: { label: 'Best', cls: 'text-neon-magenta border-neon-magenta/50', bars: 3, note: 'up to 1440p/4K · demanding and CPU-heavy games' },
+};
+
+/** GOOD / BETTER / BEST — the Recon tier this machine's hardware falls in. */
+function TierBadge({ shape }: { shape: ShapeInfo }) {
+  const t = TIER_STYLE[tierOf(shape)];
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[0.62rem] uppercase tracking-label border rounded px-1.5 py-0.5 ${t.cls}`}
+      title={`${t.label} tier: ${shape.gpuModel} GPU · ${shape.vcpus} vCPU · ${shape.memoryGb} GB RAM — ${t.note}`}>
+      <span aria-hidden className="inline-flex items-end gap-px h-2.5">
+        {[1, 2, 3].map((b) => <span key={b} className={`w-[3px] rounded-sm ${b <= t.bars ? 'bg-current' : 'bg-current opacity-25'}`} style={{ height: `${b * 33}%` }} />)}
+      </span>
+      {t.label}
+      <span className="normal-case tracking-normal text-slate-400">{shape.gpuModel} · {shape.vcpus} vCPU</span>
+    </span>
+  );
+}
+
 function MachineCard({
-  machine, activeOp, onAction, onOpFinished, regions,
+  machine, activeOp, onAction, onOpFinished, regions, shape,
 }: {
   machine: Machine;
+  shape?: ShapeInfo;
   activeOp: string | null;
   onAction: (machine: Machine, action: Action, body?: Record<string, unknown>) => void;
   onOpFinished: () => void;
@@ -201,6 +232,7 @@ function MachineCard({
               {st.text}
             </span>
             <span className="text-sm font-semibold text-slate-100">{machine.instance_type}</span>
+            {shape && <TierBadge shape={shape} />}
             <span className="text-xs text-slate-400">{PROVIDER_LABEL[machine.provider] || machine.provider} · {machine.region}{zone && zone !== machine.region ? ` · ${zone}` : ''}</span>
             {machine.spot && <span className="text-[0.62rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>}
           </div>
@@ -419,13 +451,15 @@ function MachinesPageInner() {
   // Regions per cloud, for "restore in another region" (clouds that allow it).
   const [regionsBy, setRegionsBy] = useState<Record<string, Region[]>>({});
   const [gpuOf, setGpuOf] = useState<Record<string, string>>({});
+  const [shapeOf, setShapeOf] = useState<Record<string, ShapeInfo>>({});
   // Regions this machine's GPU is offered in.
   const regionsFor = (m: Machine) => (regionsBy[m.provider] || []).filter((r) => !gpuOf[`${m.provider}:${m.instance_type}`] || r.gpus.includes(gpuOf[`${m.provider}:${m.instance_type}`]));
   useEffect(() => {
-    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: Array<{ id: string; gpuModel: string }> }> }>('/machines/options')
+    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: ShapeInfo[] }> }>('/machines/options')
       .then((o) => {
         setRegionsBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.regions])));
         setGpuOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh.gpuModel]))));
+        setShapeOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh]))));
       })
       .catch(() => undefined);
   }, []);
@@ -570,6 +604,7 @@ function MachinesPageInner() {
             onAction={runAction}
             onOpFinished={() => finished(m.id)}
             regions={regionsFor(m)}
+            shape={shapeOf[`${m.provider}:${m.instance_type}`]}
           />
         ))}
       </div>
@@ -587,6 +622,7 @@ function MachinesPageInner() {
                 onAction={runAction}
                 onOpFinished={() => finished(m.id)}
                 regions={regionsFor(m)}
+                shape={shapeOf[`${m.provider}:${m.instance_type}`]}
               />
             ))}
           </div>

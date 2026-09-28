@@ -496,6 +496,16 @@ function AccessNote({ access: a, spot, rank, gpu }: { access: RegionAccess; spot
   const status = statusFor(a, gpu);
   const st = ACCESS_STYLE[status];
   const spotShort = spot && status === 'ready' && a.spotReady === false;
+  const spotOnly = !spot && status === 'ready' && a.onDemandReady === false;
+  if (spotOnly) {
+    return (
+      <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.7rem] text-slate-400">
+        <span className={`inline-flex items-center gap-1 rounded border px-1 uppercase tracking-label text-[0.6rem] ${ACCESS_STYLE['no-quota'].className}`}><span aria-hidden className="font-bold">!</span>Spot only</span>
+        <span>Your quota here only covers spot machines — turn on spot, or</span>
+        <Link href="/regions" className="text-neon-cyan hover:underline whitespace-nowrap">raise on-demand</Link>
+      </p>
+    );
+  }
   if (status === 'ready' && !spotShort) {
     return <p className="mt-1.5 text-[0.7rem] text-neon-lime"><span aria-hidden>✓</span> Ready — your account can launch here</p>;
   }

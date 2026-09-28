@@ -12,6 +12,7 @@
  *   GET  /api/regions                  every known region with prices
  *   POST /api/regions/test-latency     estimated latency to one region
  *   GET  /api/regions/recommend        best region/machine for a game
+ *   POST /api/regions/access/check     region access check with a live log (poll GET …/check/:id)
  *   GET  /api/regions/qualities        streaming quality tiers + their costs
  *
  * Region data comes from the `region_data` table.
@@ -21,7 +22,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 import { RecommendationEngine } from '../../services/RecommendationEngine';
-import { getRegionAccess } from '../../services/RegionAccessService';
+import { getRegionAccess, startRegionCheck, readRegionCheck } from '../../services/RegionAccessService';
 
 const router = Router();
 
@@ -68,6 +69,21 @@ router.get('/access', async (req: Request, res: Response) => {
     console.error('Region access error:', error);
     res.status(500).json({ error: 'Couldn\'t check your cloud regions', details: String(error) });
   }
+});
+
+/**
+ * POST /api/regions/access/check { refresh? } → { checkId }
+ * GET  /api/regions/access/check/:id?after=<line> → { done, lines, result? }
+ * The same check with a live log of every cloud API call (Regions page).
+ */
+router.post('/access/check', (req: Request, res: Response) => {
+  res.json({ checkId: startRegionCheck(req.userId!, req.body?.refresh === true) });
+});
+router.get('/access/check/:id', (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  const r = readRegionCheck(req.userId!, req.params.id, Number(req.query.after) || 0);
+  if (!r) return res.status(404).json({ error: 'That check has expired — press Re-check.' });
+  res.json(r);
 });
 
 /**

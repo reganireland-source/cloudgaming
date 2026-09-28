@@ -40,6 +40,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
+import ThemedSelect from './ThemedSelect';
 import FriendlyErrorCard from './FriendlyErrorCard';
 import { SCREENS, fitResolution, detectScreen, detectAllScreens, canListScreens, MAX_W, MAX_H, type AttachedScreen } from '@/lib/screens';
 
@@ -252,33 +253,21 @@ export default function MoonlightLauncher({
         <div className="grid sm:grid-cols-3 gap-3">
           <label className="text-xs text-slate-400 space-y-1">
             <span className="block">What to open</span>
-            <select value={app} onChange={(e) => setApp(e.target.value)} className="input-neon w-full px-2 py-1.5">
-              {APPS.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
+            <ThemedSelect ariaLabel="What to open" value={app} onChange={setApp} options={APPS.map((a) => ({ value: a, label: a }))} />
           </label>
           <label className="text-xs text-slate-400 space-y-1">
             <span className="block">Quality {preset === quality && '(machine default)'}</span>
-            <select value={preset} onChange={(e) => setPreset(e.target.value)} className="input-neon w-full px-2 py-1.5">
-              {Object.entries(PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
+            <ThemedSelect ariaLabel="Quality" value={preset} onChange={setPreset}
+              options={Object.entries(PRESETS).map(([k, v]) => ({ value: k, label: v.label, hint: k === quality ? 'this machine’s default' : undefined }))} />
           </label>
           <label className="text-xs text-slate-400 space-y-1">
             <span className="block">Your screen</span>
-            <select value={screenId} onChange={(e) => pickScreen(e.target.value)} className="input-neon w-full px-2 py-1.5">
-              <option value="auto" disabled={!detected}>The screen this window is on{detected ? ` (${detected.w}×${detected.h})` : ''}</option>
-              {attached && attached.length > 0 && (
-                <optgroup label="Your displays">
-                  {attached.map((x) => (
-                    <option key={x.key} value={`attached:${x.key}`}>{x.label} ({x.w}×{x.h}){x.primary ? ' · main' : ''}{x.current ? ' · this window' : ''}</option>
-                  ))}
-                </optgroup>
-              )}
-              {Array.from(new Set(SCREENS.map((x) => x.group))).map((g) => (
-                <optgroup key={g} label={g}>
-                  {SCREENS.filter((x) => x.group === g).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-                </optgroup>
-              ))}
-            </select>
+            <ThemedSelect ariaLabel="Your screen" align="right" value={screenId} onChange={pickScreen}
+              options={[
+                { value: 'auto', label: `The screen this window is on${detected ? ` (${detected.w}×${detected.h})` : ''}`, disabled: !detected, hint: 'follows this window if you drag it to another monitor' },
+                ...(attached || []).map((x) => ({ value: `attached:${x.key}`, group: 'Your displays', label: `${x.label} (${x.w}×${x.h})`, hint: [x.primary && 'main display', x.current && 'this window is on it'].filter(Boolean).join(' · ') || undefined })),
+                ...SCREENS.map((x) => ({ value: x.id, group: x.group, label: x.label })),
+              ]} />
           </label>
         </div>
         <p className="text-[0.7rem] text-slate-500 leading-relaxed">

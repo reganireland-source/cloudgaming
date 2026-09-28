@@ -224,6 +224,9 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       {(() => {
                         const a = access[`${provider}:${region}`];
                         const st = a ? statusFor(a, shape?.gpuModel) : null;
+                        if (a && st === 'ready' && !spot && a.onDemandReady === false) {
+                          return <p className="text-xs text-neon-amber mt-1">! Spot only here: your quota covers spot machines but not on-demand ({a.summary}). Tick spot below, or raise the on-demand quota. <Link href="/regions" className="text-neon-cyan hover:underline whitespace-nowrap">How to fix</Link></p>;
+                        }
                         if (!a || st === 'ready' && !(spot && a.spotReady === false)) return <p className="text-xs text-slate-500 mt-1">{a ? <span className="text-neon-lime">✓ Your account has GPU quota here. </span> : null}Pick the one closest to you — distance adds lag.</p>;
                         const msg = st === 'ready' ? 'Your spot quota here is too low — launch on-demand, or raise it.'
                           : a.status === 'ready' ? `No ${shape?.gpuModel} quota here (${a.summary}). Pick a ${a.quotas.filter((q) => q.limit - q.used >= 1 && /T4|L4/.test(q.label)).map((q) => q.label.replace(/NVIDIA | GPUs/g, '')).join('/') || 'different'} size, or request it.`

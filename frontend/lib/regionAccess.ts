@@ -27,6 +27,7 @@ export interface RegionAccess {
   quotas: QuotaLine[];
   spot: QuotaLine | null;
   spotReady: boolean | null;
+  onDemandReady?: boolean | null; // false = only spot machines can launch here
   missingGpus?: string[];   // ready, except for these GPU models (GCP: T4 vs L4 quota)
   notSold?: string[];       // GPU models the cloud doesn't sell in this region at all
   fix?: { steps: string[]; consoleUrl?: string; consoleLabel?: string; cli?: string };
@@ -45,8 +46,11 @@ export const fetchRegionAccess = (refresh = false) =>
   apiFetch<AccessReport>(`/regions/access${refresh ? '?refresh=true' : ''}`);
 
 /** Status for one GPU model: a region that's ready for T4 but has no L4 quota is "no quota" for an L4 machine. */
-export function statusFor(a: RegionAccess, gpuModel?: string): AccessStatus {
+export function statusFor(a: RegionAccess, gpuModel?: string, spot?: boolean): AccessStatus {
   if (gpuModel && a.notSold?.includes(gpuModel)) return 'not-offered';
+  // Spot and on-demand have separate quotas: a "spot only" region is no-quota for an on-demand machine.
+  if (a.status === 'ready' && spot === false && a.onDemandReady === false) return 'no-quota';
+  if (a.status === 'ready' && spot === true && a.spotReady === false) return 'no-quota';
   return a.status === 'ready' && gpuModel && a.missingGpus?.includes(gpuModel) ? 'no-quota' : a.status;
 }
 
@@ -66,3 +70,20 @@ export const ACCESS_STYLE: Record<AccessStatus, { icon: string; label: string; s
   unknown: { icon: '?', label: 'Couldn’t check', short: 'Unchecked', className: 'border-white/25 text-slate-300' },
   'not-connected': { icon: '–', label: 'Cloud not connected', short: 'No keys', className: 'border-white/15 text-slate-500' },
 };
+
+export interface CheckLine { i: number; ms: number; level: 'info' | 'call' | 'ok' | 'warn' | 'err'; text: string }
+
+/** Run the check with a live log: onLines gets each batch of new log lines. */
+export async function runRegionCheck(refresh: boolean, onLines: (lines: CheckLine[]) => void): Promise<AccessReport> {
+  const { checkId } = await apiFetch<{ checkId: string }>('/regions/access/check', { method: 'POST', body: { refresh } });
+  let after = 0;
+  for (;;) {
+    const r = await apiFetch<{ done: boolean; lines: CheckLine[]; result?: AccessReport; error?: string }>(`/regions/access/check/${checkId}?after=${after}`);
+    if (r.lines.length) { after = r.lines[r.lines.length - 1].i; onLines(r.lines); }
+    if (r.done) {
+      if (!r.result) throw new Error(r.error || 'The check failed.');
+      return r.result;
+    }
+    await new Promise((res) => setTimeout(res, 350));
+  }
+}

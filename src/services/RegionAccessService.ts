@@ -60,6 +60,8 @@ export interface RegionAccess {
   quotas: QuotaLine[];           // on-demand GPU quota(s)
   spot: QuotaLine | null;        // spot/preemptible quota, if the cloud has a separate one
   spotReady: boolean | null;
+  /** On-demand quota has room (false = spot only). null = not known. */
+  onDemandReady?: boolean | null;
   /** Ready overall, but these GPU models have no free quota (GCP quotas are per GPU: T4 vs L4). */
   missingGpus?: string[];
   /** GPU models of ours the cloud doesn't sell in this region (asked live). */
@@ -98,6 +100,76 @@ const unknown = (region: string, error: unknown, provider: string): RegionAccess
     fix: { steps: f.fixes, consoleUrl: f.consoleUrl, consoleLabel: f.consoleLabel } };
 };
 
+// ---------------------------------------------------------------------------
+// Live log ("terminal" on the Regions page): every cloud API call with its
+// endpoint, time and a short result, and one verdict line per region.
+// ---------------------------------------------------------------------------
+export type LogLevel = 'info' | 'call' | 'ok' | 'warn' | 'err';
+export type Log = (level: LogLevel, text: string) => void;
+const noLog: Log = () => undefined;
+
+type Describe = (args: any[], result?: any) => { api: string; host: string; out?: string };
+const pairs = (usage: any[], names: RegExp) => (usage || []).filter((u) => names.test(u.name)).map((u) => `${u.name} ${u.current}/${u.limit}`).join(' · ') || 'no matching quotas';
+const API: Record<ProviderName, Record<string, Describe>> = {
+  aws: {
+    getRegionOptIn: (_a, r) => ({ api: 'EC2 DescribeRegions AllRegions=true', host: 'ec2.us-east-1.amazonaws.com',
+      out: r && `${Object.keys(r).length} regions, ${Object.values(r).filter((v) => v === 'not-opted-in').length} not switched on` }),
+    getGpuTypesOffered: ([reg], r) => ({ api: 'EC2 DescribeInstanceTypeOfferings g4dn/g5', host: `ec2.${reg}.amazonaws.com`, out: r && ([...r].join(', ') || 'none sold') }),
+    getEc2Quota: ([reg, code], r) => ({ api: `ServiceQuotas GetServiceQuota ec2/${code}${code === 'L-3819A6DF' ? ' (spot)' : ' (on-demand)'}`, host: `servicequotas.${reg}.amazonaws.com`, out: r == null ? undefined : `${r} vCPUs` }),
+  },
+  gcp: {
+    getProject: (_a, r) => ({ api: 'compute.projects.get', host: 'compute.googleapis.com',
+      out: r && `GPUS_ALL_REGIONS ${(r.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.usage ?? 0}/${(r.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.limit ?? 0}` }),
+    getGpuZones: (_a, r) => ({ api: 'compute.acceleratorTypes.aggregatedList', host: 'compute.googleapis.com', out: r && `T4/L4 sold in ${Object.keys(r).length} regions` }),
+    getRegionQuotas: ([reg], r) => ({ api: `compute.regions.get ${reg}`, host: 'compute.googleapis.com',
+      out: r && ((r as any[]).filter((q) => /T4|L4/.test(q.metric)).map((q) => `${q.metric} ${q.usage}/${q.limit}`).join(' · ') || 'no T4/L4 quotas') }),
+  },
+  azure: {
+    getSizeAvailability: ([loc], r) => ({ api: `GET Microsoft.Compute/skus $filter=location eq '${loc}'`, host: 'management.azure.com',
+      out: r && (Object.entries(r).map(([k, v]: any) => `${k}${v.restricted ? ` (${v.restricted})` : ''}`).join(', ') || 'no T4 sizes') }),
+    getComputeUsage: ([loc], r) => ({ api: `GET Microsoft.Compute/locations/${loc}/usages`, host: 'management.azure.com', out: r && pairs(r, /ncasv3_?t4|^cores$|lowprioritycores/i) }),
+  },
+  oracle: {
+    getSubscribedRegions: (_a, r) => ({ api: 'Identity ListRegionSubscriptions', host: 'identity.oci.oraclecloud.com', out: r && `${r.length} subscribed: ${r.join(', ')}` }),
+    getGpuLimit: ([reg], r) => ({ api: 'Limits ListLimitValues service=compute (A10)', host: `limits.${reg}.oci.oraclecloud.com`, out: r === undefined ? undefined : r ? `A10 ${r.used}/${r.limit}` : 'no A10 limit here' }),
+  },
+};
+const SHORT: Record<ProviderName, string> = { aws: 'AWS', gcp: 'GCP', azure: 'Azure', oracle: 'OCI' };
+
+/** Wrap a cloud client so each described call is logged when it finishes. */
+export function traced(provider: any, cloud: ProviderName, log: Log): any {
+  if (log === noLog) return provider;
+  return new Proxy(provider, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv);
+      const d = API[cloud][String(prop)];
+      if (typeof v !== 'function') return v;
+      if (!d) return v.bind(target);
+      return async (...args: any[]) => {
+        const t0 = Date.now();
+        const { api, host } = d(args);
+        log('call', `${SHORT[cloud].padEnd(5)} → ${api}  [${host}]`);
+        try {
+          const r = await v.apply(target, args);
+          log('ok', `${SHORT[cloud].padEnd(5)} ← ${api}  ${Date.now() - t0} ms  ${d(args, r).out ?? 'ok'}`);
+          return r;
+        } catch (e: any) {
+          log('err', `${SHORT[cloud].padEnd(5)} ✗ ${api}  ${Date.now() - t0} ms  ${String(e?.code || e?.name || 'error')}: ${String(e?.message || e).slice(0, 160)}`);
+          throw e;
+        }
+      };
+    },
+  });
+}
+
+const VERDICT_LEVEL: Record<RegionStatus, LogLevel> = { ready: 'ok', 'no-quota': 'warn', 'not-enabled': 'warn', 'not-offered': 'info', unknown: 'err', 'not-connected': 'info' };
+/** Log each region's outcome as soon as it's known. */
+const verdict = (cloud: ProviderName, log: Log, fn: (region: string) => Promise<RegionAccess>) => async (region: string) => {
+  const a = await fn(region);
+  log(VERDICT_LEVEL[a.status], `${SHORT[cloud].padEnd(5)} = ${region.padEnd(24)} ${a.status.toUpperCase().replace('-', ' ')} — ${a.summary}`);
+  return a;
+};
+
 /** The cloud doesn't sell our GPU machines here at all. */
 const notOffered = (region: string, summary: string, consoleUrl: string, consoleLabel: string): RegionAccess => ({
   region, status: 'not-offered', summary, quotas: [], spot: null, spotReady: null,
@@ -108,7 +180,7 @@ const uniq = <T,>(list: T[]) => Array.from(new Set(list));
 // ---------------------------------------------------------------------------
 // Google Cloud
 // ---------------------------------------------------------------------------
-async function gcpAccess(provider: any, regionIds: string[]): Promise<RegionAccess[]> {
+async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): Promise<RegionAccess[]> {
   const project = await provider.getProject();
   const pid = provider.projectId;
   const globalLimit = Number((project.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.limit) || 0;
@@ -120,7 +192,7 @@ async function gcpAccess(provider: any, regionIds: string[]): Promise<RegionAcce
   const gpuZones: Record<string, Record<string, string[]>> | null = await provider.getGpuZones().catch(() => null);
   const allModels = uniq(GCP_SHAPES.map((sh) => sh.gpuModel));
 
-  return mapLimit(regionIds, 5, async (region) => {
+  return mapLimit(regionIds, 5, verdict('gcp', log, async (region): Promise<RegionAccess> => {
     const sold = gpuZones ? allModels.filter((m) => gpuZones[region]?.[m]?.length) : allModels;
     const notSold = allModels.filter((m) => !sold.includes(m));
     if (!sold.length) return notOffered(region, 'Google sells no T4 or L4 GPUs in this region', 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones', 'Google’s GPU locations');
@@ -144,20 +216,25 @@ async function gcpAccess(provider: any, regionIds: string[]): Promise<RegionAcce
           fix: { steps: ['Request "GPUs (all regions)" = 1 (once for the whole project).', `Also request "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs" = 1 in ${region}.`, 'Free-trial accounts must "Activate full account" first.'],
             consoleUrl: `${quotasUrl}&metric=compute.googleapis.com%2Fgpus_all_regions`, consoleLabel: 'Request GPU quota', cli } };
       }
+      if (!regional.length && spotOk) {
+        // Spot VMs use the separate "Preemptible" GPU quotas.
+        return { region, status: 'ready', onDemandReady: false, summary: `Spot only: ${spotLines.filter((l) => l.limit - l.used >= 1).map((l) => `${l.label.replace('Spot NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · ')} · no on-demand GPU quota`, quotas, spot: bestSpot, spotReady: true,
+          fix: { steps: ['Spot machines can launch here. For on-demand ones:', `On the Quotas page, filter "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs", pick ${region}, request 1.`], consoleUrl: quotasUrl, consoleLabel: 'Open Quotas', cli } };
+      }
       if (!regional.length) {
-        return { region, status: 'no-quota', summary: `No T4 or L4 GPU quota in ${region}`, quotas, spot: bestSpot, spotReady: spotOk,
+        return { region, status: 'no-quota', onDemandReady: false, summary: `No T4 or L4 GPU quota in ${region}`, quotas, spot: bestSpot, spotReady: spotOk,
           fix: { steps: [`On the Quotas page, filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs", pick ${region}, request 1.`, 'For spot machines also request the "Preemptible" version.', 'Approval: minutes to 2 business days.'],
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas', cli } };
       }
       const missingGpus = soldMetrics.filter((m) => { const l = line(m); return l.limit - l.used < 1; })
         .map((m) => GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!.gpuModel);
-      return { region, status: 'ready', summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, spot: bestSpot, spotReady: spotOk, missingGpus,
+      return { region, status: 'ready', onDemandReady: true, summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, spot: bestSpot, spotReady: spotOk, missingGpus,
         ...(missingGpus.length ? { fix: { steps: [`Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here. For ${missingGpus.join('/')} machines, request "NVIDIA ${missingGpus[0]} GPUs" = 1 in ${region}.`], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', cli } } : {}) };
       })());
     } catch (error) {
       return unknown(region, error, 'gcp');
     }
-  });
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -167,10 +244,10 @@ const AWS_ON_DEMAND = 'L-DB2E81BA'; // Running On-Demand G and VT instances (vCP
 const AWS_SPOT = 'L-3819A6DF';      // All G and VT Spot Instance Requests (vCPUs)
 const AWS_MIN = 4;
 
-async function awsAccess(provider: any, regionIds: string[]): Promise<RegionAccess[]> {
+async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): Promise<RegionAccess[]> {
   let optIn: Record<string, string> = {};
   try { optIn = await provider.getRegionOptIn(); } catch { /* treat as unknown below */ }
-  return mapLimit(regionIds, 4, async (region) => {
+  return mapLimit(regionIds, 4, verdict('aws', log, async (region): Promise<RegionAccess> => {
     const quotasUrl = `https://${region}.console.aws.amazon.com/servicequotas/home/services/ec2/quotas/${AWS_ON_DEMAND}`;
     if (optIn[region] === 'not-opted-in') {
       return { region, status: 'not-enabled' as const, summary: 'Opt-in region — not switched on for your account', quotas: [], spot: null, spotReady: null,
@@ -197,12 +274,19 @@ async function awsAccess(provider: any, regionIds: string[]): Promise<RegionAcce
       const spot: QuotaLine | null = sp == null ? null : { label: 'G and VT spot vCPUs', limit: sp, used: 0, unit: 'vCPUs' };
       const cli = `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${AWS_ON_DEMAND} --desired-value 8\n` +
         `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${AWS_SPOT} --desired-value 8   # spot`;
+      const spotReady = sp == null ? null : sp >= AWS_MIN;
+      if (od < AWS_MIN && spotReady) {
+        // Spot machines use their own quota: this region works for spot.
+        return withSold({ region, status: 'ready' as const, onDemandReady: false, summary: `Spot only: ${sp} spot GPU vCPUs · on-demand quota is ${od}`, quotas, spot, spotReady,
+          fix: { steps: [`Spot machines can launch here. For on-demand ones: Service Quotas → EC2 → "Running On-Demand G and VT instances" in ${region} → Request increase → 8.`],
+            consoleUrl: quotasUrl, consoleLabel: 'Request on-demand quota', cli } });
+      }
       if (od < AWS_MIN) {
-        return withSold({ region, status: 'no-quota' as const, summary: `GPU quota is ${od} vCPUs (a machine needs ${AWS_MIN})`, quotas, spot, spotReady: sp == null ? null : sp >= AWS_MIN,
+        return withSold({ region, status: 'no-quota' as const, onDemandReady: false, summary: `GPU quota is ${od} vCPUs on-demand${sp == null ? '' : `, ${sp} spot`} (a machine needs ${AWS_MIN})`, quotas, spot, spotReady,
           fix: { steps: [`Service Quotas → EC2 → "Running On-Demand G and VT instances" in ${region} → Request increase → 8.`, 'For spot machines also "All G and VT Spot Instance Requests" → 8.', 'Approval: minutes to a couple of days.'],
             consoleUrl: quotasUrl, consoleLabel: 'Request quota', cli } });
       }
-      return withSold({ region, status: 'ready' as const, summary: `${od} GPU vCPUs (${Math.floor(od / AWS_MIN)} small machine${Math.floor(od / AWS_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady: sp == null ? null : sp >= AWS_MIN });
+      return withSold({ region, status: 'ready' as const, onDemandReady: true, summary: `${od} GPU vCPUs on-demand${sp == null ? '' : ` · ${sp} spot`} (${Math.floor(od / AWS_MIN)} small machine${Math.floor(od / AWS_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady });
     } catch (error) {
       const r = unknown(region, error, 'aws');
       if (/AccessDenied|not authorized|servicequotas/i.test(String((error as any)?.code || (error as any)?.message))) {
@@ -211,7 +295,7 @@ async function awsAccess(provider: any, regionIds: string[]): Promise<RegionAcce
       }
       return r;
     }
-  });
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -219,9 +303,9 @@ async function awsAccess(provider: any, regionIds: string[]): Promise<RegionAcce
 // ---------------------------------------------------------------------------
 const AZ_MIN = Math.min(...AZURE_SHAPES.map((s) => s.vcpus));
 
-async function azureAccess(provider: any, regionIds: string[]): Promise<RegionAccess[]> {
+async function azureAccess(provider: any, regionIds: string[], log: Log = noLog): Promise<RegionAccess[]> {
 
-  return mapLimit(regionIds, 4, async (region) => {
+  return mapLimit(regionIds, 4, verdict('azure', log, async (region): Promise<RegionAccess> => {
     const cliBase = `SUB=$(az account show --query id -o tsv)\n`;
     // Does Azure sell our T4 sizes here, and to this subscription? (Asked live.)
     try {
@@ -238,33 +322,44 @@ async function azureAccess(provider: any, regionIds: string[]): Promise<RegionAc
     try {
       const usage: Array<{ name: string; limit: number; current: number }> = await provider.getComputeUsage(region);
       const find = (n: string) => usage.find((u) => u.name.toLowerCase() === n.toLowerCase());
-      const fam = find(T4_QUOTA_FAMILY);
+      // The T4 family's quota (Azure names it standardNCASv3_T4Family; match loosely in case the casing/format differs).
+      const fam = find(T4_QUOTA_FAMILY) || usage.find((u) => /ncasv3_?t4/i.test(u.name));
       const total = find('cores');
       const spotU = find('lowPriorityCores');
       const line = (label: string, u?: { limit: number; current: number }): QuotaLine => ({ label, limit: u?.limit || 0, used: u?.current || 0, unit: 'vCPUs' });
-      const quotas = [line('NCASv3_T4 family vCPUs', fam), line('Total regional vCPUs', total)];
-      const spot = spotU ? line('Spot vCPUs', spotU) : null;
-      const spotReady = spot ? spot.limit - spot.used >= AZ_MIN : null;
+      const quotas = [line('NCASv3_T4 family vCPUs (on-demand)', fam), line('Total regional vCPUs (on-demand)', total)];
+      const spot = spotU ? line('Spot (low-priority) vCPUs', spotU) : null;
+      // Spot machines count ONLY against the spot quota ("Total Regional
+      // Low-priority vCPUs"), not the T4 family or regional totals.
+      const spotFree = spot ? spot.limit - spot.used : 0;
+      const spotReady = spot ? spotFree >= AZ_MIN : null;
+      const famFree = fam ? fam.limit - fam.current : 0;
+      const totFree = total ? total.limit - total.current : Infinity;
+      const onDemandReady = !!fam && famFree >= AZ_MIN && totFree >= AZ_MIN;
       const quotasUrl = `https://portal.azure.com/#view/Microsoft_Azure_Capacity/QuotaMenuBlade/~/myQuotas`;
-      if (!fam) {
-        return { region, status: 'no-quota' as const, summary: 'No T4 quota entry for your subscription here — needs a support request', quotas, spot, spotReady,
-          fix: { steps: [
+      const odFix = !fam
+        ? { steps: [
             `Check the machines exist here: az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table (Restrictions should be "None").`,
             'Portal → Help + support → Create a support request → Service and subscription limits (quotas) → Compute-VM (cores-vCPUs) subscription limit increases.',
             `Region ${region}, series "NCASv3_T4", new limit 8. Microsoft reviews it by hand (usually a few days).`,
           ], consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Support/NewSupportRequestV3Blade', consoleLabel: 'New support request',
-            cli: `az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table` } };
-      }
-      const famFree = fam.limit - fam.current;
-      const totFree = total ? total.limit - total.current : Infinity;
-      if (famFree < AZ_MIN || totFree < AZ_MIN) {
-        const which = famFree < AZ_MIN ? `NCASv3_T4 family quota is ${fam.limit} vCPUs` : `"Total Regional vCPUs" is only ${total!.limit}`;
-        return { region, status: 'no-quota' as const, summary: `${which} (a machine needs ${AZ_MIN})`, quotas, spot, spotReady,
-          fix: { steps: [`Quotas → Compute → filter region ${region} → "Standard NCASv3_T4 Family vCPUs" → request 8 (and "Total Regional vCPUs" ≥ 8).`, 'Auto-approved in minutes where Azure has capacity; otherwise follow up with a support request.'],
+            cli: `az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table` }
+        : { steps: [`Quotas → Compute → filter region ${region} → "Standard NCASv3_T4 Family vCPUs" → request 8 (and "Total Regional vCPUs" ≥ 8).`, 'Auto-approved in minutes where Azure has capacity; otherwise follow up with a support request.'],
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas',
-            cli: `${cliBase}az extension add --name quota\naz quota update --resource-name ${T4_QUOTA_FAMILY} --resource-type dedicated \\\n  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/${region}" --limit-object value=8` } };
+            cli: `${cliBase}az extension add --name quota\naz quota update --resource-name ${T4_QUOTA_FAMILY} --resource-type dedicated \\\n  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/${region}" --limit-object value=8` };
+      const inUse = (u?: { limit: number; current: number }) => !!u && u.limit >= AZ_MIN && u.limit - u.current < AZ_MIN;
+      const odWhy = !fam ? 'no T4 on-demand quota entry for your subscription here'
+        : famFree < AZ_MIN ? (inUse(fam) ? `T4 on-demand quota in use (${fam.current} of ${fam.limit} vCPUs used by your machines)` : `T4 on-demand quota is ${fam.limit} vCPUs`)
+        : `"Total Regional vCPUs" ${inUse(total) ? `in use (${total!.current} of ${total!.limit})` : `is only ${total!.limit}`}`;
+      if (onDemandReady) {
+        return { region, status: 'ready' as const, onDemandReady: true, summary: `${famFree} T4 vCPUs free on-demand${spot ? ` · ${spotFree} spot` : ''} (${Math.floor(famFree / AZ_MIN)} small machine${Math.floor(famFree / AZ_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady };
       }
-      return { region, status: 'ready' as const, summary: `${famFree} T4 vCPUs free (${Math.floor(famFree / AZ_MIN)} small machine${Math.floor(famFree / AZ_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady };
+      if (spotReady) {
+        return { region, status: 'ready' as const, onDemandReady: false, summary: `Spot only: ${spotFree} spot vCPUs free · ${odWhy}`, quotas, spot, spotReady,
+          fix: { ...odFix, steps: ['Spot machines can launch here (they use the separate spot quota). For on-demand machines:', ...odFix.steps] } };
+      }
+      const spotWhy = !spot ? '' : inUse(spotU) ? ` · spot quota in use (${spot.used} of ${spot.limit} vCPUs)` : ` · spot quota ${spot.limit} vCPUs`;
+      return { region, status: 'no-quota' as const, onDemandReady: false, summary: `${odWhy[0].toUpperCase()}${odWhy.slice(1)}${spotWhy} (a machine needs ${AZ_MIN})`, quotas, spot, spotReady, fix: odFix };
     } catch (error) {
       const text = String((error as any)?.code || '') + String((error as any)?.message || '');
       if (/LocationNotAvailableForResourceType|NoRegisteredProviderFound|not available for subscription|InvalidLocation/i.test(text)) {
@@ -273,16 +368,16 @@ async function azureAccess(provider: any, regionIds: string[]): Promise<RegionAc
       }
       return unknown(region, error, 'azure');
     }
-  });
+  }));
 }
 
 // ---------------------------------------------------------------------------
 // Oracle
 // ---------------------------------------------------------------------------
-async function oracleAccess(provider: any, regionIds: string[]): Promise<RegionAccess[]> {
+async function oracleAccess(provider: any, regionIds: string[], log: Log = noLog): Promise<RegionAccess[]> {
   let subscribed: string[] | null = null;
   try { subscribed = await provider.getSubscribedRegions(); } catch { /* unknown below */ }
-  return mapLimit(regionIds, 3, async (region) => {
+  return mapLimit(regionIds, 3, verdict('oracle', log, async (region): Promise<RegionAccess> => {
     const limitsUrl = `https://cloud.oracle.com/limits?region=${region}`;
     if (subscribed && !subscribed.includes(region)) {
       return { region, status: 'not-enabled' as const, summary: 'Region not subscribed in your tenancy', quotas: [], spot: null, spotReady: null,
@@ -302,15 +397,15 @@ async function oracleAccess(provider: any, regionIds: string[]): Promise<RegionA
     } catch (error) {
       return unknown(region, error, 'oracle');
     }
-  });
+  }));
 }
 
-export const CHECKERS: Record<ProviderName, (provider: any, regions: string[]) => Promise<RegionAccess[]>> = {
+export const CHECKERS: Record<ProviderName, (provider: any, regions: string[], log?: Log) => Promise<RegionAccess[]>> = {
   gcp: gcpAccess, aws: awsAccess, azure: azureAccess, oracle: oracleAccess,
 };
 
 /** Access for every cloud (connected or not) and every catalog region. */
-export async function getRegionAccess(userId: string, refresh = false): Promise<{ generatedAt: string; clouds: CloudAccess[] }> {
+export async function getRegionAccess(userId: string, refresh = false, log: Log = noLog): Promise<{ generatedAt: string; clouds: CloudAccess[] }> {
   const creds = await listCredentialSummaries(userId);
   const connected = new Set(creds.map((c) => c.provider).filter(isProviderName));
 
@@ -323,23 +418,65 @@ export async function getRegionAccess(userId: string, refresh = false): Promise<
     // Every catalog region is listed even when it can't be checked, so the
     // page can show the whole footprint ("this would work once connected").
     const placeholder = (status: RegionStatus, summary: string) => withCoords(catalog.regions.map((r) => ({ region: r.id, status, summary, quotas: [], spot: null, spotReady: null })));
+    const tag = SHORT[catalog.provider].padEnd(5);
     if (!connected.has(catalog.provider)) {
+      log('info', `${tag}   no keys saved — skipped (${catalog.regions.length} regions shown as "No keys")`);
       return { ...base, connected: false, checkedAt: new Date().toISOString(), regions: placeholder('not-connected', `Add your ${catalog.label} keys on Config to check this region`) };
     }
     const key = `${userId}:${catalog.provider}`;
     const hit = cache.get(key);
-    if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+    if (!refresh && hit && Date.now() - hit.at < CACHE_MS) {
+      log('info', `${tag}   using the check from ${Math.max(1, Math.round((Date.now() - hit.at) / 60000))} min ago (kept 10 min) — press Re-check to ask ${catalog.label} again`);
+      return hit.value;
+    }
     let value: CloudAccess;
+    const t0 = Date.now();
+    log('info', `${tag}   ${catalog.label}: checking ${catalog.regions.length} regions with your saved key…`);
     try {
-      const provider = await providerFor(userId, catalog.provider);
-      const list = await CHECKERS[catalog.provider](provider, catalog.regions.map((r) => r.id));
+      const provider = traced(await providerFor(userId, catalog.provider), catalog.provider, log);
+      const list = await CHECKERS[catalog.provider](provider, catalog.regions.map((r) => r.id), log);
       value = { ...base, connected: true, checkedAt: new Date().toISOString(), regions: withCoords(list) };
+      const n = (st: RegionStatus) => list.filter((a) => a.status === st).length;
+      log('ok', `${tag}   ${catalog.label} done in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${n('ready')} ready · ${n('no-quota')} no quota · ${n('not-enabled')} not enabled · ${n('not-offered')} not sold · ${n('unknown')} unchecked`);
     } catch (error) {
       value = { ...base, connected: true, checkedAt: new Date().toISOString(), error: toFriendlyError(error, catalog.provider), regions: [] };
       value.regions = placeholder('unknown', `Couldn't check: ${value.error!.title}`);
+      log('err', `${tag}   ${catalog.label}: couldn't check — ${value.error!.title}`);
     }
     cache.set(key, { at: Date.now(), value });
     return value;
   }));
   return { generatedAt: new Date().toISOString(), clouds };
+}
+
+
+// ---------------------------------------------------------------------------
+// Checks with a live log: POST starts one, GET polls its new lines.
+// Kept in memory for 10 minutes (one server instance).
+// ---------------------------------------------------------------------------
+interface LiveCheck {
+  userId: string; startedAt: number; done: boolean;
+  lines: Array<{ i: number; ms: number; level: LogLevel; text: string }>;
+  result?: { generatedAt: string; clouds: CloudAccess[] }; error?: string;
+}
+const liveChecks = new Map<string, LiveCheck>();
+
+export function startRegionCheck(userId: string, refresh: boolean): string {
+  for (const [k, v] of liveChecks) if (Date.now() - v.startedAt > 10 * 60_000) liveChecks.delete(k);
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const check: LiveCheck = { userId, startedAt: Date.now(), done: false, lines: [] };
+  liveChecks.set(id, check);
+  const log: Log = (level, text) => { if (check.lines.length < 5000) check.lines.push({ i: check.lines.length + 1, ms: Date.now() - check.startedAt, level, text }); };
+  log('info', `Asking your clouds where you can launch a GPU machine${refresh ? ' (fresh check)' : ''}…`);
+  getRegionAccess(userId, refresh, log)
+    .then((r) => { check.result = r; log('ok', `All done in ${((Date.now() - check.startedAt) / 1000).toFixed(1)} s.`); })
+    .catch((e) => { check.error = String(e?.message || e); log('err', `Failed: ${check.error}`); })
+    .finally(() => { check.done = true; });
+  return id;
+}
+
+export function readRegionCheck(userId: string, id: string, after: number) {
+  const c = liveChecks.get(id);
+  if (!c || c.userId !== userId) return null;
+  return { done: c.done, lines: c.lines.filter((l) => l.i > after), result: c.done ? c.result : undefined, error: c.error };
 }
