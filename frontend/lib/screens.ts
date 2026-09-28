@@ -67,7 +67,7 @@ export function fitResolution(screen: { w: number; h: number }, presetPixels: nu
   return { w: W, h: H };
 }
 
-/** This device's screen in real pixels (e.g. 3024×1964 on a 14″ MacBook Pro), or null. */
+/** This browser window's screen in real pixels (e.g. 3024×1964 on a 14″ MacBook Pro), or null. */
 export function detectScreen(): { w: number; h: number } | null {
   if (typeof window === 'undefined' || !window.screen?.width) return null;
   const dpr = window.devicePixelRatio || 1;
@@ -75,3 +75,44 @@ export function detectScreen(): { w: number; h: number } | null {
   const b = Math.round(window.screen.height * dpr);
   return { w: Math.max(a, b), h: Math.min(a, b) }; // landscape
 }
+
+export interface AttachedScreen { key: string; label: string; w: number; h: number; primary: boolean; current: boolean }
+
+/**
+ * Every display attached to this computer, via the browser's Window
+ * Management API (Chrome/Edge 100+). The browser asks once for permission
+ * ("Manage windows on all your displays"); with `ask` false we only read
+ * the list when that was already granted, so nothing pops up on page load.
+ * Returns null where the API doesn't exist (Safari, Firefox) or permission
+ * was refused — then only the window's own screen is known (detectScreen).
+ */
+export async function detectAllScreens(ask: boolean): Promise<AttachedScreen[] | null> {
+  const w = typeof window !== 'undefined' ? (window as any) : null;
+  if (!w?.getScreenDetails) return null;
+  if (!ask) {
+    try {
+      const st = await navigator.permissions.query({ name: 'window-management' as PermissionName });
+      if (st.state !== 'granted') return null;
+    } catch { return null; }
+  }
+  try {
+    const details = await w.getScreenDetails();
+    return (details.screens as any[]).map((sc, i) => {
+      const dpr = sc.devicePixelRatio || 1;
+      const a = Math.round(sc.width * dpr);
+      const b = Math.round(sc.height * dpr);
+      return {
+        key: `${i}:${a}x${b}`,
+        label: sc.label || (sc.isInternal ? 'Built-in display' : `Display ${i + 1}`),
+        w: Math.max(a, b), h: Math.min(a, b),
+        primary: !!sc.isPrimary,
+        current: sc === details.currentScreen,
+      };
+    });
+  } catch {
+    return null; // permission refused
+  }
+}
+
+/** Can this browser list every display? (Offer the "find my other screens" button.) */
+export const canListScreens = () => typeof window !== 'undefined' && 'getScreenDetails' in window;

@@ -41,7 +41,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
-import { SCREENS, fitResolution, detectScreen, MAX_W, MAX_H } from '@/lib/screens';
+import { SCREENS, fitResolution, detectScreen, detectAllScreens, canListScreens, MAX_W, MAX_H, type AttachedScreen } from '@/lib/screens';
 
 type OS = 'windows' | 'macos' | 'linux';
 
@@ -122,9 +122,14 @@ export default function MoonlightLauncher({
   const [app, setApp] = useState('Desktop');
   const [preset, setPreset] = useState(PRESETS[quality] ? quality : 'high');
   const [fullscreen, setFullscreen] = useState(true);
-  // Screen shape: 'auto' = this device's display; else a SCREENS preset id.
+  // Screen shape: 'auto' = the screen this browser window is on;
+  // 'attached:<key>' = one of this computer's displays (multi-monitor);
+  // else a SCREENS preset id.
   const [screenId, setScreenId] = useState('16x9');
   const [detected, setDetected] = useState<{ w: number; h: number } | null>(null);
+  const [attached, setAttached] = useState<AttachedScreen[] | null>(null);
+  const [listTried, setListTried] = useState(false);
+  const findScreens = async () => { setListTried(true); setAttached(await detectAllScreens(true)); };
   const [pairing, setPairing] = useState<{ operationId: string; pin: string; host: string } | null>(null);
   const [pairError, setPairError] = useState<ApiError | null>(null);
   const [pairBusy, setPairBusy] = useState(false);
@@ -132,11 +137,20 @@ export default function MoonlightLauncher({
 
   useEffect(() => setOs(detectOS()), []);
   useEffect(() => {
-    // Default to this device's shape when it isn't plain 16:9 (e.g. a MacBook).
+    // Default to this screen's shape when it isn't plain 16:9 (e.g. a MacBook).
     const d = detectScreen();
     setDetected(d);
+    // All displays, if the browser already has permission to list them.
+    detectAllScreens(false).then((list) => list && setAttached(list));
     try { const saved = localStorage.getItem('moonlight.screen'); if (saved) { setScreenId(saved); return; } } catch { /* no storage */ }
     if (d && Math.abs(d.w / d.h - 16 / 9) > 0.02) setScreenId('auto');
+  }, []);
+  useEffect(() => {
+    // Dragging the browser to another monitor changes "this screen".
+    const update = () => setDetected(detectScreen());
+    window.addEventListener('resize', update);
+    window.addEventListener('focus', update);
+    return () => { window.removeEventListener('resize', update); window.removeEventListener('focus', update); };
   }, []);
   const pickScreen = (id: string) => { setScreenId(id); try { localStorage.setItem('moonlight.screen', id); } catch { /* no storage */ } };
   useEffect(() => { if (PRESETS[quality]) setPreset(quality); }, [quality]);
@@ -144,7 +158,9 @@ export default function MoonlightLauncher({
   const base = PRESETS[preset];
   const exe = MOONLIGHT_EXE[os];
   // The stream's size: the preset's pixel budget in the chosen screen's shape.
-  const screen = screenId === 'auto' ? detected : SCREENS.find((x) => x.id === screenId) || null;
+  const screen = screenId === 'auto' ? detected
+    : screenId.startsWith('attached:') ? attached?.find((x) => `attached:${x.key}` === screenId) || detected
+    : SCREENS.find((x) => x.id === screenId) || null;
   const [bw, bh] = base.resolution.split('x').map(Number);
   const fitted = screen && screenId !== '16x9' ? fitResolution(screen, bw * bh) : { w: bw, h: bh };
   // Bitrate follows the pixel count (within ±40% of the preset's).
@@ -249,7 +265,14 @@ export default function MoonlightLauncher({
           <label className="text-xs text-slate-400 space-y-1">
             <span className="block">Your screen</span>
             <select value={screenId} onChange={(e) => pickScreen(e.target.value)} className="input-neon w-full px-2 py-1.5">
-              <option value="auto" disabled={!detected}>This screen{detected ? ` (${detected.w}×${detected.h})` : ''}</option>
+              <option value="auto" disabled={!detected}>The screen this window is on{detected ? ` (${detected.w}×${detected.h})` : ''}</option>
+              {attached && attached.length > 0 && (
+                <optgroup label="Your displays">
+                  {attached.map((x) => (
+                    <option key={x.key} value={`attached:${x.key}`}>{x.label} ({x.w}×{x.h}){x.primary ? ' · main' : ''}{x.current ? ' · this window' : ''}</option>
+                  ))}
+                </optgroup>
+              )}
               {Array.from(new Set(SCREENS.map((x) => x.group))).map((g) => (
                 <optgroup key={g} label={g}>
                   {SCREENS.filter((x) => x.group === g).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
@@ -258,6 +281,14 @@ export default function MoonlightLauncher({
             </select>
           </label>
         </div>
+        <p className="text-[0.7rem] text-slate-500 leading-relaxed">
+          More than one monitor? Pick the one you&apos;ll play on — Moonlight streams to the display its window is on.
+          {attached
+            ? <> {attached.length} display{attached.length === 1 ? '' : 's'} found.</>
+            : canListScreens()
+              ? <> <button type="button" onClick={findScreens} className="text-neon-cyan hover:underline">Find my other displays</button>{listTried && ' (permission refused — allow “window management” for this site in the browser, or pick a size from the list)'}</>
+              : <> This browser can only see the screen its window is on: drag this window to the other monitor and choose “The screen this window is on”, or pick the size from the list.</>}
+        </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
           <span>Stream: <span className="font-mono text-slate-200">{fitted.w}×{fitted.h}</span> @ {p.fps} fps · {(p.bitrateKbps / 1000).toFixed(1)} Mbps</span>
           <span className="text-slate-500">In the Moonlight app instead: Settings → Resolution → Custom → {fitted.w}×{fitted.h}</span>
