@@ -147,11 +147,12 @@ export default function RegionsPage() {
           </div>
 
           {/* ---- Legend ---- */}
-          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[0.7rem] text-slate-400" aria-label="Legend">
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:flex sm:flex-wrap text-[0.7rem] text-slate-400" aria-label="Legend">
             {(Object.keys(ACCESS_STYLE) as AccessStatus[]).map((s) => (
-              <li key={s} className="inline-flex items-center gap-1"><Chip status={s} compact /> {ACCESS_STYLE[s].label}</li>
+              <li key={s} className="inline-flex items-center gap-1"><Chip status={s} mode="icon" /> {ACCESS_STYLE[s].label}</li>
             ))}
             <li className="inline-flex items-center gap-1"><span className="inline-block w-6 text-center text-slate-600">·</span> Cloud has no region here</li>
+            <li className="col-span-2 sm:hidden text-slate-500">Tap a symbol in the table for the details and the fix.</li>
           </ul>
 
           {/* ---- Places × clouds ---- */}
@@ -160,7 +161,7 @@ export default function RegionsPage() {
               <thead>
                 <tr className="text-left text-[0.66rem] uppercase tracking-label text-slate-500 bg-white/[0.03]">
                   <th className="py-2 pl-2.5 pr-1 font-normal">{me ? <>Nearest to {me.label.split(',')[0]}</> : 'Place'}</th>
-                  {CLOUDS.map((c) => <th key={c.id} className="py-2 px-0.5 font-normal text-center w-[3.1rem] xs:w-[4.5rem] sm:w-28"><span className="inline-flex flex-col sm:flex-row items-center gap-1"><CloudLogo provider={c.id} size={18} /><span className="hidden sm:inline">{c.short}</span></span></th>)}
+                  {CLOUDS.map((c) => <th key={c.id} className="py-2 px-0.5 font-normal text-center w-10 sm:w-28"><span className="inline-flex flex-col sm:flex-row items-center gap-1"><CloudLogo provider={c.id} size={18} /><span className="hidden sm:inline">{c.short}</span></span></th>)}
                 </tr>
               </thead>
               <tbody>
@@ -215,12 +216,18 @@ export default function RegionsPage() {
   );
 }
 
-function Chip({ status, compact }: { status: AccessStatus; compact?: boolean }) {
+/**
+ * Status chip. "icon" = the symbol only (legend); "auto" = symbol only on
+ * phones, where four columns of words don't fit, and symbol + word from
+ * 640px; "full" = always both (detail panel).
+ */
+function Chip({ status, mode = 'auto' }: { status: AccessStatus; mode?: 'icon' | 'auto' | 'full' }) {
   const s = ACCESS_STYLE[status];
+  const size = mode === 'icon' ? 'w-6' : mode === 'auto' ? 'w-7 h-6 sm:w-auto sm:h-auto sm:min-w-[1.5rem]' : 'min-w-[1.5rem]';
   return (
-    <span className={`inline-flex items-center justify-center gap-1 rounded border px-1 py-0.5 text-[0.62rem] uppercase tracking-label whitespace-nowrap ${s.className} ${compact ? 'w-6' : 'min-w-[1.5rem]'}`}>
+    <span className={`inline-flex items-center justify-center gap-1 rounded border px-1 py-0.5 text-[0.62rem] uppercase tracking-label whitespace-nowrap ${s.className} ${size}`}>
       <span aria-hidden className="font-bold">{s.icon}</span>
-      {!compact && <span className="hidden xs:inline">{s.short}</span>}
+      {mode !== 'icon' && <span className={mode === 'auto' ? 'hidden sm:inline' : ''}>{s.short}</span>}
     </span>
   );
 }
@@ -235,7 +242,7 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
               <p className="text-sm text-slate-100">{cloudLabel} · {r.name}</p>
               <p className="text-[0.66rem] text-slate-500 font-mono break-all">{r.region}</p>
             </div>
-            <Chip status={r.status} />
+            <Chip status={r.status} mode="full" />
           </div>
           <p className="text-xs text-slate-300">{r.summary}</p>
           {!!r.notSold?.length && r.status !== 'not-offered' && (
