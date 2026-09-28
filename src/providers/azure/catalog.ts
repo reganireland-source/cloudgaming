@@ -106,6 +106,36 @@ export const AZURE_REGIONS: AzureRegion[] = [
   { id: 'westus2', name: 'Washington (West US 2)', lat: 47.23, lng: -119.85, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
   { id: 'westeurope', name: 'Netherlands (West Europe)', lat: 52.37, lng: 4.9, gpus: ['T4'], priceFactor: 1.1, egressPerGb: 0.087 },
   { id: 'uksouth', name: 'London (UK South)', lat: 51.51, lng: -0.13, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.087 },
+  // Every other public Azure region, 2026. Not all of them sell the T4 sizes
+  // (or sell them to every subscription): the Regions page asks Azure live
+  // (its SKU list) and shows "Not sold here" or the restriction, with the fix.
+  { id: 'australiasoutheast', name: 'Melbourne (Australia Southeast)', lat: -37.81, lng: 144.96, gpus: ['T4'], priceFactor: 1.4, egressPerGb: 0.12 },
+  { id: 'eastus2', name: 'Virginia (East US 2)', lat: 36.67, lng: -78.39, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
+  { id: 'southcentralus', name: 'Texas (South Central US)', lat: 29.42, lng: -98.49, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
+  { id: 'northcentralus', name: 'Chicago (North Central US)', lat: 41.88, lng: -87.63, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
+  { id: 'centralus', name: 'Iowa (Central US)', lat: 41.59, lng: -93.6, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
+  { id: 'westus3', name: 'Phoenix (West US 3)', lat: 33.45, lng: -112.07, gpus: ['T4'], priceFactor: 1.0, egressPerGb: 0.087 },
+  { id: 'canadacentral', name: 'Toronto (Canada Central)', lat: 43.65, lng: -79.38, gpus: ['T4'], priceFactor: 1.1, egressPerGb: 0.087 },
+  { id: 'brazilsouth', name: 'São Paulo (Brazil South)', lat: -23.55, lng: -46.63, gpus: ['T4'], priceFactor: 1.5, egressPerGb: 0.181 },
+  { id: 'mexicocentral', name: 'Querétaro (Mexico Central)', lat: 20.59, lng: -100.39, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.087 },
+  { id: 'northeurope', name: 'Ireland (North Europe)', lat: 53.35, lng: -6.26, gpus: ['T4'], priceFactor: 1.1, egressPerGb: 0.087 },
+  { id: 'ukwest', name: 'Cardiff (UK West)', lat: 51.48, lng: -3.18, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.087 },
+  { id: 'francecentral', name: 'Paris (France Central)', lat: 48.86, lng: 2.35, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.087 },
+  { id: 'germanywestcentral', name: 'Frankfurt (Germany West Central)', lat: 50.11, lng: 8.68, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.087 },
+  { id: 'switzerlandnorth', name: 'Zurich (Switzerland North)', lat: 47.37, lng: 8.54, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.087 },
+  { id: 'swedencentral', name: 'Stockholm (Sweden Central)', lat: 60.67, lng: 17.14, gpus: ['T4'], priceFactor: 1.05, egressPerGb: 0.087 },
+  { id: 'norwayeast', name: 'Oslo (Norway East)', lat: 59.91, lng: 10.75, gpus: ['T4'], priceFactor: 1.25, egressPerGb: 0.087 },
+  { id: 'polandcentral', name: 'Warsaw (Poland Central)', lat: 52.23, lng: 21.01, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.087 },
+  { id: 'italynorth', name: 'Milan (Italy North)', lat: 45.46, lng: 9.19, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.087 },
+  { id: 'spaincentral', name: 'Madrid (Spain Central)', lat: 40.42, lng: -3.7, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.087 },
+  { id: 'uaenorth', name: 'Dubai (UAE North)', lat: 25.2, lng: 55.27, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'qatarcentral', name: 'Doha (Qatar Central)', lat: 25.29, lng: 51.53, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'israelcentral', name: 'Tel Aviv (Israel Central)', lat: 32.08, lng: 34.78, gpus: ['T4'], priceFactor: 1.25, egressPerGb: 0.12 },
+  { id: 'southafricanorth', name: 'Johannesburg (South Africa North)', lat: -26.2, lng: 28.05, gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.181 },
+  { id: 'koreasouth', name: 'Busan (Korea South)', lat: 35.18, lng: 129.08, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'indonesiacentral', name: 'Jakarta (Indonesia Central)', lat: -6.21, lng: 106.85, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'newzealandnorth', name: 'Auckland (New Zealand North)', lat: -36.85, lng: 174.76, gpus: ['T4'], priceFactor: 1.45, egressPerGb: 0.12 },
+  { id: 'westindia', name: 'Mumbai (West India)', lat: 19.08, lng: 72.88, gpus: ['T4'], priceFactor: 1.05, egressPerGb: 0.12 },
 ];
 
 export const DEFAULT_REGION = 'southeastasia';

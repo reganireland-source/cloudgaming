@@ -16,7 +16,7 @@
 
 import { apiFetch, type FriendlyError } from './auth';
 
-export type AccessStatus = 'ready' | 'no-quota' | 'not-enabled' | 'unknown' | 'not-connected';
+export type AccessStatus = 'ready' | 'no-quota' | 'not-enabled' | 'not-offered' | 'unknown' | 'not-connected';
 
 export interface QuotaLine { label: string; limit: number; used: number; unit: 'GPUs' | 'vCPUs' }
 
@@ -28,6 +28,7 @@ export interface RegionAccess {
   spot: QuotaLine | null;
   spotReady: boolean | null;
   missingGpus?: string[];   // ready, except for these GPU models (GCP: T4 vs L4 quota)
+  notSold?: string[];       // GPU models the cloud doesn't sell in this region at all
   fix?: { steps: string[]; consoleUrl?: string; consoleLabel?: string; cli?: string };
 }
 
@@ -45,6 +46,7 @@ export const fetchRegionAccess = (refresh = false) =>
 
 /** Status for one GPU model: a region that's ready for T4 but has no L4 quota is "no quota" for an L4 machine. */
 export function statusFor(a: RegionAccess, gpuModel?: string): AccessStatus {
+  if (gpuModel && a.notSold?.includes(gpuModel)) return 'not-offered';
   return a.status === 'ready' && gpuModel && a.missingGpus?.includes(gpuModel) ? 'no-quota' : a.status;
 }
 
@@ -60,6 +62,7 @@ export const ACCESS_STYLE: Record<AccessStatus, { icon: string; label: string; s
   ready: { icon: '✓', label: 'Ready', short: 'Ready', className: 'border-neon-lime/60 text-neon-lime bg-neon-lime/[0.06]' },
   'no-quota': { icon: '!', label: 'No GPU quota', short: 'No quota', className: 'border-neon-amber/60 text-neon-amber bg-neon-amber/[0.06]' },
   'not-enabled': { icon: '✗', label: 'Region not enabled', short: 'Not enabled', className: 'border-neon-pink/60 text-neon-pink bg-neon-pink/[0.06]' },
+  'not-offered': { icon: '⊘', label: 'GPU not sold here', short: 'Not sold', className: 'border-white/20 text-slate-400 bg-white/[0.02]' },
   unknown: { icon: '?', label: 'Couldn’t check', short: 'Unchecked', className: 'border-white/25 text-slate-300' },
   'not-connected': { icon: '–', label: 'Cloud not connected', short: 'No keys', className: 'border-white/15 text-slate-500' },
 };

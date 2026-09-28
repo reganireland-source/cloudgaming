@@ -72,6 +72,9 @@ function isNotFound(error: any): boolean {
   return error?.code === 404 || error?.code === 5 || /not found|was not found|NOT_FOUND/i.test(String(error?.message));
 }
 
+/** Live GPU zones per project (see getGpuZones). */
+const GPU_ZONES_CACHE = new Map<string, { at: number; value: Record<string, Partial<Record<'T4' | 'L4', string[]>>> }>();
+
 export class GCPProvider extends CloudProvider {
   name = 'gcp' as const;
   readonly selfConfiguring = true;
@@ -89,6 +92,7 @@ export class GCPProvider extends CloudProvider {
   private snapshots: any;
   private projects: any;
   private regions: any;
+  private acceleratorTypes: any;
   private networks: any;
   private subnetworks: any;
   private regionOps: any;
@@ -164,6 +168,7 @@ export class GCPProvider extends CloudProvider {
     this.networks = new compute.NetworksClient(opts);
     this.subnetworks = new compute.SubnetworksClient(opts);
     this.regionOps = new compute.RegionOperationsClient(opts);
+    this.acceleratorTypes = new compute.AcceleratorTypesClient(opts);
   }
 
   // ==========================================================================
@@ -365,7 +370,26 @@ export class GCPProvider extends CloudProvider {
     const name = `cg-${crypto.randomBytes(4).toString('hex')}`;
     const zoneErrors: string[] = [];
 
-    for (const letter of region.zones) {
+    // Ask Google which zones of the region really sell this GPU (the catalog
+    // is best knowledge); fall back to the catalog's zones if that fails.
+    const live = await this.getGpuZones().catch(() => null);
+    let letters = region.zones;
+    if (live) {
+      const zones = live[region.id]?.[shape.gpuModel] || [];
+      if (!zones.length) {
+        throw new FriendlyCloudError({
+          code: 'GPU_NOT_IN_REGION',
+          title: `${shape.gpuModel} GPUs aren't sold in ${region.name}`,
+          explanation: `Google doesn't offer ${shape.gpuModel} GPUs in any zone of ${region.id} right now.`,
+          fixes: [`Pick another region — the Regions page shows where each GPU is sold.`],
+          consoleUrl: 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones', consoleLabel: 'Google\'s GPU regions list',
+        });
+      }
+      const liveLetters = zones.map((z) => z.slice(region.id.length + 1));
+      letters = [...region.zones.filter((l) => liveLetters.includes(l)), ...liveLetters.filter((l) => !region.zones.includes(l))];
+    }
+
+    for (const letter of letters) {
       const zone = `${region.id}-${letter}`;
       await this.report('info', `Trying zone ${zone}…`);
 
@@ -740,6 +764,30 @@ export class GCPProvider extends CloudProvider {
   async getProject(): Promise<any> {
     const [project] = await this.projects.get({ project: this.projectId });
     return project;
+  }
+
+  /**
+   * Where Google sells our GPUs: { region: { T4: [zones], L4: [zones] } },
+   * from the live accelerator list (one call for every zone). Cached for 6 h
+   * per project.
+   */
+  async getGpuZones(): Promise<Record<string, Partial<Record<'T4' | 'L4', string[]>>>> {
+    const hit = GPU_ZONES_CACHE.get(this.projectId);
+    if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.value;
+    const byName: Record<string, 'T4' | 'L4'> = { 'nvidia-tesla-t4': 'T4', 'nvidia-l4': 'L4' };
+    const value: Record<string, Partial<Record<'T4' | 'L4', string[]>>> = {};
+    for await (const [scope, list] of this.acceleratorTypes.aggregatedListAsync({ project: this.projectId })) {
+      const zone = String(scope).replace(/^zones\//, '');
+      for (const a of (list as any)?.acceleratorTypes || []) {
+        const model = byName[String(a.name)];
+        if (!model) continue;
+        const region = zone.replace(/-[a-z]$/, '');
+        ((value[region] ||= {})[model] ||= []).push(zone);
+      }
+    }
+    for (const r of Object.values(value)) for (const z of Object.values(r)) z!.sort();
+    GPU_ZONES_CACHE.set(this.projectId, { at: Date.now(), value });
+    return value;
   }
 
   /** A region's quotas (e.g. NVIDIA_T4_GPUS). */

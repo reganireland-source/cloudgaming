@@ -11,7 +11,10 @@
  *   ready        you can launch a GPU machine here now
  *   no-quota     the region works, but your GPU quota there is too low
  *   not-enabled  the region isn't switched on for your account (AWS opt-in
- *                regions, Oracle region subscriptions)
+ *                regions, Oracle region subscriptions, Azure sizes held back
+ *                for your subscription)
+ *   not-offered  the cloud doesn't sell our GPU machines in this region at
+ *                all (asked live: the region lists are best knowledge)
  *   unknown      we couldn't read it (permission to read quotas missing,
  *                or the cloud didn't answer) — launching may still work
  *
@@ -38,9 +41,10 @@ import type { ProviderName } from '../providers/shared/types';
 import { toFriendlyError, FriendlyError } from '../providers/errors';
 import { listCredentialSummaries, providerFor } from './CredentialService';
 import { GCP_SHAPES } from '../providers/gcp/catalog';
+import { AWS_SHAPES } from '../providers/aws/catalog';
 import { AZURE_SHAPES, T4_QUOTA_FAMILY } from '../providers/azure/catalog';
 
-export type RegionStatus = 'ready' | 'no-quota' | 'not-enabled' | 'unknown' | 'not-connected';
+export type RegionStatus = 'ready' | 'no-quota' | 'not-enabled' | 'not-offered' | 'unknown' | 'not-connected';
 
 export interface QuotaLine {
   label: string;     // "NVIDIA T4 GPUs", "G and VT on-demand vCPUs"…
@@ -58,6 +62,8 @@ export interface RegionAccess {
   spotReady: boolean | null;
   /** Ready overall, but these GPU models have no free quota (GCP quotas are per GPU: T4 vs L4). */
   missingGpus?: string[];
+  /** GPU models of ours the cloud doesn't sell in this region (asked live). */
+  notSold?: string[];
   fix?: { steps: string[]; consoleUrl?: string; consoleLabel?: string; cli?: string };
 }
 
@@ -92,6 +98,13 @@ const unknown = (region: string, error: unknown, provider: string): RegionAccess
     fix: { steps: f.fixes, consoleUrl: f.consoleUrl, consoleLabel: f.consoleLabel } };
 };
 
+/** The cloud doesn't sell our GPU machines here at all. */
+const notOffered = (region: string, summary: string, consoleUrl: string, consoleLabel: string): RegionAccess => ({
+  region, status: 'not-offered', summary, quotas: [], spot: null, spotReady: null,
+  fix: { steps: ['Nothing to request: the cloud has no GPU machines of the kinds we launch in this region.', 'Pick the nearest region that shows Ready or No quota.'], consoleUrl, consoleLabel },
+});
+const uniq = <T,>(list: T[]) => Array.from(new Set(list));
+
 // ---------------------------------------------------------------------------
 // Google Cloud
 // ---------------------------------------------------------------------------
@@ -103,16 +116,26 @@ async function gcpAccess(provider: any, regionIds: string[]): Promise<RegionAcce
   const quotasUrl = `https://console.cloud.google.com/iam-admin/quotas?project=${pid}`;
   const metrics = Array.from(new Set(GCP_SHAPES.map((s) => s.gpuQuotaMetric)));   // NVIDIA_T4_GPUS, NVIDIA_L4_GPUS
 
+  // Where Google actually sells T4 / L4 (one call; null if it can't be read).
+  const gpuZones: Record<string, Record<string, string[]>> | null = await provider.getGpuZones().catch(() => null);
+  const allModels = uniq(GCP_SHAPES.map((sh) => sh.gpuModel));
+
   return mapLimit(regionIds, 5, async (region) => {
+    const sold = gpuZones ? allModels.filter((m) => gpuZones[region]?.[m]?.length) : allModels;
+    const notSold = allModels.filter((m) => !sold.includes(m));
+    if (!sold.length) return notOffered(region, 'Google sells no T4 or L4 GPUs in this region', 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones', 'Google’s GPU locations');
+    const soldMetrics = metrics.filter((m) => sold.includes(GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!.gpuModel));
+    const withSold = (a: RegionAccess): RegionAccess => (notSold.length ? { ...a, notSold, summary: `${a.summary} · only ${sold.join('/')} sold here` } : a);
     try {
+      return withSold(await (async (): Promise<RegionAccess> => {
       const q = await provider.getRegionQuotas(region);
       const line = (metric: string): QuotaLine => {
         const m = q.find((x: any) => x.metric === metric);
         return { label: metric.replace(/_/g, ' ').replace('NVIDIA ', 'NVIDIA ').replace(' GPUS', ' GPUs').replace('PREEMPTIBLE ', 'Spot '), limit: m?.limit || 0, used: m?.usage || 0, unit: 'GPUs' };
       };
       const quotas = [{ label: 'GPUs (all regions)', limit: globalLimit, used: globalUsage, unit: 'GPUs' as const }, ...metrics.map(line)];
-      const regional = metrics.map(line).filter((l) => l.limit - l.used >= 1);
-      const spotLines = metrics.map((m) => line('PREEMPTIBLE_' + m));
+      const regional = soldMetrics.map(line).filter((l) => l.limit - l.used >= 1);
+      const spotLines = soldMetrics.map((m) => line('PREEMPTIBLE_' + m));
       const spotOk = spotLines.some((l) => l.limit - l.used >= 1);
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
       const cli = `gcloud beta quotas preferences create --project=${pid} --service=compute.googleapis.com \\\n  --quota-id=<ID from: gcloud beta quotas info list --service=compute.googleapis.com --project=${pid} --filter="quotaId~GPU" --format="value(quotaId)"> \\\n  --preferred-value=1 --dimensions=region=${region} --email=<you> --justification="Personal cloud gaming VM"`;
@@ -126,10 +149,11 @@ async function gcpAccess(provider: any, regionIds: string[]): Promise<RegionAcce
           fix: { steps: [`On the Quotas page, filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs", pick ${region}, request 1.`, 'For spot machines also request the "Preemptible" version.', 'Approval: minutes to 2 business days.'],
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas', cli } };
       }
-      const missingGpus = metrics.filter((m) => { const l = line(m); return l.limit - l.used < 1; })
+      const missingGpus = soldMetrics.filter((m) => { const l = line(m); return l.limit - l.used < 1; })
         .map((m) => GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!.gpuModel);
       return { region, status: 'ready', summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, spot: bestSpot, spotReady: spotOk, missingGpus,
         ...(missingGpus.length ? { fix: { steps: [`Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here. For ${missingGpus.join('/')} machines, request "NVIDIA ${missingGpus[0]} GPUs" = 1 in ${region}.`], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', cli } } : {}) };
+      })());
     } catch (error) {
       return unknown(region, error, 'gcp');
     }
@@ -154,6 +178,16 @@ async function awsAccess(provider: any, regionIds: string[]): Promise<RegionAcce
           consoleUrl: 'https://console.aws.amazon.com/billing/home#/account', consoleLabel: 'Open Account → AWS Regions',
           cli: `aws account enable-region --region-name ${region}` } };
     }
+    // Which of our instance types AWS sells here (asked live; skipped if it can't be read).
+    const allModels = uniq(AWS_SHAPES.map((sh) => sh.gpuModel));
+    let notSold: string[] = [];
+    try {
+      const offered: Set<string> = await provider.getGpuTypesOffered(region);
+      const sold = allModels.filter((m) => AWS_SHAPES.some((sh) => sh.gpuModel === m && offered.has(sh.id)));
+      if (!sold.length) return notOffered(region, 'AWS sells no g4dn (T4) or g5 (A10G) machines in this region', 'https://aws.amazon.com/ec2/instance-types/g4/', 'AWS G4dn instances');
+      notSold = allModels.filter((m) => !sold.includes(m));
+    } catch { /* unknown: assume the catalog is right */ }
+    const withSold = (a: RegionAccess): RegionAccess => (notSold.length ? { ...a, notSold, summary: `${a.summary} · no ${notSold.join('/')} machines sold here` } : a);
     try {
       const [od, sp] = await Promise.all([
         provider.getEc2Quota(region, AWS_ON_DEMAND),
@@ -164,11 +198,11 @@ async function awsAccess(provider: any, regionIds: string[]): Promise<RegionAcce
       const cli = `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${AWS_ON_DEMAND} --desired-value 8\n` +
         `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${AWS_SPOT} --desired-value 8   # spot`;
       if (od < AWS_MIN) {
-        return { region, status: 'no-quota' as const, summary: `GPU quota is ${od} vCPUs (a machine needs ${AWS_MIN})`, quotas, spot, spotReady: sp == null ? null : sp >= AWS_MIN,
+        return withSold({ region, status: 'no-quota' as const, summary: `GPU quota is ${od} vCPUs (a machine needs ${AWS_MIN})`, quotas, spot, spotReady: sp == null ? null : sp >= AWS_MIN,
           fix: { steps: [`Service Quotas → EC2 → "Running On-Demand G and VT instances" in ${region} → Request increase → 8.`, 'For spot machines also "All G and VT Spot Instance Requests" → 8.', 'Approval: minutes to a couple of days.'],
-            consoleUrl: quotasUrl, consoleLabel: 'Request quota', cli } };
+            consoleUrl: quotasUrl, consoleLabel: 'Request quota', cli } });
       }
-      return { region, status: 'ready' as const, summary: `${od} GPU vCPUs (${Math.floor(od / AWS_MIN)} small machine${Math.floor(od / AWS_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady: sp == null ? null : sp >= AWS_MIN };
+      return withSold({ region, status: 'ready' as const, summary: `${od} GPU vCPUs (${Math.floor(od / AWS_MIN)} small machine${Math.floor(od / AWS_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady: sp == null ? null : sp >= AWS_MIN });
     } catch (error) {
       const r = unknown(region, error, 'aws');
       if (/AccessDenied|not authorized|servicequotas/i.test(String((error as any)?.code || (error as any)?.message))) {
@@ -189,6 +223,18 @@ async function azureAccess(provider: any, regionIds: string[]): Promise<RegionAc
 
   return mapLimit(regionIds, 4, async (region) => {
     const cliBase = `SUB=$(az account show --query id -o tsv)\n`;
+    // Does Azure sell our T4 sizes here, and to this subscription? (Asked live.)
+    try {
+      const sizes: Record<string, { restricted?: string }> = await provider.getSizeAvailability(region);
+      const listed = Object.values(sizes);
+      if (!listed.length) return notOffered(region, 'Azure sells no NCasT4_v3 (T4) machines in this region', 'https://azure.microsoft.com/explore/global-infrastructure/products-by-region/', 'Azure products by region');
+      if (listed.every((x) => x.restricted)) {
+        return { region, status: 'not-enabled' as const, summary: `Azure holds the T4 sizes back for your subscription here (${listed[0].restricted})`, quotas: [], spot: null, spotReady: null,
+          fix: { steps: ['Portal → Help + support → Create a support request → Service and subscription limits (quotas) → Compute-VM (cores-vCPUs).', `Ask for access to "NCASv3_T4" in ${region} (new limit 8). Microsoft reviews it by hand.`, 'Meanwhile use a nearby region that shows Ready or No quota.'],
+            consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Support/NewSupportRequestV3Blade', consoleLabel: 'New support request',
+            cli: `az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table` } };
+      }
+    } catch { /* unknown: carry on with the quota check */ }
     try {
       const usage: Array<{ name: string; limit: number; current: number }> = await provider.getComputeUsage(region);
       const find = (n: string) => usage.find((u) => u.name.toLowerCase() === n.toLowerCase());
@@ -245,8 +291,9 @@ async function oracleAccess(provider: any, regionIds: string[]): Promise<RegionA
     }
     try {
       const lim = await provider.getGpuLimit(region);
-      if (!lim || lim.limit - lim.used < 1) {
-        return { region, status: 'no-quota' as const, summary: lim ? `A10 GPU limit is ${lim.limit}` : 'No A10 GPU limit listed here', quotas: lim ? [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }] : [], spot: null, spotReady: null,
+      if (!lim) return notOffered(region, 'Oracle lists no A10 GPU limit here, so it doesn’t sell A10 machines in this region', 'https://docs.oracle.com/iaas/Content/Compute/References/computeshapes.htm', 'Oracle GPU shapes');
+      if (lim.limit - lim.used < 1) {
+        return { region, status: 'no-quota' as const, summary: `A10 GPU limit is ${lim.limit}`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }], spot: null, spotReady: null,
           fix: { steps: ['Governance → Limits, Quotas and Usage → Service "Compute" → search "GPU.A10".', 'Click "Request a service limit increase" → 1 (per availability domain).', 'Approval: hours to a couple of days.'],
             consoleUrl: limitsUrl, consoleLabel: 'Open Limits',
             cli: `oci limits value list --service-name compute --compartment-id <tenancy-ocid> --region ${region} --all --query "data[?contains(name,'a10')]" --output table` } };
@@ -258,7 +305,7 @@ async function oracleAccess(provider: any, regionIds: string[]): Promise<RegionA
   });
 }
 
-const CHECKERS: Record<ProviderName, (provider: any, regions: string[]) => Promise<RegionAccess[]>> = {
+export const CHECKERS: Record<ProviderName, (provider: any, regions: string[]) => Promise<RegionAccess[]>> = {
   gcp: gcpAccess, aws: awsAccess, azure: azureAccess, oracle: oracleAccess,
 };
 

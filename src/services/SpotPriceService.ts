@@ -82,31 +82,45 @@ async function loadAwsAdvisor(): Promise<any | undefined> {
 }
 
 // ---------------------------------------------------------------------------
-// Azure: Retail Prices API (cached 6 hours per size + region)
+// Azure: Retail Prices API — one lookup per VM size covers every region
+// (cached 6 hours per size; a failed lookup is retried after ~30 minutes)
 // ---------------------------------------------------------------------------
-const azureCache = new Map<string, { at: number; onDemand?: number; spot?: number }>();
+type AzurePrice = { onDemand?: number; spot?: number };
+const azureCache = new Map<string, { at: number; byRegion: Record<string, AzurePrice>; pending?: Promise<void> }>();
 
-async function azurePrices(armSku: string, region: string): Promise<{ onDemand?: number; spot?: number }> {
-  const key = `${armSku}|${region}`;
-  const hit = azureCache.get(key);
-  if (hit && Date.now() - hit.at < 6 * 3_600_000) return hit;
-  const filter = `serviceName eq 'Virtual Machines' and armSkuName eq '${armSku}' and armRegionName eq '${region}' and priceType eq 'Consumption'`;
-  try {
-    const res = await fetch(`https://prices.azure.com/api/retail/prices?$filter=${encodeURIComponent(filter)}`, { signal: AbortSignal.timeout(6000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const items: any[] = ((await res.json()) as any).Items || [];
-    // Linux meters only (our machines run Ubuntu); hourly; skip Low Priority.
-    const linux = items.filter((i) => !/windows/i.test(i.productName) && i.unitOfMeasure === '1 Hour' && !/low priority/i.test(i.skuName));
-    const spot = linux.find((i) => /\bspot\b/i.test(i.skuName))?.retailPrice;
-    const onDemand = linux.find((i) => !/\bspot\b/i.test(i.skuName))?.retailPrice;
-    const entry = { at: Date.now(), onDemand: onDemand || undefined, spot: spot || undefined };
-    azureCache.set(key, entry);
-    return entry;
-  } catch (error) {
-    console.error(`[Spot] Azure price lookup failed (${armSku} ${region}):`, (error as Error).message);
-    azureCache.set(key, { at: Date.now() - 5.5 * 3_600_000 }); // retry in ~30 minutes
-    return {};
-  }
+async function loadAzureSku(armSku: string): Promise<Record<string, AzurePrice>> {
+  const hit = azureCache.get(armSku);
+  if (hit && Date.now() - hit.at < 6 * 3_600_000) { await hit.pending; return hit.byRegion; }
+  const entry: { at: number; byRegion: Record<string, AzurePrice>; pending?: Promise<void> } = { at: Date.now(), byRegion: {} };
+  entry.pending = (async () => {
+    const filter = `serviceName eq 'Virtual Machines' and armSkuName eq '${armSku}' and priceType eq 'Consumption'`;
+    let url: string | null = `https://prices.azure.com/api/retail/prices?$filter=${encodeURIComponent(filter)}`;
+    try {
+      for (let page = 0; url && page < 20; page++) {
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as any;
+        // Linux meters only (our machines run Ubuntu); hourly; skip Low Priority.
+        for (const i of body.Items || []) {
+          if (/windows/i.test(i.productName) || i.unitOfMeasure !== '1 Hour' || /low priority/i.test(i.skuName)) continue;
+          const r = (entry.byRegion[String(i.armRegionName)] ||= {});
+          if (/\bspot\b/i.test(i.skuName)) r.spot ||= i.retailPrice || undefined;
+          else r.onDemand ||= i.retailPrice || undefined;
+        }
+        url = body.NextPageLink || null;
+      }
+    } catch (error) {
+      console.error(`[Spot] Azure price lookup failed (${armSku}):`, (error as Error).message);
+      entry.at = Date.now() - 5.5 * 3_600_000;
+    }
+  })();
+  azureCache.set(armSku, entry);
+  await entry.pending;
+  return entry.byRegion;
+}
+
+async function azurePrices(armSku: string, region: string): Promise<AzurePrice> {
+  return (await loadAzureSku(armSku))[region] || {};
 }
 
 const AWS_BANDS = ['<5%', '5–10%', '10–15%', '15–20%', '>20%'];

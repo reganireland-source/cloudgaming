@@ -182,14 +182,15 @@ aws iam create-access-key --user-name $U --query 'AccessKey.[AccessKeyId,SecretA
         'For spot machines, also request "All G and VT Spot Instance Requests" (quota code L-3819A6DF) → 8.',
         'Or use the direct links below: each opens that quota in the region currently selected in the console (top right), so check the region before requesting.',
         'Quota is per region: switch region (top right) and repeat for each place you travel to.',
-        'Hong Kong (ap-east-1) is an opt-in region: Account → AWS Regions → Enable it first, and wait a few minutes. Until then AWS answers as if your key were wrong.',
-        'Region names: ap-southeast-1 = Singapore, ap-east-1 = Hong Kong, ap-northeast-1 = Tokyo, ap-northeast-2 = Seoul, ap-south-1 = Mumbai, ap-southeast-2 = Sydney, us-west-2 = Oregon, us-west-1 = N. California.',
+        'Opt-in regions must be switched on first: Account → AWS Regions → Enable, then wait a few minutes (until then AWS answers as if your key were wrong). Opt-in: Hong Kong (ap-east-1), Taipei (ap-east-2), Melbourne (ap-southeast-4), Jakarta (ap-southeast-3), Malaysia (ap-southeast-5), Thailand (ap-southeast-7), Hyderabad (ap-south-2), Calgary (ca-west-1), Mexico (mx-central-1), Milan (eu-south-1), Spain (eu-south-2), Zurich (eu-central-2), Tel Aviv (il-central-1), Bahrain (me-south-1), UAE (me-central-1), Cape Town (af-south-1).',
+        'Region names — Asia-Pacific: ap-southeast-1 Singapore, ap-southeast-2 Sydney, ap-southeast-4 Melbourne, ap-southeast-3 Jakarta, ap-southeast-5 Malaysia, ap-southeast-7 Thailand, ap-east-1 Hong Kong, ap-east-2 Taipei, ap-northeast-1 Tokyo, ap-northeast-3 Osaka, ap-northeast-2 Seoul, ap-south-1 Mumbai, ap-south-2 Hyderabad. Europe: eu-west-2 London, eu-west-1 Ireland, eu-west-3 Paris, eu-central-1 Frankfurt, eu-central-2 Zurich, eu-north-1 Stockholm, eu-south-1 Milan, eu-south-2 Spain. Americas: us-east-1 N. Virginia, us-east-2 Ohio, us-west-1 N. California, us-west-2 Oregon, ca-central-1 Montréal, ca-west-1 Calgary, mx-central-1 Mexico, sa-east-1 São Paulo. Middle East/Africa: il-central-1 Tel Aviv, me-south-1 Bahrain, me-central-1 UAE, af-south-1 Cape Town.',
+        'Not every region sells every GPU (the newest ones often start with T4 only, or none): the Regions page asks AWS and shows "Not sold here" where that\'s the case, so you don\'t request quota for nothing.',
         'Approval takes from minutes to a couple of days; brand-new accounts may be asked for a use case.',
       ],
       cli: {
         shell: 'CloudShell', href: 'https://console.aws.amazon.com/cloudshell/home',
         note: 'L-DB2E81BA = on-demand G/VT, L-3819A6DF = spot G/VT. Edit the region list to the places you travel to.',
-        code: `REGIONS="ap-southeast-1 ap-northeast-1 ap-south-1 us-west-2"
+        code: `REGIONS="ap-southeast-1 ap-southeast-2 ap-southeast-4 ap-northeast-1 eu-west-2"
 
 # Current limits per region (vCPUs; 0 = blocked)
 for R in $REGIONS; do

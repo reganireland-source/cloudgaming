@@ -93,6 +93,39 @@ export const ORACLE_REGIONS: OracleRegion[] = [
   { id: 'us-phoenix-1', name: 'Phoenix', lat: 33.45, lng: -112.07, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
   { id: 'eu-frankfurt-1', name: 'Frankfurt', lat: 50.11, lng: 8.68, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
   { id: 'uk-london-1', name: 'London', lat: 51.51, lng: -0.13, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  // Every other commercial Oracle region, 2026. A region must be subscribed
+  // in your tenancy first (the Regions page shows "Not enabled" with the
+  // fix). Where Oracle has no A10 GPUs, the Regions page shows "Not sold
+  // here" (the region lists no A10 limit at all).
+  { id: 'ap-seoul-1', name: 'Seoul', lat: 37.57, lng: 126.98, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'ap-singapore-2', name: 'Singapore West', lat: 1.35, lng: 103.7, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'ap-batam-1', name: 'Batam (Indonesia)', lat: 1.13, lng: 104.05, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'us-sanjose-1', name: 'San Jose', lat: 37.34, lng: -121.89, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'us-chicago-1', name: 'Chicago', lat: 41.88, lng: -87.63, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'ca-toronto-1', name: 'Toronto', lat: 43.65, lng: -79.38, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'ca-montreal-1', name: 'Montréal', lat: 45.5, lng: -73.57, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'mx-queretaro-1', name: 'Querétaro (Mexico)', lat: 20.59, lng: -100.39, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'mx-monterrey-1', name: 'Monterrey', lat: 25.69, lng: -100.32, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'sa-saopaulo-1', name: 'São Paulo', lat: -23.55, lng: -46.63, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'sa-vinhedo-1', name: 'Vinhedo (near São Paulo)', lat: -23.03, lng: -46.98, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'sa-santiago-1', name: 'Santiago', lat: -33.45, lng: -70.67, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'sa-valparaiso-1', name: 'Valparaíso', lat: -33.05, lng: -71.62, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'sa-bogota-1', name: 'Bogotá', lat: 4.71, lng: -74.07, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'eu-amsterdam-1', name: 'Amsterdam', lat: 52.37, lng: 4.9, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'uk-cardiff-1', name: 'Newport (Wales)', lat: 51.59, lng: -2.99, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-paris-1', name: 'Paris', lat: 48.86, lng: 2.35, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-marseille-1', name: 'Marseille', lat: 43.3, lng: 5.37, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-zurich-1', name: 'Zurich', lat: 47.37, lng: 8.54, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-milan-1', name: 'Milan', lat: 45.46, lng: 9.19, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-madrid-1', name: 'Madrid', lat: 40.42, lng: -3.7, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-stockholm-1', name: 'Stockholm', lat: 59.33, lng: 18.07, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'eu-jovanovac-1', name: 'Jovanovac (Serbia)', lat: 44.02, lng: 20.9, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.0085 },
+  { id: 'il-jerusalem-1', name: 'Jerusalem', lat: 31.77, lng: 35.21, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'me-dubai-1', name: 'Dubai', lat: 25.2, lng: 55.27, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'me-abudhabi-1', name: 'Abu Dhabi', lat: 24.45, lng: 54.38, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'me-jeddah-1', name: 'Jeddah', lat: 21.49, lng: 39.19, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'me-riyadh-1', name: 'Riyadh', lat: 24.71, lng: 46.68, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
+  { id: 'af-johannesburg-1', name: 'Johannesburg', lat: -26.2, lng: 28.05, gpus: ['A10'], egressPerGb: 0, egressOverPerGb: 0.025 },
 ];
 
 export const DEFAULT_REGION = 'ap-singapore-1';

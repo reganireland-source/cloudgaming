@@ -103,6 +103,32 @@ export const AWS_REGIONS: AwsRegion[] = [
   { id: 'us-west-1', name: 'N. California', lat: 37.35, lng: -121.96, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.09 },
   { id: 'eu-west-1', name: 'Ireland', lat: 53.35, lng: -6.26, gpus: ['T4', 'A10G'], priceFactor: 1.12, egressPerGb: 0.09 },
   { id: 'eu-central-1', name: 'Frankfurt', lat: 50.11, lng: 8.68, gpus: ['T4', 'A10G'], priceFactor: 1.25, egressPerGb: 0.09 },
+  // Every other commercial region AWS runs, 2026. "(opt-in)" regions must be
+  // switched on per account first (the Regions page shows "Not enabled" with
+  // the fix). The newest regions start with few instance types: the Regions
+  // page asks AWS live which of our GPU machines are sold in each region and
+  // shows "Not sold here" / "only T4" where these lists are too hopeful.
+  { id: 'us-east-2', name: 'Ohio', lat: 40.0, lng: -83.0, gpus: ['T4', 'A10G'], priceFactor: 1.0, egressPerGb: 0.09 },
+  { id: 'ca-central-1', name: 'Montréal', lat: 45.5, lng: -73.57, gpus: ['T4', 'A10G'], priceFactor: 1.1, egressPerGb: 0.09 },
+  { id: 'ca-west-1', name: 'Calgary', lat: 51.05, lng: -114.07, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.09 },                  // opt-in
+  { id: 'mx-central-1', name: 'Querétaro (Mexico)', lat: 20.59, lng: -100.39, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.09 },       // opt-in
+  { id: 'sa-east-1', name: 'São Paulo', lat: -23.55, lng: -46.63, gpus: ['T4', 'A10G'], priceFactor: 1.6, egressPerGb: 0.15 },
+  { id: 'eu-west-2', name: 'London', lat: 51.51, lng: -0.13, gpus: ['T4', 'A10G'], priceFactor: 1.15, egressPerGb: 0.09 },
+  { id: 'eu-west-3', name: 'Paris', lat: 48.86, lng: 2.35, gpus: ['T4'], priceFactor: 1.18, egressPerGb: 0.09 },
+  { id: 'eu-north-1', name: 'Stockholm', lat: 59.33, lng: 18.07, gpus: ['T4', 'A10G'], priceFactor: 1.05, egressPerGb: 0.09 },
+  { id: 'eu-south-1', name: 'Milan', lat: 45.46, lng: 9.19, gpus: ['T4'], priceFactor: 1.2, egressPerGb: 0.09 },                        // opt-in
+  { id: 'eu-south-2', name: 'Spain (Aragón)', lat: 41.65, lng: -0.88, gpus: ['T4'], priceFactor: 1.15, egressPerGb: 0.09 },               // opt-in
+  { id: 'eu-central-2', name: 'Zurich', lat: 47.37, lng: 8.54, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.09 },                     // opt-in
+  { id: 'il-central-1', name: 'Tel Aviv', lat: 32.08, lng: 34.78, gpus: ['T4'], priceFactor: 1.25, egressPerGb: 0.11 },                 // opt-in
+  { id: 'me-south-1', name: 'Bahrain', lat: 26.07, lng: 50.56, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.117 },                   // opt-in
+  { id: 'me-central-1', name: 'UAE (Dubai)', lat: 25.2, lng: 55.27, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.11 },                // opt-in
+  { id: 'af-south-1', name: 'Cape Town', lat: -33.92, lng: 18.42, gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.154 },                // opt-in
+  { id: 'ap-south-2', name: 'Hyderabad', lat: 17.39, lng: 78.49, gpus: ['T4'], priceFactor: 1.1, egressPerGb: 0.1093 },                 // opt-in
+  { id: 'ap-southeast-3', name: 'Jakarta', lat: -6.21, lng: 106.85, gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.132 },              // opt-in
+  { id: 'ap-southeast-4', name: 'Melbourne', lat: -37.81, lng: 144.96, gpus: ['T4'], priceFactor: 1.5, egressPerGb: 0.114 },            // opt-in
+  { id: 'ap-southeast-5', name: 'Kuala Lumpur (Malaysia)', lat: 3.14, lng: 101.69, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 }, // opt-in
+  { id: 'ap-southeast-7', name: 'Bangkok (Thailand)', lat: 13.76, lng: 100.5, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.12 },     // opt-in
+  { id: 'ap-east-2', name: 'Taipei', lat: 25.03, lng: 121.57, gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.12 },                     // opt-in
 ];
 
 export const DEFAULT_REGION = 'ap-southeast-1';

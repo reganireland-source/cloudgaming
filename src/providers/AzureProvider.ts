@@ -1384,6 +1384,22 @@ export class AzureProvider extends CloudProvider {
     await this.resources.providers.register(namespace);
   }
 
+  /**
+   * Our VM sizes in a location, from Azure's SKU list: which are sold here
+   * and which are held back for this subscription (e.g.
+   * "NotAvailableForSubscription"). Sizes Azure doesn't list aren't sold here.
+   */
+  async getSizeAvailability(location: string): Promise<Record<string, { restricted?: string }>> {
+    const ours = new Set(AZURE_SHAPES.map((sh) => sh.id.toLowerCase()));
+    const out: Record<string, { restricted?: string }> = {};
+    for await (const sku of this.compute.resourceSkus.list({ filter: `location eq '${location}'` })) {
+      if (sku.resourceType !== 'virtualMachines' || !ours.has(String(sku.name).toLowerCase())) continue;
+      const whole = (sku.restrictions || []).find((r: any) => r.type === 'Location');
+      out[String(sku.name)] = whole ? { restricted: String(whole.reasonCode || 'Restricted') } : {};
+    }
+    return out;
+  }
+
   /** Compute quotas in a location (vCPU counts), e.g. 'standardNCASv3_T4Family', 'cores', 'lowPriorityCores'. */
   async getComputeUsage(location: string): Promise<Array<{ name: string; label: string; limit: number; current: number }>> {
     const out: Array<{ name: string; label: string; limit: number; current: number }> = [];

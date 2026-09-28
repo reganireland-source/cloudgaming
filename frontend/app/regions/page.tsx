@@ -31,7 +31,7 @@ const CLOUDS = [
   { id: 'oracle', short: 'Oracle', color: '#d55181' },
 ];
 // Best-first, for a cell holding several regions of one cloud.
-const ORDER: AccessStatus[] = ['ready', 'no-quota', 'unknown', 'not-enabled', 'not-connected'];
+const ORDER: AccessStatus[] = ['ready', 'no-quota', 'unknown', 'not-enabled', 'not-offered', 'not-connected'];
 const CLUSTER_KM = 300;
 
 function km(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -138,6 +138,7 @@ export default function RegionsPage() {
                       {n['no-quota'] ? <> · <span className="text-neon-amber">{n['no-quota']} no quota</span></> : null}
                       {n['not-enabled'] ? <> · <span className="text-neon-pink">{n['not-enabled']} off</span></> : null}
                       {n.unknown ? <> · {n.unknown} unchecked</> : null}
+                      {n['not-offered'] ? <> · <span className="text-slate-500">{n['not-offered']} not sold</span></> : null}
                     </p>
                   )}
                 </div>
@@ -237,6 +238,9 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
             <Chip status={r.status} />
           </div>
           <p className="text-xs text-slate-300">{r.summary}</p>
+          {!!r.notSold?.length && r.status !== 'not-offered' && (
+            <p className="text-[0.7rem] text-slate-400">⊘ {r.notSold.join(' and ')} machines aren’t sold in this region — only the other GPU{r.notSold.length > 1 ? 's' : ''} can launch here.</p>
+          )}
           {(r.quotas.length > 0 || r.spot) && (
             <ul className="text-[0.7rem] text-slate-400 tabular-nums space-y-0.5">
               {r.quotas.map((q) => <QuotaRow key={q.label} q={q} />)}

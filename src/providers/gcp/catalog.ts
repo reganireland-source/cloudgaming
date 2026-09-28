@@ -112,6 +112,39 @@ export const GCP_REGIONS: GcpRegion[] = [
   { id: 'us-east4', name: 'N. Virginia', lat: 39.04, lng: -77.49, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.12, egressPerGb: 0.12 },
   { id: 'europe-west4', name: 'Netherlands', lat: 53.44, lng: 6.84, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.1, egressPerGb: 0.12 },
   { id: 'europe-west2', name: 'London', lat: 51.51, lng: -0.13, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  // Every other Google Cloud region, 2026. KEEP ADDING AT THE END: each
+  // region's subnet range comes from its position in this list
+  // (subnetCidrFor), so reordering would clash with networks already made.
+  // Newer regions sell few GPUs: the launch asks Google live which zones sell
+  // the GPU, and the Regions page shows "Not sold here" / "only T4" where
+  // these lists are too hopeful.
+  { id: 'europe-west1', name: 'Belgium', lat: 50.45, lng: 3.82, zones: ['b', 'c', 'd'], gpus: ['T4', 'L4'], priceFactor: 1.1, egressPerGb: 0.12 },
+  { id: 'europe-west3', name: 'Frankfurt', lat: 50.11, lng: 8.68, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.29, egressPerGb: 0.12 },
+  { id: 'europe-west6', name: 'Zurich', lat: 47.37, lng: 8.54, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.4, egressPerGb: 0.12 },
+  { id: 'europe-west8', name: 'Milan', lat: 45.46, lng: 9.19, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'europe-west9', name: 'Paris', lat: 48.86, lng: 2.35, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'europe-west10', name: 'Berlin', lat: 52.52, lng: 13.4, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'europe-west12', name: 'Turin', lat: 45.07, lng: 7.69, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'europe-central2', name: 'Warsaw', lat: 52.23, lng: 21.01, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.29, egressPerGb: 0.12 },
+  { id: 'europe-north1', name: 'Finland', lat: 60.57, lng: 27.19, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.1, egressPerGb: 0.12 },
+  { id: 'europe-north2', name: 'Stockholm', lat: 59.33, lng: 18.07, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.1, egressPerGb: 0.12 },
+  { id: 'europe-southwest1', name: 'Madrid', lat: 40.42, lng: -3.7, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.18, egressPerGb: 0.12 },
+  { id: 'me-west1', name: 'Tel Aviv', lat: 32.08, lng: 34.78, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'me-central1', name: 'Doha', lat: 25.29, lng: 51.53, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'me-central2', name: 'Dammam', lat: 26.43, lng: 50.1, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'africa-south1', name: 'Johannesburg', lat: -26.2, lng: 28.05, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.3, egressPerGb: 0.12 },
+  { id: 'asia-southeast2', name: 'Jakarta', lat: -6.21, lng: 106.85, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.29, egressPerGb: 0.12 },
+  { id: 'asia-south2', name: 'Delhi', lat: 28.61, lng: 77.21, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'us-east1', name: 'S. Carolina', lat: 33.2, lng: -80.01, zones: ['b', 'c', 'd'], gpus: ['T4', 'L4'], priceFactor: 1.0, egressPerGb: 0.12 },
+  { id: 'us-east5', name: 'Columbus', lat: 39.96, lng: -83.0, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.0, egressPerGb: 0.12 },
+  { id: 'us-south1', name: 'Dallas', lat: 32.78, lng: -96.8, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.18, egressPerGb: 0.12 },
+  { id: 'us-west3', name: 'Salt Lake City', lat: 40.76, lng: -111.89, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'us-west4', name: 'Las Vegas', lat: 36.17, lng: -115.14, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.12, egressPerGb: 0.12 },
+  { id: 'northamerica-northeast1', name: 'Montréal', lat: 45.5, lng: -73.57, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.1, egressPerGb: 0.12 },
+  { id: 'northamerica-northeast2', name: 'Toronto', lat: 43.65, lng: -79.38, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.1, egressPerGb: 0.12 },
+  { id: 'northamerica-south1', name: 'Querétaro (Mexico)', lat: 20.59, lng: -100.39, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.2, egressPerGb: 0.12 },
+  { id: 'southamerica-east1', name: 'São Paulo', lat: -23.55, lng: -46.63, zones: ['a', 'b', 'c'], gpus: ['T4', 'L4'], priceFactor: 1.59, egressPerGb: 0.12 },
+  { id: 'southamerica-west1', name: 'Santiago', lat: -33.45, lng: -70.67, zones: ['a', 'b', 'c'], gpus: ['L4'], priceFactor: 1.4, egressPerGb: 0.12 },
 ];
 
 export const DEFAULT_REGION = 'asia-southeast1';

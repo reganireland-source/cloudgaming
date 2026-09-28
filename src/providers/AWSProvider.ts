@@ -1302,6 +1302,15 @@ export class AWSProvider extends CloudProvider {
     return Object.fromEntries((res.Regions || []).map((r) => [String(r.RegionName), String(r.OptInStatus || 'opt-in-not-required')]));
   }
 
+  /** Which of our GPU instance types AWS sells in a region (any zone). */
+  async getGpuTypesOffered(region: string): Promise<Set<string>> {
+    const res = await this.ec2For(region).describeInstanceTypeOfferings({
+      LocationType: 'region',
+      Filters: [{ Name: 'instance-type', Values: AWS_SHAPES.map((sh) => sh.id) }],
+    }).promise();
+    return new Set((res.InstanceTypeOfferings || []).map((o) => String(o.InstanceType)));
+  }
+
   async getEc2Quota(region: string, quotaCode: string): Promise<number> {
     const sq = new AWS.ServiceQuotas(this.clientConfig(region));
     try {
