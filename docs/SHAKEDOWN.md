@@ -146,10 +146,10 @@ Machine card → **Play with Moonlight**:
 **Good numbers:** network latency ≈ the Recon estimate (±15 ms), decode time
 < 5 ms, frame drops near 0, FPS steady at 60.
 **Battle.net installer stops with "Install UMU to use Proton"?** Lutris needs
-the UMU launcher for Proton-based Wine. Machines whose image was built after
-this fix have it (the Activity log's image build would say `WARNING: UMU
-skipped` if the download failed). On an older machine, open a terminal on the
-desktop and run:
+the UMU launcher for Proton-based Wine. Machines launched after 28 Sep 2026
+(image recipe v4) have it built in; the machine's serial log says
+`UMU for Lutris/Proton: /usr/local/bin/umu-run` (or `MISSING`). On an older
+machine, launch a new one, or open a terminal on the desktop and run:
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/umu ~/.local/bin /tmp/umux
