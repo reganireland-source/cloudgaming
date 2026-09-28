@@ -145,6 +145,25 @@ Machine card → **Play with Moonlight**:
 
 **Good numbers:** network latency ≈ the Recon estimate (±15 ms), decode time
 < 5 ms, frame drops near 0, FPS steady at 60.
+**Battle.net installer stops with "Install UMU to use Proton"?** Lutris needs
+the UMU launcher for Proton-based Wine. Machines whose image was built after
+this fix have it (the Activity log's image build would say `WARNING: UMU
+skipped` if the download failed). On an older machine, open a terminal on the
+desktop and run:
+
+```bash
+mkdir -p ~/.local/share/lutris/runtime/umu ~/.local/bin /tmp/umux
+curl -fsSL https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest \
+  | grep -o 'https://[^"]*zipapp\.tar' | head -1 | xargs curl -fL -o /tmp/umu.tar
+tar -xf /tmp/umu.tar -C /tmp/umux
+cp "$(find /tmp/umux -name umu-run -type f | head -1)" ~/.local/share/lutris/runtime/umu/umu-run
+ln -sf ~/.local/share/lutris/runtime/umu/umu-run ~/.local/bin/umu-run
+```
+
+Then close Lutris completely and start Battle.net again. (It's kept across
+reboots: the home folder lives on the disk.) Alternatively, in the installer's
+Wine version list pick a non-Proton build (e.g. `wine-ge-8-26`).
+
 **Won't launch?** Games with kernel anti-cheat (Valorant, Fortnite, Apex,
 PUBG, Call of Duty…) are blocked on Linux. Check <https://www.protondb.com>.
 

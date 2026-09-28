@@ -306,7 +306,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=2
+APPS_VERSION=3
 APPS_IMAGE="gggh/sunshine-apps:$APPS_VERSION-$(echo "$SUNSHINE_IMAGE" | awk -F: '{print $NF}')"
 
 cat > "$SUN_DIR/project/docker-compose.yml" <<COMPOSE
@@ -387,6 +387,17 @@ RUN apt-get update \
       && chown root:root /opt/Discord/chrome-sandbox && chmod 4755 /opt/Discord/chrome-sandbox \
       || echo "WARNING: Discord skipped" ) \
  && rm -f /tmp/discord.tar.gz && apt-get clean && rm -rf /var/lib/apt/lists/*
+# UMU launcher: newer Lutris runs Proton-based Wine builds (which its
+# Battle.net installer picks) only through umu-run, and otherwise stops with
+# "Install UMU to use Proton". The latest release's self-contained zipapp
+# (needs only python3) goes on PATH.
+RUN ( curl -fsSL https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest \
+      | grep -o 'https://[^"]*zipapp\.tar' | head -1 > /tmp/umu-url \
+      && curl -fL -o /tmp/umu.tar "\$(cat /tmp/umu-url)" \
+      && mkdir -p /opt/umu && tar -xf /tmp/umu.tar -C /opt/umu \
+      && ln -sf "\$(find /opt/umu -name umu-run -type f | head -1)" /usr/local/bin/umu-run ) \
+ ; test -x /usr/local/bin/umu-run || echo "WARNING: UMU skipped (Lutris can't use Proton builds)" \
+ ; rm -f /tmp/umu.tar /tmp/umu-url
 # Battle.net icon for the dock/menu (best-effort; falls back to Lutris's).
 RUN curl -fsL -o /usr/share/pixmaps/battlenet.png https://lutris.net/games/icon/battlenet.png || echo "WARNING: Battle.net icon skipped"
 COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
