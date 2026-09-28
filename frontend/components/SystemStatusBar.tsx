@@ -7,7 +7,8 @@
  * ============================================================================
  *
  * The thin strip under the header on every page:
- *   ● BACKEND  ● DATABASE  |  ● AWS  ● AZURE  ● GCP  ● ORACLE     Build info ›
+ *   ● BACKEND  ● DATABASE  |  ● AWS  ● AZURE  ● GCP  ● ORACLE     TODAY · WTD · MTD …  Build info ›
+ * (the spend figures: components/SpendTicker.tsx, shown while signed in)
  * Green = reachable (with the check time in ms), red = not, grey pulsing = still checking.
  *
  * HOW IT WORKS
@@ -31,6 +32,7 @@
 import { useState, useEffect } from 'react';
 import { apiUrl } from '@/lib/api';
 import BuildInfoPanel from './BuildInfoPanel';
+import SpendTicker from './SpendTicker';
 import StatusDetailPanel, { type LightKey } from './StatusDetailPanel';
 
 // These interfaces describe the JSON the backend sends. They mirror the ones
@@ -113,7 +115,7 @@ function Light({
         <span className="sm:hidden">{SHORT_LABEL[label] || label}</span>
       </span>
       {!loading && connected && latencyMs !== undefined && (
-        <span className="hidden sm:inline text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
+        <span className="hidden xl:inline text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
       )}
     </button>
   );
@@ -227,6 +229,8 @@ export default function SystemStatusBar() {
           />
         </div>
 
+        <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
+        <SpendTicker />
         <button
           onClick={() => setPanelOpen(true)}
           className="text-[0.66rem] tracking-label uppercase text-slate-500 hover:text-neon-cyan transition-colors flex-shrink-0"
@@ -234,6 +238,7 @@ export default function SystemStatusBar() {
         >
           <span className="hidden sm:inline">Build info ›</span><span className="sm:hidden">ⓘ</span>
         </button>
+        </div>
       </div>
 
       {/* The pop-up only exists while panelOpen is true. We pass it a

@@ -216,3 +216,58 @@ function pickRates(fx: FxRates) {
   const want = ['USD', 'SGD', 'AUD', 'EUR', 'GBP', 'JPY', 'KRW', 'HKD', 'INR', 'MYR', 'PHP', 'CAD', 'NZD'];
   return Object.fromEntries(want.filter((c) => fx.rates[c]).map((c) => [c, fx.rates[c]]));
 }
+
+/**
+ * The short spend summary shown in the status strip on every page:
+ * today, week to date (weeks start Monday), month to date, the month
+ * projection, and what running machines cost per hour right now. All USD,
+ * all UTC days. Cheap: reads only what's stored (no cloud calls) — actual
+ * charges already fetched by the daily job or the Costs page, and the app's
+ * estimates for any day a cloud hasn't billed yet.
+ */
+export async function getSpendSummary(userId: string) {
+  const now = new Date();
+  const day = (offset: number) => iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset)));
+  const today = day(0);
+  const weekStart = day(-((now.getUTCDay() + 6) % 7));
+  const monthStart = iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
+  const from = weekStart < monthStart ? weekStart : monthStart;
+  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+
+  const [est, acts, fetches, running, fx] = await Promise.all([
+    query(`SELECT provider, to_char(date, 'YYYY-MM-DD') AS d, SUM(compute_cost + egress_cost + storage_cost) AS usd
+           FROM costs WHERE user_id = $1 AND date >= $2 GROUP BY provider, d`, [userId, from]),
+    query(`SELECT provider, to_char(date, 'YYYY-MM-DD') AS d, currency, amount FROM billing_actuals
+           WHERE user_id = $1 AND date >= $2 AND date < $3`, [userId, from, today]),
+    query('SELECT provider, ok FROM billing_fetches WHERE user_id = $1', [userId]),
+    query(`SELECT COALESCE(SUM(cost_per_hour), 0) AS h FROM machines WHERE user_id = $1 AND status = 'running'`, [userId]),
+    getFxRates(),
+  ]);
+
+  // Per cloud and day: the billed amount (USD) where the cloud has reported
+  // that day and its last fetch worked, otherwise the app's estimate.
+  const ok = new Set(fetches.rows.filter((f: any) => f.ok).map((f: any) => f.provider));
+  const cell = new Map<string, { usd: number; billed: boolean }>();
+  for (const r of est.rows) cell.set(`${r.provider}:${r.d}`, { usd: Number(r.usd) || 0, billed: false });
+  for (const a of acts.rows) {
+    if (!ok.has(a.provider)) continue;
+    const u = toUsd(Number(a.amount) || 0, a.currency, fx);
+    if (u !== null) cell.set(`${a.provider}:${a.d}`, { usd: u, billed: true });
+  }
+  const total = (start: string) => {
+    let usd = 0; let billed = 0;
+    for (const [k, v] of cell) if (k.slice(k.indexOf(':') + 1) >= start) { usd += v.usd; if (v.billed) billed += v.usd; }
+    return { usd: r2(usd), billedUsd: r2(billed) };
+  };
+  const month = total(monthStart);
+  const daysElapsed = now.getUTCDate();
+  return {
+    currency: 'USD' as const,
+    today: total(today),
+    weekToDate: { ...total(weekStart), since: weekStart },
+    monthToDate: { ...month, since: monthStart },
+    projectedMonthUsd: r2((month.usd / Math.max(daysElapsed, 1)) * daysInMonth),
+    runningPerHourUsd: r2(Number(running.rows[0].h) || 0),
+    generatedAt: now.toISOString(),
+  };
+}

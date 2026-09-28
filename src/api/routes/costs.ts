@@ -17,6 +17,7 @@
  *   GET  /api/costs/actuals    what each cloud ACTUALLY billed (its billing currency),
  *                              reconciled with the estimates; ?refresh=true re-asks
  *   PUT  /api/costs/billing-settings/:provider   e.g. Google's BigQuery export table
+ *   GET  /api/costs/summary    today / week / month to date, for the status strip
  *
  * Everything in the `costs` table is an ESTIMATE in USD (list prices).
  *
@@ -30,7 +31,7 @@
 
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
-import { getReconciliation, saveBillingSettings } from '../../services/BillingService';
+import { getReconciliation, saveBillingSettings, getSpendSummary } from '../../services/BillingService';
 import { isProviderName } from '../../providers/registry';
 
 const router = Router();
@@ -207,6 +208,17 @@ router.get('/actuals', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Actual costs error:', error);
     res.status(500).json({ error: 'Failed to read actual charges', tip: 'Try again in a moment.' });
+  }
+});
+
+/** GET /api/costs/summary — the short spend line shown on every page. */
+router.get('/summary', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getSpendSummary(req.userId!));
+  } catch (error) {
+    console.error('Spend summary error:', error);
+    res.status(500).json({ error: 'Failed to read spend' });
   }
 });
 
