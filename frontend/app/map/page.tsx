@@ -284,11 +284,11 @@ export default function InfrastructureMapPage() {
       {/* ---- Cost overlay ---- */}
       {inventory && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-          <Tile label="Running now" value={`$${inventory.totals.hourly.toFixed(2)}/h`} sub={`${inventory.totals.runningMachines} machine${inventory.totals.runningMachines === 1 ? '' : 's'} running`} />
-          <Tile label="Standing cost" value={`$${inventory.totals.monthlyStanding.toFixed(2)}/mo`} sub="disks, snapshots, IPs — billed even when stopped" />
+          <Tile label="Running now" value={`USD ${inventory.totals.hourly.toFixed(2)}/h`} sub={`${inventory.totals.runningMachines} machine${inventory.totals.runningMachines === 1 ? '' : 's'} running`} />
+          <Tile label="Standing cost" value={`USD ${inventory.totals.monthlyStanding.toFixed(2)}/mo`} sub="disks, snapshots, IPs — billed even when stopped" />
           <Tile label="Resources" value={`${inventory.items.length}`} sub={`across ${inventory.clouds.length} cloud${inventory.clouds.length === 1 ? '' : 's'}`} />
           <Tile label="Orphans" value={`${inventory.totals.orphans}`} warn={inventory.totals.orphans > 0}
-            sub={inventory.totals.orphans ? `≈$${inventory.totals.orphanMonthly.toFixed(2)}/mo${inventory.totals.orphanHourly ? ` + $${inventory.totals.orphanHourly.toFixed(2)}/h` : ''} wasted` : 'nothing left behind'} />
+            sub={inventory.totals.orphans ? `≈USD ${inventory.totals.orphanMonthly.toFixed(2)}/mo${inventory.totals.orphanHourly ? ` + USD ${inventory.totals.orphanHourly.toFixed(2)}/h` : ''} wasted` : 'nothing left behind'} />
         </div>
       )}
 
@@ -377,8 +377,8 @@ export default function InfrastructureMapPage() {
                 <button type="button" onClick={() => setSelected(null)} className="text-xs text-slate-400 hover:text-slate-100">✕</button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Tile label="Running" value={`$${selectedGroup.hourly.toFixed(2)}/h`} />
-                <Tile label="Standing" value={`$${selectedGroup.monthly.toFixed(2)}/mo`} />
+                <Tile label="Running" value={`USD ${selectedGroup.hourly.toFixed(2)}/h`} />
+                <Tile label="Standing" value={`USD ${selectedGroup.monthly.toFixed(2)}/mo`} />
               </div>
               {actionError && <FriendlyErrorCard message={actionError.message} tip={actionError.tip} friendly={actionError.friendly} />}
               <ul className="space-y-2">
@@ -394,8 +394,8 @@ export default function InfrastructureMapPage() {
                       <StatusChip status={it.status} />
                     </div>
                     <p className="text-[0.7rem] text-slate-400 mt-1 tabular-nums">
-                      {it.hourlyCost ? `≈$${it.hourlyCost.toFixed(2)}/h while running` : ''}
-                      {it.monthlyCost ? `${it.hourlyCost ? ' · ' : ''}≈$${it.monthlyCost.toFixed(2)}/mo` : ''}
+                      {it.hourlyCost ? `≈USD ${it.hourlyCost.toFixed(2)}/h while running` : ''}
+                      {it.monthlyCost ? `${it.hourlyCost ? ' · ' : ''}≈USD ${it.monthlyCost.toFixed(2)}/mo` : ''}
                       {it.sizeGb ? ` · ${it.sizeGb} GB` : ''}
                       {!it.hourlyCost && !it.monthlyCost ? 'no charge' : ''}
                     </p>
@@ -442,7 +442,7 @@ export default function InfrastructureMapPage() {
                     <ShapeIcon provider={o.provider} />
                     <span className="min-w-0">
                       <button type="button" className="text-slate-200 hover:underline text-left break-all" onClick={() => setSelected(`${o.provider}:${o.region}`)}>{TYPE_LABEL[o.type]} {o.name}</button>
-                      <span className="block text-slate-500">{o.region} · {o.monthlyCost ? `$${o.monthlyCost.toFixed(2)}/mo` : o.hourlyCost ? `$${o.hourlyCost.toFixed(2)}/h` : 'no charge'} · {o.orphanReason}</span>
+                      <span className="block text-slate-500">{o.region} · {o.monthlyCost ? `USD ${o.monthlyCost.toFixed(2)}/mo` : o.hourlyCost ? `USD ${o.hourlyCost.toFixed(2)}/h` : 'no charge'} · {o.orphanReason}</span>
                       {o.consoleUrl && <a href={o.consoleUrl} target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline">Delete in console ↗</a>}
                     </span>
                   </li>
@@ -471,7 +471,7 @@ export default function InfrastructureMapPage() {
             <table className="w-full text-xs">
               <thead><tr className="text-left text-slate-500">
                 <th className="py-1 pr-3 font-normal">Cloud</th><th className="py-1 pr-3 font-normal">Region</th><th className="py-1 pr-3 font-normal">Type</th>
-                <th className="py-1 pr-3 font-normal">Name</th><th className="py-1 pr-3 font-normal">Status</th><th className="py-1 pr-3 font-normal text-right">$/h</th><th className="py-1 font-normal text-right">$/mo</th>
+                <th className="py-1 pr-3 font-normal">Name</th><th className="py-1 pr-3 font-normal">Status</th><th className="py-1 pr-3 font-normal text-right">USD/h</th><th className="py-1 font-normal text-right">USD/mo</th>
               </tr></thead>
               <tbody>
                 {inventory.items.map((i) => (

@@ -168,5 +168,5 @@ export const AWS_CATALOG: ProviderCatalog = {
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
   restoreAnyRegion: true,
   priceNote:
-    'Estimates from AWS\'s us-east-1 Linux list prices scaled per region (±15%); excludes tax, and data sent to you (~$0.09–0.12/GB) is extra. Spot prices move with demand — assumed ~35% of on-demand.',
+    'Estimates from AWS\'s us-east-1 Linux list prices scaled per region (±15%); excludes tax, and data sent to you (~USD 0.09–0.12/GB) is extra. Spot prices move with demand — assumed ~35% of on-demand.',
 };

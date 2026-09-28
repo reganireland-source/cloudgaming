@@ -20,6 +20,7 @@
 
 import { MachineService } from '../services/MachineService';
 import { query } from '../config/database';
+import { getReconciliation } from '../services/BillingService';
 import { expireStaleOperations } from '../services/OperationLog';
 import { providerFor } from '../services/CredentialService';
 import { CATALOGS, isProviderName } from '../providers/registry';
@@ -209,6 +210,23 @@ export async function autoShelveJob() {
 }
 
 /**
+ * Background job (daily): fetch what each cloud actually billed, for every
+ * user with cloud keys, so the Costs page has the history even if nobody
+ * opened it (see services/BillingService.ts; each fetch is cached/limited).
+ */
+export async function refreshBillingActualsJob() {
+  try {
+    const users = await query('SELECT DISTINCT user_id FROM cloud_credentials');
+    for (const u of users.rows) {
+      try { await getReconciliation(u.user_id, false); }
+      catch (error) { console.error(`[Job] Billing actuals for ${u.user_id}:`, (error as Error).message); }
+    }
+  } catch (error) {
+    console.error('[Job] Billing actuals failed:', error);
+  }
+}
+
+/**
  * Background job: Send budget alerts
  *
  * For each user with a budget cap: add up this month's costs and compare
@@ -246,7 +264,7 @@ export async function budgetAlertJob() {
         if (currentSpend > threshold) {
           // Send email alert (TODO: implement email service)
           console.log(
-            `[Job] Budget alert for ${user.email}: $${currentSpend.toFixed(2)} / $${user.budget_cap}`
+            `[Job] Budget alert for ${user.email}: USD ${currentSpend.toFixed(2)} / USD ${user.budget_cap}`
           );
         }
       } catch (error) {

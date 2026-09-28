@@ -14,6 +14,11 @@
  *   GET  /api/costs/daily      a day-by-day history (for charts)
  *   GET  /api/costs/forecast   projected end-of-month spend
  *   POST /api/costs/budget     set a budget cap and alert threshold
+ *   GET  /api/costs/actuals    what each cloud ACTUALLY billed (its billing currency),
+ *                              reconciled with the estimates; ?refresh=true re-asks
+ *   PUT  /api/costs/billing-settings/:provider   e.g. Google's BigQuery export table
+ *
+ * Everything in the `costs` table is an ESTIMATE in USD (list prices).
  *
  * SQL TOOLS USED BELOW
  *   SUM(x)           add up a column across rows
@@ -25,6 +30,8 @@
 
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
+import { getReconciliation, saveBillingSettings } from '../../services/BillingService';
+import { isProviderName } from '../../providers/registry';
 
 const router = Router();
 
@@ -189,6 +196,28 @@ router.post('/budget', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Set budget error:', error);
     res.status(500).json({ error: 'Failed to set budget' });
+  }
+});
+
+/** GET /api/costs/actuals — actual charges per cloud vs the app's estimates. */
+router.get('/actuals', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getReconciliation(req.userId!, req.query.refresh === 'true'));
+  } catch (error) {
+    console.error('Actual costs error:', error);
+    res.status(500).json({ error: 'Failed to read actual charges', tip: 'Try again in a moment.' });
+  }
+});
+
+/** PUT /api/costs/billing-settings/:provider — body e.g. { exportTable: "proj.dataset.table" } */
+router.put('/billing-settings/:provider', async (req: Request, res: Response) => {
+  try {
+    if (!isProviderName(req.params.provider)) return res.status(400).json({ error: 'Unknown cloud.' });
+    res.json(await saveBillingSettings(req.userId!, req.params.provider, req.body));
+  } catch (error) {
+    console.error('Billing settings error:', error);
+    res.status(500).json({ error: 'Failed to save the setting' });
   }
 });
 

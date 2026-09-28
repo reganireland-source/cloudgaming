@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usd, usdRange } from '@/lib/money';
 import { apiFetch, type ApiError } from '@/lib/auth';
 import CloudLogo from '@/components/CloudLogo';
 
@@ -38,7 +39,7 @@ interface Report {
   rates: Rate[];
 }
 
-const money = (n: number) => `$${(Number(n) || 0).toFixed(2)}`;
+const money = (n: number) => usd(n);
 const KIND_LABEL = { disk: 'Disk', snapshot: 'Snapshot', ip: 'Public IP', other: 'Other' };
 const GROUPS: Array<{ level: Level; title: string; blurb: string; cls: string }> = [
   { level: 'waste', title: 'Leftovers — paying for nothing', blurb: 'Not attached to anything the app manages. Delete them in the cloud console (link on each).', cls: 'border-neon-pink/40' },
@@ -99,7 +100,7 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
         <Tile label="Standing, per month" value={t ? money(t.monthly) : '—'} sub="whether or not you play" strong />
         <Tile label="Disks" value={t ? money(t.disks) : '—'} sub="billed on full size, empty space included" />
         <Tile label="Snapshots" value={t ? money(t.snapshots) : '—'} sub="billed on data actually stored" />
-        <Tile label="Could save" value={t ? (t.savingHigh <= 0 ? '$0.00' : t.savingLow === t.savingHigh ? money(t.savingHigh) : `${money(t.savingLow)}–${money(t.savingHigh)}`) : '—'} sub={t && t.waste > 0 ? `incl. ${money(t.waste)} of leftovers` : 'per month, following the advice below'} warn={!!t && t.savingHigh > 0.5} />
+        <Tile label="Could save" value={t ? (t.savingHigh <= 0 ? usd(0) : t.savingLow === t.savingHigh ? money(t.savingHigh) : `${usdRange(t.savingLow, t.savingHigh)}`) : '—'} sub={t && t.waste > 0 ? `incl. ${money(t.waste)} of leftovers` : 'per month, following the advice below'} warn={!!t && t.savingHigh > 0.5} />
       </div>
 
       {/* ---- 2. The options for a machine you aren't using ---- */}
@@ -131,7 +132,7 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
                   <tr key={r.provider} className="border-t border-white/5">
                     <td className="py-1.5 pr-3"><span className="inline-flex items-center gap-1.5"><CloudLogo provider={r.provider} size={14} />{r.label}</span></td>
                     <td className="py-1.5 pr-3 text-right">{money(150 * r.diskPerGbMonth)}</td>
-                    <td className="py-1.5 pr-3 text-right text-neon-cyan">{money(30 * r.snapshotPerGbMonth)}–{money(150 * r.snapshotPerGbMonth)}</td>
+                    <td className="py-1.5 pr-3 text-right text-neon-cyan">{usdRange(30 * r.snapshotPerGbMonth, 150 * r.snapshotPerGbMonth)}</td>
                     <td className="py-1.5">{r.restoreAnyRegion ? 'Yes — shelve at home, restore where you travel' : 'No — same region only'}</td>
                   </tr>
                 ))}
@@ -143,7 +144,7 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
         <ul className="mt-3 space-y-1 text-xs text-slate-300 list-disc pl-4">
           <li><strong className="text-slate-100">Auto-stop</strong> (on every launch, 15 min idle) ends the hourly bill when you forget.</li>
           <li><strong className="text-slate-100">Auto-shelve</strong> (per machine, e.g. after 7 days stopped) ends the disk bill when you stop playing for a while. Set it on each machine card.</li>
-          <li><strong className="text-slate-100">Right-size the disk</strong> at launch: disks bill their full size. Every extra 50 GB costs {report ? money(50 * Math.max(...report.rates.map((r) => r.diskPerGbMonth))) : '≈$5'}/month or so, stopped or not.</li>
+          <li><strong className="text-slate-100">Right-size the disk</strong> at launch: disks bill their full size. Every extra 50 GB costs {report ? money(50 * Math.max(...report.rates.map((r) => r.diskPerGbMonth))) : '≈USD 5'}/month or so, stopped or not.</li>
           <li><strong className="text-slate-100">Don’t keep spare backups</strong> of machines that still have their disk — that’s paying twice.</li>
           <li><strong className="text-slate-100">Check for leftovers</strong> after deleting things in a cloud console yourself; they show up in red below and on the <Link href="/map" className="text-neon-cyan hover:underline">Map</Link>.</li>
         </ul>
@@ -175,7 +176,7 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
                         {it.estimated && <span className="ml-1 align-middle text-[0.6rem] text-slate-500">(estimated)</span>}
                       </p>
                       <p className="text-[0.68rem] text-slate-500 truncate">{it.region}{it.sizeGb ? ` · ${it.sizeGb} GB` : ''}{it.machineLabel && it.name !== it.machineLabel ? ` · ${it.name}` : ''}</p>
-                      <p className="text-xs text-slate-300 mt-1">{it.advice.text}{it.advice.saving && it.advice.level === 'save' ? <> <span className="text-neon-amber whitespace-nowrap">Save {it.advice.saving.low === it.advice.saving.high ? money(it.advice.saving.low) : `${money(it.advice.saving.low)}–${money(it.advice.saving.high)}`}/month.</span></> : null}</p>
+                      <p className="text-xs text-slate-300 mt-1">{it.advice.text}{it.advice.saving && it.advice.level === 'save' ? <> <span className="text-neon-amber whitespace-nowrap">Save {it.advice.saving.low === it.advice.saving.high ? money(it.advice.saving.low) : `${usdRange(it.advice.saving.low, it.advice.saving.high)}`}/month.</span></> : null}</p>
                       {confirm === it.key && (
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                           <span className="text-slate-300">{it.advice.action === 'shelve' ? 'Snapshot the disk, then delete the machine and disk?' : 'Delete this snapshot permanently?'}</span>

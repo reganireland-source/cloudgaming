@@ -156,7 +156,7 @@ export const ORACLE_CATALOG: ProviderCatalog = {
   restoreAnyRegion: false,
   priceNote:
     'Approximate Oracle list prices (same in every region; GPU price includes CPU and memory), not fetched live. ' +
-    'First 10 TB/month of internet egress is free, so streaming data is usually $0. ' +
+    'First 10 TB/month of internet egress is free, so streaming data is usually USD 0. ' +
     'New accounts have a GPU service limit of 0 — request an increase (Governance → Limits) before launching. ' +
     'Preemptible ≈ 50% off, can be reclaimed at any time, and can\'t be stopped — only deleted (snapshot first).',
 };

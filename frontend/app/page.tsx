@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usd } from '@/lib/money';
 import CloudLogo from '@/components/CloudLogo';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
@@ -40,7 +41,7 @@ const CLOUD: Record<string, { color: string; letter: string; label: string }> = 
 const STATUS_CLASS: Record<string, string> = {
   running: 'text-neon-lime', stopped: 'text-slate-400', error: 'text-neon-pink', missing: 'text-neon-pink',
 };
-const money = (n: number) => `$${(Number(n) || 0).toFixed(2)}`;
+const money = (n: number) => usd(n);
 function ago(iso: string) {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;

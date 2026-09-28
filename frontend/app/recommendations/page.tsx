@@ -32,6 +32,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usd } from '@/lib/money';
 import CloudLogo from '@/components/CloudLogo';
 import { apiFetch, ApiError } from '@/lib/auth';
 import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
@@ -105,7 +106,7 @@ const TIER_QUALITY: Record<TierId, string> = { good: 'good', better: 'high', bes
 const QUICK_PICKS = ['Sydney', 'Singapore', 'Tokyo', 'London', 'New York', 'Los Angeles'];
 const STORE_KEY = 'recon.place';
 
-const money = (n: number) => `$${n.toFixed(2)}`;
+const money = (n: number) => usd(n);
 
 // Discount highlight: deep (≥ 65% off, live) / good (≥ 55%, live) / plain.
 const DEAL_STYLE: Record<'deep' | 'good' | 'plain', { label: string; className: string }> = {

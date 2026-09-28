@@ -34,7 +34,8 @@ import crypto from 'crypto';
 import compute from '@google-cloud/compute';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
-import type { InventoryItem } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
+import { RESOURCE_TAG } from './shared/streaming';
 import { FriendlyCloudError, isZoneSpecificError, toFriendlyError } from './gcp/errors';
 import {
   BOOT_IMAGE,
@@ -137,11 +138,14 @@ export class GCPProvider extends CloudProvider {
     return { projectId, clientEmail: key.client_email, privateKey: key.private_key };
   }
 
+  private readonly privateKey: string;
+
   constructor(credentials: any) {
     super();
     const creds = GCPProvider.parseCredentials(credentials);
     this.projectId = creds.projectId;
     this.clientEmail = creds.clientEmail;
+    this.privateKey = creds.privateKey;
 
     // Every client gets the same login. Google's library signs requests
     // with the private key; nothing is written to disk.
@@ -516,6 +520,103 @@ export class GCPProvider extends CloudProvider {
       if (isNotFound(error)) return { status: 'terminated' };
       throw error;
     }
+  }
+
+  /**
+   * Actual charges from Google's Cloud Billing export to BigQuery - the only
+   * place Google provides billed costs by API. `exportTable` is the table the
+   * export writes, e.g. "my-project.billing.gcp_billing_export_v1_0123AB_...".
+   * Cost includes credits (free-trial, sustained-use discounts), in the
+   * billing account's currency. "This app" = resources labelled
+   * app=cloudgaming-hub in this project.
+   * The key needs BigQuery Job User (to run the query) in this project and
+   * BigQuery Data Viewer on the export dataset.
+   */
+  async getBillingActuals(from: string, to: string, settings: { exportTable?: string } = {}): Promise<BillingActuals> {
+    const table = String(settings.exportTable || '').trim().replace(/`/g, '');
+    if (!table) {
+      throw new FriendlyCloudError({
+        code: 'BILLING_SETUP', title: 'Google Cloud billing export isn\'t set up yet',
+        explanation: 'Google only provides actual (billed) costs through its billing export to BigQuery. It\'s a one-time setting, and data starts from the day you turn it on.',
+        fixes: [
+          'Billing → Billing export → BigQuery export → Standard usage cost → Edit settings: pick this project and create a dataset (e.g. "billing"). Save.',
+          `Give the app's service account (${this.clientEmail}) the roles "BigQuery Job User" on this project and "BigQuery Data Viewer" on that dataset.`,
+          'After a few hours, BigQuery shows a table named gcp_billing_export_v1_…; paste its full name ("project.dataset.table") into the app\'s Costs page.',
+        ],
+        consoleUrl: 'https://console.cloud.google.com/billing/export', consoleLabel: 'Open Billing export',
+      });
+    }
+    if (!/^[A-Za-z0-9_.:-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/.test(table)) {
+      throw new FriendlyCloudError({
+        code: 'BILLING_SETUP', title: 'That doesn\'t look like a BigQuery table name',
+        explanation: `Expected "project.dataset.table", got "${table}".`,
+        fixes: ['In BigQuery, open the export table → Details → copy "Table ID".'],
+      });
+    }
+    const { JWT } = await import('google-auth-library');
+    const client = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const credits = 'IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)';
+    const isApp = `EXISTS(SELECT 1 FROM UNNEST(labels) l WHERE l.key = '${RESOURCE_TAG.key}' AND l.value = '${RESOURCE_TAG.value}')`;
+    const sql = `SELECT FORMAT_DATE('%Y-%m-%d', DATE(usage_start_time)) AS day, currency,
+        SUM(cost) + SUM(${credits}) AS account_total,
+        SUM(IF(${isApp}, cost + ${credits}, 0)) AS app_total
+      FROM \`${table}\`
+      WHERE usage_start_time >= TIMESTAMP(@from) AND usage_start_time < TIMESTAMP(@to) AND project.id = @project
+      GROUP BY day, currency ORDER BY day`;
+    let res: any;
+    try {
+      res = (await client.request({
+        url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/queries`, method: 'POST',
+        data: {
+          query: sql, useLegacySql: false, parameterMode: 'NAMED', timeoutMs: 30000,
+          queryParameters: [
+            { name: 'from', parameterType: { type: 'STRING' }, parameterValue: { value: from } },
+            { name: 'to', parameterType: { type: 'STRING' }, parameterValue: { value: to } },
+            { name: 'project', parameterType: { type: 'STRING' }, parameterValue: { value: this.projectId } },
+          ],
+        },
+      })).data;
+      for (let i = 0; res && res.jobComplete === false && i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const loc = res.jobReference?.location ? `?location=${encodeURIComponent(res.jobReference.location)}` : '';
+        res = (await client.request({ url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/queries/${res.jobReference.jobId}${loc}` })).data;
+      }
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const msg = String(error?.response?.data?.error?.message || error?.message || error);
+      if (status === 403 || /denied|permission/i.test(msg)) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_PERMISSION', title: 'The service account can\'t read the billing export',
+          explanation: `Google answered: ${msg}`,
+          fixes: [`Grant ${this.clientEmail} "BigQuery Job User" on project ${this.projectId}, and "BigQuery Data Viewer" on the export's dataset.`,
+            `gcloud projects add-iam-policy-binding ${this.projectId} --member=serviceAccount:${this.clientEmail} --role=roles/bigquery.jobUser`],
+          consoleUrl: `https://console.cloud.google.com/iam-admin/iam?project=${this.projectId}`, consoleLabel: 'Open IAM',
+        });
+      }
+      if (status === 404 || /not found/i.test(msg)) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_SETUP', title: 'Billing export table not found',
+          explanation: `Google answered: ${msg}`,
+          fixes: ['Check the table name on the Costs page ("project.dataset.table"). A new export takes a few hours to create its table.'],
+          consoleUrl: 'https://console.cloud.google.com/bigquery', consoleLabel: 'Open BigQuery',
+        });
+      }
+      throw error;
+    }
+    const app: BillingDay[] = [];
+    const account: BillingDay[] = [];
+    let currency = 'USD';
+    for (const row of res?.rows || []) {
+      const [day, cur, accountTotal, appTotal] = row.f.map((c: any) => c.v);
+      if (cur) currency = String(cur);
+      account.push({ date: String(day), amount: Number(accountTotal) || 0 });
+      app.push({ date: String(day), amount: Number(appTotal) || 0 });
+    }
+    return {
+      currency, scope: 'app', scopeNote: `Resources labelled ${RESOURCE_TAG.key}=${RESOURCE_TAG.value} in ${this.projectId} (credits included)`,
+      daily: app, accountDaily: account,
+      notes: ['Google\'s export runs a few hours behind, and has no data from before it was switched on.'],
+    };
   }
 
   async createSnapshot(instanceId: string, _diskPath: string): Promise<{ snapshotId: string; sizeGb: number }> {

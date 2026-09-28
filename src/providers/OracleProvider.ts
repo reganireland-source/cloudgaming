@@ -52,6 +52,7 @@ import * as common from 'oci-common';
 import * as core from 'oci-core';
 import * as identity from 'oci-identity';
 import * as limits from 'oci-limits';
+import * as usageapi from 'oci-usageapi';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 // Shared errors FIRST: it registers the Oracle rules from oracle/errors.
@@ -77,7 +78,7 @@ import {
 } from './oracle/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
-import type { InventoryItem } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
 
 /** The parsed, checked credentials. */
 export interface OracleCredentials {
@@ -988,6 +989,59 @@ export class OracleProvider extends CloudProvider {
       /* status is still useful without the IP */
     }
     return { status, ipAddress };
+  }
+
+  /**
+   * Actual charges from Oracle's Usage API, daily, in the tenancy's billing
+   * currency. Oracle can't split out only what this app created, so it's the
+   * compartment the app uses when one is set, otherwise the whole tenancy.
+   * Needs the policy: Allow group <group> to read usage-report in tenancy
+   */
+  async getBillingActuals(from: string, to: string): Promise<BillingActuals> {
+    const client = new usageapi.UsageapiClient({ authenticationDetailsProvider: this.auth }, CLIENT_CONFIG);
+    client.regionId = this.homeRegion;
+    const ownCompartment = this.compartmentId && this.compartmentId !== this.tenancyOcid ? this.compartmentId : null;
+    let items: usageapi.models.UsageSummary[] = [];
+    try {
+      const res = await client.requestSummarizedUsages({
+        requestSummarizedUsagesDetails: {
+          tenantId: this.tenancyOcid,
+          timeUsageStarted: new Date(`${from}T00:00:00Z`),
+          timeUsageEnded: new Date(`${to}T00:00:00Z`),
+          granularity: usageapi.models.RequestSummarizedUsagesDetails.Granularity.Daily,
+          queryType: usageapi.models.RequestSummarizedUsagesDetails.QueryType.Cost,
+          groupBy: ['compartmentId'],
+          compartmentDepth: 6,
+        },
+      });
+      items = res.usageAggregation?.items || [];
+    } catch (error: any) {
+      if (error?.statusCode === 404 || error?.statusCode === 401 || /NotAuthorized/i.test(String(error?.serviceCode))) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_PERMISSION', title: 'Your Oracle key can\'t read cost data',
+          explanation: 'Oracle\'s Usage API needs its own policy statement.',
+          fixes: ['Identity & Security → Policies (root compartment) → edit your CloudGaming policy and add:',
+            'Allow group CloudGaming to read usage-report in tenancy'],
+          consoleUrl: 'https://cloud.oracle.com/identity/domains/policies', consoleLabel: 'Open Policies',
+        });
+      }
+      throw error;
+    }
+    const scoped = new Map<string, number>();
+    const account = new Map<string, number>();
+    let currency = 'USD';
+    for (const it of items) {
+      const date = new Date(it.timeUsageStarted).toISOString().slice(0, 10);
+      const amount = Number(it.computedAmount) || 0;
+      if (it.currency) currency = String(it.currency).trim();
+      account.set(date, (account.get(date) || 0) + amount);
+      if (ownCompartment && it.compartmentId === ownCompartment) scoped.set(date, (scoped.get(date) || 0) + amount);
+    }
+    const toDays = (m: Map<string, number>) => [...m.entries()].sort().map(([date, amount]) => ({ date, amount }));
+    return ownCompartment
+      ? { currency, scope: 'compartment', scopeNote: 'The compartment the app uses', daily: toDays(scoped), accountDaily: toDays(account) }
+      : { currency, scope: 'account', scopeNote: 'Whole tenancy (the app uses the root compartment)', daily: toDays(account),
+          notes: ['Set a dedicated compartment on Config to see only this app\'s costs.'] };
   }
 
   async createSnapshot(instanceId: string, _diskPath: string): Promise<{ snapshotId: string; sizeGb: number }> {

@@ -125,7 +125,7 @@ export default function PerformancePage() {
       ) : (
         <>
           <p className="text-xs text-slate-400 tabular-nums">
-            {machines.length} machine{machines.length === 1 ? '' : 's'} · {running.length} running · ≈${running.reduce((s, m) => s + (Number(m.cost_per_hour) || 0), 0).toFixed(2)}/hour right now
+            {machines.length} machine{machines.length === 1 ? '' : 's'} · {running.length} running · ≈USD {running.reduce((s, m) => s + (Number(m.cost_per_hour) || 0), 0).toFixed(2)}/hour right now
             {me && <> · pings estimated from {me.label}</>}
           </p>
           <ul className="grid gap-3 lg:grid-cols-2">
@@ -143,7 +143,7 @@ export default function PerformancePage() {
                   </div>
                   <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <Stat label="Up for" value={m.status === 'running' ? since(m.last_started) : '—'} />
-                    <Stat label="Cost" value={`≈$${(Number(m.cost_per_hour) || 0).toFixed(2)}/h`} />
+                    <Stat label="Cost" value={`≈USD ${(Number(m.cost_per_hour) || 0).toFixed(2)}/h`} />
                     <Stat label="Est. ping" value={me && r ? `~${pingMs(me, r)} ms` : '—'} />
                     <Stat label="Checked" value={m.last_synced_at ? `${since(m.last_synced_at)} ago` : '—'} />
                   </dl>

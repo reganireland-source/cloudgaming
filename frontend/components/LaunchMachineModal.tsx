@@ -260,11 +260,11 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                           >
                             <span className="flex justify-between gap-2">
                               <span className="font-semibold text-slate-100">{s.label}</span>
-                              <span className="text-neon-lime tabular-nums">≈${p?.onDemand.toFixed(2)}/h</span>
+                              <span className="text-neon-lime tabular-nums">≈USD {p?.onDemand.toFixed(2)}/h</span>
                             </span>
                             {p?.spot != null && (
                               <span className="block mt-0.5 text-[0.68rem] text-slate-500 tabular-nums">
-                                spot ≈${p.spot.toFixed(2)}/h
+                                spot ≈USD {p.spot.toFixed(2)}/h
                                 {p.spotDiscountPct != null && <> · −{p.spotDiscountPct}%{p.spotSource === 'estimate' ? ' est.' : ''}{p.spotSource === 'live' && p.spotDiscountPct >= 65 ? ' 🔥' : ''}</>}
                               </span>
                             )}
@@ -312,7 +312,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       <select id="launch-quality" value={quality} onChange={(e) => setQuality(e.target.value)} className="input-neon w-full px-3 py-2">
                         {options.qualities.map((q) => <option key={q} value={q}>{q[0].toUpperCase() + q.slice(1)} — {QUALITY_HINT[q]}</option>)}
                       </select>
-                      <p className="text-xs text-slate-500 mt-1">Streamed data is billed by the cloud (≈${regionInfo?.egressPerGb.toFixed(2)}/GB here).</p>
+                      <p className="text-xs text-slate-500 mt-1">Streamed data is billed by the cloud (≈USD {regionInfo?.egressPerGb.toFixed(2)}/GB here).</p>
                     </div>
                   </div>
 
@@ -343,8 +343,8 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       <option value={0}>Never — keep the disk</option>
                     </select>
                     <p className="text-xs text-slate-500 mt-1">
-                      A stopped machine still pays for its whole disk (≈${diskMonthly.toFixed(2)}/month here). Shelving snapshots the disk and deletes it,
-                      cutting that to ≈${shelfLow.toFixed(2)}–${shelfHigh.toFixed(2)}/month; Restore brings it back with your games (a few minutes longer than Start).
+                      A stopped machine still pays for its whole disk (≈USD {diskMonthly.toFixed(2)}/month here). Shelving snapshots the disk and deletes it,
+                      cutting that to ≈USD {shelfLow.toFixed(2)}–{shelfHigh.toFixed(2)}/month; Restore brings it back with your games (a few minutes longer than Start).
                       The disk is only deleted once the snapshot is confirmed complete. You can change this on the machine at any time.
                     </p>
                   </div>
@@ -353,9 +353,9 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   <div className="rounded border border-neon-cyan/20 bg-neon-cyan/[0.03] p-4 text-sm">
                     <p className="text-slate-200">
                       <span className="text-neon-lime font-semibold tabular-nums">≈ ${hourly.toFixed(2)}/hour</span> while running
-                      {' '}+ <span className="tabular-nums">${diskMonthly.toFixed(2)}/month</span> for the disk (also while stopped).
+                      {' '}+ <span className="tabular-nums">USD {diskMonthly.toFixed(2)}/month</span> for the disk (also while stopped).
                     </p>
-                    <p className="text-xs text-slate-400 mt-1">Shelved when you&apos;re not using it: ≈${shelfLow.toFixed(2)}–${shelfHigh.toFixed(2)}/month.</p>
+                    <p className="text-xs text-slate-400 mt-1">Shelved when you&apos;re not using it: ≈USD {shelfLow.toFixed(2)}–{shelfHigh.toFixed(2)}/month.</p>
                     <p className="text-xs text-slate-500 mt-1">{current.priceNote} Billed by {current.label} to your account — stop the machine when you're done playing.</p>
                   </div>
 

@@ -180,5 +180,5 @@ export const AZURE_CATALOG: ProviderCatalog = {
   priceNote:
     'Rough estimates from Azure\'s East US list prices × a region factor (±20%); excludes tax. ' +
     'Spot prices change constantly. Disks are billed by size tier rounded up (150 GB → 256 GB tier), even while stopped. ' +
-    'A stopped machine also keeps its static public IP (~$3.60/month).',
+    'A stopped machine also keeps its static public IP (~USD 3.60/month).',
 };

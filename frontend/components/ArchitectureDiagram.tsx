@@ -156,7 +156,7 @@ function explain(key: string, t: CloudTerms, m?: MachineLike): NodeInfo {
       title: `Network — ${t.network}`,
       what: 'A private, software-defined network in your account that the machine plugs into.',
       how: `${t.firewall} only lets in the streaming ports Sunshine/Moonlight need. The machine also gets a public address: ${t.ip}. There\'s no SSH port opened by the app.`,
-      control: 'Created/used by the app in your account; editable by you in the console.', cost: 'Usually free; public IPv4 addresses cost ~$0.005/hour on some clouds. Streamed video out is "egress" (~$0.09–0.12/GB).',
+      control: 'Created/used by the app in your account; editable by you in the console.', cost: 'Usually free; public IPv4 addresses cost ~USD 0.005/hour on some clouds. Streamed video out is "egress" (~$0.09–0.12/GB).',
     },
     hypervisor: {
       title: `Physical host + ${t.hypervisor}`,

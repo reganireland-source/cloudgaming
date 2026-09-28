@@ -215,7 +215,7 @@ export default function InfraMap({
             const st = CLOUD_STYLE[a.provider];
             return (
               <g key={`a-${a.provider}-${a.id}`} transform={`translate(${x},${y}) scale(${inv}) translate(${dx},${dy})`}
-                onMouseEnter={() => setHover({ x: transform.x + x * transform.k, y: transform.y + y * transform.k, lines: [`${st.label} · ${a.name}`, 'Nothing deployed here', a.fromPrice ? `From ≈$${a.fromPrice.toFixed(2)}/h` : '', user ? `Est. ping ~${estimatePingMs(user, a)} ms` : ''].filter(Boolean) })}
+                onMouseEnter={() => setHover({ x: transform.x + x * transform.k, y: transform.y + y * transform.k, lines: [`${st.label} · ${a.name}`, 'Nothing deployed here', a.fromPrice ? `From ≈USD ${a.fromPrice.toFixed(2)}/h` : '', user ? `Est. ping ~${estimatePingMs(user, a)} ms` : ''].filter(Boolean) })}
                 onMouseLeave={() => setHover(null)}>
                 <Shape shape={st.shape} size={3.5} color={st.color} dim />
               </g>
@@ -249,8 +249,8 @@ export default function InfraMap({
                 onMouseEnter={() => setHover({ x: transform.x + x * transform.k, y: transform.y + y * transform.k, lines: [
                   `${st.label} · ${g.regionName}`,
                   `${g.count} resource${g.count === 1 ? '' : 's'} · ${g.machines} machine${g.machines === 1 ? '' : 's'} · ${ring.label}`,
-                  g.hourly ? `Running now ≈$${g.hourly.toFixed(2)}/h` : '',
-                  g.monthly ? `Standing ≈$${g.monthly.toFixed(2)}/month` : '',
+                  g.hourly ? `Running now ≈USD ${g.hourly.toFixed(2)}/h` : '',
+                  g.monthly ? `Standing ≈USD ${g.monthly.toFixed(2)}/month` : '',
                   g.orphans ? `⚠ ${g.orphans} orphan${g.orphans === 1 ? '' : 's'} still billing` : '',
                   'Click for details',
                 ].filter(Boolean) })}

@@ -79,7 +79,7 @@ import {
 } from './aws/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
-import type { InventoryItem } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
 
 /** The parsed, checked credentials. */
 export interface AwsCredentials {
@@ -1226,6 +1226,77 @@ export class AWSProvider extends CloudProvider {
    * OptInStatus ('opt-in-not-required' | 'opted-in' | 'not-opted-in').
    * Opt-in regions (e.g. Hong Kong) must be enabled before anything works there.
    */
+  /**
+   * Actual charges from AWS Cost Explorer (needs ce:GetCostAndUsage), daily,
+   * in the account's billing currency. Two views: everything tagged
+   * app=cloudgaming-hub (what this app created) and the whole account.
+   * Tag filtering only works once "app" is activated as a cost allocation
+   * tag, so we try to activate it (ce:UpdateCostAllocationTagsStatus);
+   * AWS then needs up to 24 hours before tagged costs appear.
+   * Each Cost Explorer request costs USD 0.01 - callers cache the result.
+   */
+  async getBillingActuals(from: string, to: string): Promise<BillingActuals> {
+    const ce = new AWS.CostExplorer(this.clientConfig('us-east-1'));
+    const run = async (filter?: AWS.CostExplorer.Expression) => {
+      const days: BillingDay[] = [];
+      let currency = 'USD';
+      let token: string | undefined;
+      do {
+        const res = await ce.getCostAndUsage({
+          TimePeriod: { Start: from, End: to }, Granularity: 'DAILY', Metrics: ['UnblendedCost'],
+          ...(filter ? { Filter: filter } : {}), ...(token ? { NextPageToken: token } : {}),
+        }).promise();
+        for (const r of res.ResultsByTime || []) {
+          const m = r.Total?.UnblendedCost;
+          if (m?.Unit) currency = m.Unit;
+          days.push({ date: String(r.TimePeriod?.Start), amount: Number(m?.Amount) || 0 });
+        }
+        token = res.NextPageToken;
+      } while (token);
+      return { days, currency };
+    };
+    try {
+      const account = await run();
+      const app = await run({ Tags: { Key: RESOURCE_TAG.key, Values: [RESOURCE_TAG.value], MatchOptions: ['EQUALS'] } });
+      const notes: string[] = [];
+      const appTotal = app.days.reduce((s, d) => s + d.amount, 0);
+      const accountTotal = account.days.reduce((s, d) => s + d.amount, 0);
+      if (appTotal === 0 && accountTotal > 0) {
+        // Most likely the tag isn't active for cost allocation yet: try to switch it on.
+        try {
+          await ce.updateCostAllocationTagsStatus({ CostAllocationTagsStatus: [{ TagKey: RESOURCE_TAG.key, Status: 'Active' }] }).promise();
+          notes.push(`Switched on the "${RESOURCE_TAG.key}" cost allocation tag, so AWS can report this app's costs separately. It takes up to 24 hours; until then the whole account is shown.`);
+        } catch (e: any) {
+          notes.push(`AWS can't yet report this app's costs separately: activate the "${RESOURCE_TAG.key}" tag under Billing → Cost allocation tags (or allow ce:UpdateCostAllocationTagsStatus). Until then the whole account is shown.`);
+        }
+        return { currency: account.currency, scope: 'account', scopeNote: 'Whole AWS account (all services)', daily: account.days, notes };
+      }
+      return { currency: app.currency, scope: 'app', scopeNote: `Resources tagged ${RESOURCE_TAG.key}=${RESOURCE_TAG.value}`, daily: app.days, accountDaily: account.days, notes };
+    } catch (error: any) {
+      if (/AccessDenied|not authorized/i.test(String(error?.code) + String(error?.message))) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_PERMISSION',
+          title: 'Your AWS key can\'t read billing data',
+          explanation: 'Actual charges come from AWS Cost Explorer, which needs its own permission.',
+          fixes: [
+            'IAM → Users → cloudgaming-hub → Add permissions → Create inline policy (JSON):',
+            '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ce:GetCostAndUsage","ce:UpdateCostAllocationTagsStatus"],"Resource":"*"}]}',
+            'If Cost Explorer was never opened on this account, open it once in the Billing console (AWS takes up to 24 hours to prepare the data).',
+          ],
+          consoleUrl: 'https://console.aws.amazon.com/iam/home#/users',
+          consoleLabel: 'Open IAM users',
+        });
+      }
+      if (/DataUnavailable/i.test(String(error?.code))) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_NOT_READY', title: 'AWS billing data isn\'t ready yet',
+          explanation: 'Cost Explorer prepares data for up to 24 hours after it is first enabled.', fixes: ['Try again tomorrow.'],
+        });
+      }
+      throw error;
+    }
+  }
+
   async getRegionOptIn(): Promise<Record<string, string>> {
     const res = await this.ec2For('us-east-1').describeRegions({ AllRegions: true }).promise();
     return Object.fromEntries((res.Regions || []).map((r) => [String(r.RegionName), String(r.OptInStatus || 'opt-in-not-required')]));

@@ -75,7 +75,7 @@ import {
   findShape,
   resourceGroupFor,
 } from './azure/catalog';
-import type { InventoryItem } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 
@@ -846,6 +846,74 @@ export class AzureProvider extends CloudProvider {
     return { status, ipAddress: ipAddress || undefined };
   }
 
+  /**
+   * Actual charges from Azure Cost Management (the Contributor role can read
+   * them), daily per resource group, in the subscription's billing
+   * currency. "This app" = resource groups named cloudgaming-hub-<region>.
+   */
+  async getBillingActuals(from: string, to: string): Promise<BillingActuals> {
+    const token = await this.credential.getToken('https://management.azure.com/.default');
+    const url = `https://management.azure.com/subscriptions/${this.subscriptionId}/providers/Microsoft.CostManagement/query?api-version=2023-11-01`;
+    const lastDay = new Date(Date.parse(to + 'T00:00:00Z') - 1000).toISOString().slice(0, 19) + 'Z';
+    const body = {
+      type: 'ActualCost',
+      timeframe: 'Custom',
+      timePeriod: { from: `${from}T00:00:00Z`, to: lastDay },
+      dataset: {
+        granularity: 'Daily',
+        aggregation: { totalCost: { name: 'Cost', function: 'Sum' } },
+        grouping: [{ type: 'Dimension', name: 'ResourceGroupName' }],
+      },
+    };
+    const rows: any[][] = [];
+    let columns: string[] = [];
+    let next: string | null = url;
+    for (let page = 0; next && page < 20; page++) {
+      const res: Response = await fetch(next, { method: 'POST', headers: { Authorization: `Bearer ${token.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = String(json?.error?.message || res.statusText);
+        if (res.status === 401 || res.status === 403) {
+          throw new FriendlyCloudError({
+            code: 'BILLING_PERMISSION', title: 'Your Azure key can\'t read cost data',
+            explanation: `Azure answered: ${msg}`,
+            fixes: [
+              'Give the app\'s identity the "Cost Management Reader" role on the subscription:',
+              `az role assignment create --assignee <CLIENT_ID> --role "Cost Management Reader" --scope /subscriptions/${this.subscriptionId}`,
+              'Free-trial, student and sponsorship subscriptions don\'t offer cost data through the API; Pay-As-You-Go does.',
+            ],
+            consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis', consoleLabel: 'Open Cost analysis',
+          });
+        }
+        if (res.status === 429) {
+          throw new FriendlyCloudError({ code: 'BILLING_RATE_LIMITED', title: 'Azure asked us to slow down', explanation: msg, fixes: ['Try again in a few minutes.'] });
+        }
+        throw new FriendlyCloudError({ code: 'BILLING_ERROR', title: 'Azure couldn\'t return cost data', explanation: msg, fixes: ['Try again later.'] });
+      }
+      columns = (json.properties?.columns || []).map((c: any) => String(c.name));
+      rows.push(...(json.properties?.rows || []));
+      next = json.properties?.nextLink || null;
+    }
+    const col = (name: string) => columns.findIndex((c) => c.toLowerCase() === name.toLowerCase());
+    const [iCost, iDate, iRg, iCur] = [col('Cost'), col('UsageDate'), col('ResourceGroupName'), col('Currency')];
+    const app = new Map<string, number>();
+    const account = new Map<string, number>();
+    let currency = 'USD';
+    for (const r of rows) {
+      const d = String(r[iDate]);                       // e.g. 20260927
+      const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+      const amount = Number(r[iCost]) || 0;
+      if (iCur >= 0 && r[iCur]) currency = String(r[iCur]);
+      account.set(date, (account.get(date) || 0) + amount);
+      if (String(r[iRg] || '').toLowerCase().startsWith(RG_PREFIX)) app.set(date, (app.get(date) || 0) + amount);
+    }
+    const toDays = (m: Map<string, number>) => [...m.entries()].sort().map(([date, amount]) => ({ date, amount }));
+    return {
+      currency, scope: 'app', scopeNote: `Resource groups ${RG_PREFIX}*`,
+      daily: toDays(app), accountDaily: toDays(account),
+    };
+  }
+
   async createSnapshot(instanceId: string, _diskPath: string): Promise<{ snapshotId: string; sizeGb: number }> {
     // Our machines have one disk (the OS disk, with the games on it); we snapshot it whole.
     const { rg, name } = this.splitId(instanceId);
@@ -1230,7 +1298,7 @@ export class AzureProvider extends CloudProvider {
           attachedTo,
           monthlyCost,
           orphan: unused || undefined,
-          orphanReason: unused ? 'Public IP not attached to any machine — still billed (~$3.65/month)' : undefined,
+          orphanReason: unused ? 'Public IP not attached to any machine — still billed (~USD 3.65/month)' : undefined,
           consoleUrl: portalLink(ip.id),
         });
       }

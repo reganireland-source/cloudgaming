@@ -161,3 +161,24 @@ export interface InventoryItem {
   consoleUrl?: string;      // link to it in the cloud console
   createdAt?: string;       // ISO timestamp, if known
 }
+
+// ---------------------------------------------------------------------------
+// Actual charges, as billed by the cloud (not the app's estimates)
+// ---------------------------------------------------------------------------
+// Returned by each provider's getBillingActuals(). Amounts are in the
+// cloud's BILLING currency (currency), exactly as the cloud reports them —
+// e.g. SGD for a Singapore billing account. Clouds report with a delay
+// (roughly 8-24 hours), so the latest day is usually incomplete.
+
+export interface BillingDay { date: string; amount: number }  // date = YYYY-MM-DD (UTC)
+
+export interface BillingActuals {
+  currency: string;
+  /** What `daily` covers: only what this app created ('app'), a compartment, or the whole account. */
+  scope: 'app' | 'compartment' | 'account';
+  scopeNote: string;
+  daily: BillingDay[];
+  /** The whole account's daily totals, when `daily` is narrower than the account. */
+  accountDaily?: BillingDay[];
+  notes?: string[];
+}

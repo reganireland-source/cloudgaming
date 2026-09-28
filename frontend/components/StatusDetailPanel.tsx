@@ -213,7 +213,7 @@ function YourCloud({ provider }: { provider: string }) {
         <Tile label="Your keys" value={data.saved ? (data.saved.lastCheckOk === false ? '⚠ check' : '✓ saved') : 'none'}
           sub={data.saved?.lastCheckedAt ? `checked ${new Date(data.saved.lastCheckedAt).toLocaleDateString()}` : 'add on Config'} />
         <Tile label="Machines" value={`${data.machines.length}`} sub={`${running.length} running`} />
-        <Tile label="Spend now" value={`≈$${hourly.toFixed(2)}/h`} sub="estimated" />
+        <Tile label="Spend now" value={`≈USD ${hourly.toFixed(2)}/h`} sub="estimated" />
       </div>
       {data.saved?.lastCheckSummary && <p className="text-xs text-slate-400">Last key check: {data.saved.lastCheckSummary}</p>}
     </div>

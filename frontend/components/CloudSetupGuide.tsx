@@ -77,6 +77,7 @@ const GUIDES: Record<ProviderKey, Guide> = {
       { title: 'Give it the "Compute Admin" role', detail: 'In "Grant this service account access to project", add Compute Admin (creates machines, disks, snapshots and the streaming firewall rule) → Continue → Done. "Service Account User" is optional — the app doesn\'t attach service accounts to machines.' },
       { title: 'Create a JSON key', detail: 'Click the service account → Keys → Add key → Create new key → JSON → Create. A .json file downloads. If you see "Service account key creation is disabled", see that entry under TROUBLESHOOTING below.' },
       { title: 'Add it on this page', detail: 'Under YOUR_CLOUD_KEYS → Google Cloud → Add keys, click "Upload file" and pick the .json (or paste all of it). Project ID can be left blank — it\'s read from the file. Press "Check & save": the app signs in, reads your GPU quotas and network, and only saves if nothing fails.' },
+      { title: '(Optional) Let the app read your actual bill', detail: 'Google only provides billed costs through its billing export to BigQuery: Billing → Billing export → BigQuery export → Standard usage cost → pick this project, create a dataset (e.g. "billing"), save. Give the service account "BigQuery Job User" on the project and "BigQuery Data Viewer" on the dataset. A few hours later a table gcp_billing_export_v1_… appears: paste its full name on the Costs page. Data starts from the day you turn it on.', link: { href: 'https://console.cloud.google.com/billing/export', label: 'Billing export' } },
     ],
     fields: [
       { field: 'Service account key (JSON)', value: 'The whole downloaded key file (step 5)', example: '{ "type": "service_account", "project_id": … }' },
@@ -136,6 +137,7 @@ gcloud beta quotas preferences create --project=$P --service=compute.googleapis.
       { title: 'Attach its permissions', detail: 'Attach policies directly: AmazonEC2FullAccess (required — machines, disks, snapshots, security group). Optional: ServiceQuotasReadOnlyAccess (lets the key check read your GPU quota) and a policy allowing ce:GetCostAndUsage (real spend reports).' },
       { title: 'Create an access key', detail: 'Open the user → Security credentials → Create access key → "Application running outside AWS" → Create.' },
       { title: 'Copy both halves immediately', detail: 'The Access key ID (starts with AKIA) and the Secret access key. The secret is shown ONLY once.' },
+      { title: '(Optional) Let the app read your actual bill', detail: 'Add an inline policy to the user allowing ce:GetCostAndUsage and ce:UpdateCostAllocationTagsStatus (the app switches on the "app" cost allocation tag so it can report only its own resources). AWS charges USD 0.01 per Cost Explorer request; the app asks at most every 6 hours.' },
       { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → AWS → Add keys → paste both → "Check & save". The check signs in, does a dry-run launch to confirm permissions, reads your GPU quota and checks the default VPC. Regions are chosen per machine in the launch form.' },
     ],
     fields: [
@@ -176,7 +178,7 @@ aws account enable-region --region-name ap-east-1`,
     },
     warnings: [
       'The app creates a security group "cloudgaming-sunshine" in the default VPC with only the streaming ports open. SSH is not opened.',
-      'Stopped machines still pay for their EBS disk (~$0.08–0.10/GB-month).',
+      'Stopped machines still pay for their EBS disk (~USD 0.08–0.10/GB-month).',
     ],
   },
   azure: {
@@ -192,6 +194,7 @@ aws account enable-region --region-name ap-east-1`,
       { title: 'Open Azure Cloud Shell', detail: 'Click the >_ icon at the top of the Azure portal and choose Bash.', link: { href: 'https://portal.azure.com/#cloudshell/', label: 'Open Cloud Shell' } },
       { title: 'Get your Subscription ID', detail: 'Run:  az account show --query id -o tsv' },
       { title: 'Create the app\'s identity with Contributor access', detail: 'Run:  az ad sp create-for-rbac --name cloudgaming-hub --role Contributor --scopes /subscriptions/<SUBSCRIPTION_ID>   It prints appId (Client ID), password (Client secret) and tenant (Tenant ID). The password is shown only once.' },
+      { title: 'Actual bill: nothing extra', detail: 'The Contributor role can already read Cost Management, so the Costs page shows what Azure billed (in your billing currency) next to the app\'s estimate. Free-trial and sponsorship subscriptions don\'t offer cost data by API.' },
       { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → Azure → Add keys → paste the four values (or paste the whole JSON that az printed into any field) → "Check & save". The check signs in, confirms permissions, registers the Compute/Network providers if needed and reads your GPU quota.' },
     ],
     fields: [
@@ -236,11 +239,11 @@ az quota update --resource-name lowPriorityCores --resource-type lowPriority \\
     timeNeeded: '~20 minutes, plus waiting for a GPU limit increase',
     beforeYouStart: [
       'A Pay As You Go account. Free-trial and Always Free accounts can\'t use GPUs.',
-      'GPU machines are VM.GPU.A10.1 (NVIDIA A10) — powerful but ~$2/hour. Oracle\'s first 10 TB/month of streamed data is free.',
+      'GPU machines are VM.GPU.A10.1 (NVIDIA A10) — powerful but ~USD 2/hour. Oracle\'s first 10 TB/month of streamed data is free.',
       'If you want a region other than your home region, subscribe to it first (region menu → Manage regions).',
     ],
     steps: [
-      { title: 'Create a group and policy (skip if you\'re a tenancy administrator)', detail: 'Identity → Domains → Default → Groups → create "CloudGaming" and add your user. Then Identity & Security → Policies (root compartment) → Create policy → manual editor:  Allow group CloudGaming to manage instance-family in tenancy · Allow group CloudGaming to manage virtual-network-family in tenancy · Allow group CloudGaming to manage volume-family in tenancy · Allow group CloudGaming to read all-resources in tenancy', link: { href: 'https://cloud.oracle.com/identity/domains/policies', label: 'Open Policies' } },
+      { title: 'Create a group and policy (skip if you\'re a tenancy administrator)', detail: 'Identity → Domains → Default → Groups → create "CloudGaming" and add your user. Then Identity & Security → Policies (root compartment) → Create policy → manual editor:  Allow group CloudGaming to manage instance-family in tenancy · Allow group CloudGaming to manage virtual-network-family in tenancy · Allow group CloudGaming to manage volume-family in tenancy · Allow group CloudGaming to read all-resources in tenancy · Allow group CloudGaming to read usage-report in tenancy (lets the Costs page show what Oracle billed)', link: { href: 'https://cloud.oracle.com/identity/domains/policies', label: 'Open Policies' } },
       { title: 'Create an API key', detail: 'Profile (top right) → My profile → API keys → Add API key → Generate API key pair → Download private key → Add.', link: { href: 'https://cloud.oracle.com/identity/domains/my-profile/api-keys', label: 'Open API keys' } },
       { title: 'Copy the configuration preview', detail: 'After adding the key, Oracle shows a "Configuration file preview" with tenancy=, user=, fingerprint= and region=. Copy those four values.' },
       { title: 'Add it on this page', detail: 'YOUR_CLOUD_KEYS → Oracle → Add keys → paste the values and upload the PRIVATE .pem (not the _public.pem) → "Check & save". The check verifies the key and fingerprint locally, signs in, tests permissions and looks for GPU shapes.' },
@@ -289,7 +292,7 @@ const FIRST_LAUNCH_TIPS: React.ReactNode[] = [
   <>Start small: on <a href="/recommendations" className="text-neon-cyan hover:underline">Recon</a> pick <strong>Classic</strong> (GOOD tier, T4) with <strong>Reliable</strong> pricing. T4 is the most widely available GPU and needs the smallest quota; on-demand can’t be taken back mid-test.</>,
   <>Turn on <strong>auto-stop</strong> (15 minutes) in the launch form, so a forgotten machine shuts itself down.</>,
   <>No Moonlight on the device you're using? Each machine also opens in a browser tab: <strong>Use the desktop</strong> (reliable, with copy &amp; paste — best for setting things up) or <strong>Play in browser</strong> (full stream in Chrome/Edge, <em>experimental</em>). Both are on the machine card under Connect.</>,
-  <>A <strong>stopped</strong> machine still pays for its whole disk every month (≈$15–22 for 150 GB). Not playing for a week or more? <strong>Shelve</strong> it (Machines page): the disk is snapshotted and deleted, cutting that to ≈$1–7, and <strong>Restore</strong> brings it back with your games in a few minutes. <strong>Auto-shelve</strong> (7 days stopped) does this for you. See <a href="/costs#standing" className="text-neon-cyan hover:underline">Costs → Standing costs</a>.</>,
+  <>A <strong>stopped</strong> machine still pays for its whole disk every month (≈USD 15–22 for 150 GB). Not playing for a week or more? <strong>Shelve</strong> it (Machines page): the disk is snapshotted and deleted, cutting that to ≈USD 1–7, and <strong>Restore</strong> brings it back with your games in a few minutes. <strong>Auto-shelve</strong> (7 days stopped) does this for you. See <a href="/costs#standing" className="text-neon-cyan hover:underline">Costs → Standing costs</a>.</>,
   <>The <strong>first boot takes 20–35 minutes</strong> (NVIDIA driver, a several-GB streaming container, then Chrome, Discord and Battle.net). The progress bar shows each stage; later starts take 1–2 minutes.</>,
   <>“Out of GPUs in this area” is common and temporary — the app already tries every zone; try again later or another region.</>,
   <>Every machine comes with <strong>Steam, Battle.net, Discord, Google Chrome, Heroic</strong> (Epic &amp; GOG), <strong>Lutris</strong> and <strong>Firefox</strong> — each is its own app in Moonlight. Battle.net installs itself the first time you open it.</>,

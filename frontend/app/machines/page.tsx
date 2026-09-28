@@ -37,6 +37,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usd, usdRange } from '@/lib/money';
 import { RequireAuth } from '@/components/AuthProvider';
 import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
 import LaunchMachineModal from '@/components/LaunchMachineModal';
@@ -81,7 +82,7 @@ interface Standing {
 type Region = { id: string; name: string; gpus: string[] };
 type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete';
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
-const money = (n: number) => `$${n.toFixed(2)}`;
+const money = (n: number) => usd(n);
 const daysSince = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null);
 
 interface OperationSummary {
@@ -261,7 +262,7 @@ function MachineCard({
           <p>
             <span className="text-neon-amber">Stopped{daysSince(machine.stopped_at) ? ` ${daysSince(machine.stopped_at)} day${daysSince(machine.stopped_at) === 1 ? '' : 's'}` : ''}:</span>{' '}
             no compute charge, but its {sd.diskGb} GB disk costs <span className="text-slate-100 tabular-nums">{money(sd.diskMonthly)}/month</span>, empty space included.
-            Shelved it would be about <span className="text-slate-100 tabular-nums">{money(sd.shelfEstimate.low)}–{money(sd.shelfEstimate.high)}/month</span>{' '}
+            Shelved it would be about <span className="text-slate-100 tabular-nums">{usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}/month</span>{' '}
             (snapshots bill only the data stored: {money(sd.shelfEstimate.low)} for a fresh install, {money(sd.shelfEstimate.high)} if the disk is full).
           </p>
           <AutoShelvePicker value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} />
@@ -269,7 +270,7 @@ function MachineCard({
       )}
       {sd && machine.status === 'running' && (
         <p className="mt-2 text-[0.7rem] text-slate-500">
-          When you stop, the {sd.diskGb} GB disk keeps costing {money(sd.diskMonthly)}/month; shelving cuts that to ≈{money(sd.shelfEstimate.low)}–{money(sd.shelfEstimate.high)}.{' '}
+          When you stop, the {sd.diskGb} GB disk keeps costing {money(sd.diskMonthly)}/month; shelving cuts that to ≈{usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}.{' '}
           <AutoShelvePicker value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} inline />
         </p>
       )}
@@ -286,7 +287,7 @@ function MachineCard({
       {confirm === 'stop' && (
         <div className="mt-3 rounded border border-neon-pink/30 p-3 text-xs text-slate-300 space-y-2">
           <p>Stop this machine? Compute billing stops; the disk (and your games) are kept{sd ? ` — about ${money(sd.diskMonthly)}/month` : ''}. Anyone streaming will be disconnected.</p>
-          <p className="text-slate-400">Not playing for a week or more? <strong className="text-slate-200">Stop &amp; shelve</strong> instead: it snapshots the disk and deletes it, so it costs {sd ? `≈${money(sd.shelfEstimate.low)}–${money(sd.shelfEstimate.high)}` : 'far less'}/month until you restore.</p>
+          <p className="text-slate-400">Not playing for a week or more? <strong className="text-slate-200">Stop &amp; shelve</strong> instead: it snapshots the disk and deletes it, so it costs {sd ? `≈${usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}` : 'far less'}/month until you restore.</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-neon-pink text-xs" onClick={() => { setConfirm(null); onAction(machine, 'stop'); }}>Stop</button>
             <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'stop-shelve'); }}>Stop &amp; shelve</button>
@@ -300,7 +301,7 @@ function MachineCard({
           <ol className="list-decimal pl-4 space-y-0.5">
             <li>The disk is snapshotted (a few minutes; the first snapshot of a big disk can take up to ~30).</li>
             <li>Only once the cloud confirms the snapshot is complete, the machine and its disk are deleted. If anything goes wrong, nothing is deleted.</li>
-            <li>Standing cost drops from {sd ? money(sd.diskMonthly) : 'the disk'}/month to ≈{sd ? `${money(sd.shelfEstimate.low)}–${money(sd.shelfEstimate.high)}` : 'a fraction'}/month.</li>
+            <li>Standing cost drops from {sd ? money(sd.diskMonthly) : 'the disk'}/month to ≈{sd ? `${usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}` : 'a fraction'}/month.</li>
           </ol>
           <p className="text-slate-400">To play again, press Restore: it rebuilds the disk from the snapshot, which takes several minutes longer than Start. Games, settings, logins and Moonlight pairing are kept; the IP address changes.</p>
           <div className="flex flex-wrap gap-2">
@@ -517,7 +518,7 @@ function MachinesPageInner() {
           <h1 className="text-xl font-bold neon-text mb-1 font-mono">[ MACHINES ]</h1>
           <p className="text-sm text-slate-400">
             {machines ? `${machines.length} machine${machines.length === 1 ? '' : 's'} · ${running.length} running` : 'Loading…'}
-            {running.length > 0 && <> · <span className="text-neon-lime tabular-nums">≈${hourly.toFixed(2)}/hour</span> right now</>}
+            {running.length > 0 && <> · <span className="text-neon-lime tabular-nums">≈{usd(hourly)}/hour</span> right now</>}
             {standing > 0 && <> · standing <Link href="/costs#standing" className="text-slate-200 tabular-nums hover:underline">≈{money(standing)}/month</Link></>}
           </p>
           {couldSave > 1 && (

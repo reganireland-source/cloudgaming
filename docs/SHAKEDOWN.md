@@ -235,6 +235,25 @@ always works if you don't want to wait. (On Azure, a machine that shut itself
 down shows "stopping" for a few minutes while Azure releases it; that is
 what stops the billing.)
 
+### Estimates vs the actual bill
+
+The app's own figures are **estimates in USD** from list prices, recorded
+hourly. **Costs → Estimate vs billed** shows, per cloud, what the cloud
+actually billed this month **in your billing currency** (e.g. SGD), up to the
+last day it has reported (clouds lag 8–24 h), its USD equivalent at the ECB
+rate, the app's estimate for the same days, and the difference. The month
+projection uses billed amounts where reported and estimates for the rest.
+"Also show in" adds a second currency to the totals.
+
+What each cloud needs (the Costs page shows the exact fix if missing):
+
+| Cloud | Source | Permission / setup |
+|---|---|---|
+| AWS | Cost Explorer | `ce:GetCostAndUsage` (+ `ce:UpdateCostAllocationTagsStatus` to split out the app's own resources). USD 0.01 per request; asked at most every 6 h |
+| Azure | Cost Management | nothing extra (Contributor can read it); not available on free-trial/sponsorship subscriptions |
+| Google Cloud | Billing export to BigQuery | one-time export setup + BigQuery Job User / Data Viewer; paste the table name on the Costs page. Data starts the day it's enabled |
+| Oracle | Usage API | policy `Allow group CloudGaming to read usage-report in tenancy` |
+
 ---
 
 ## 7. Optional second run: spot

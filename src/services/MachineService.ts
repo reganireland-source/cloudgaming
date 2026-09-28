@@ -201,8 +201,8 @@ export class MachineService {
           await op.info(`${catalog.spotLabel}: about ${spotOffer.discountPct}% off on-demand (${spotOffer.source === 'live' ? 'live price' : spotOffer.source === 'fixed' ? 'fixed discount' : 'estimate'})` +
             `${spotOffer.interruption ? `; reclaimed ${spotOffer.interruption.label} of the time in this region` : ''}. If reclaimed: ${spotOffer.onReclaim}`);
         }
-        await op.info(`Estimated cost while running: about $${costPerHour.toFixed(2)}/hour` +
-          ` (+ about $${(diskSizeGb * catalog.diskPerGbMonth).toFixed(2)}/month for the ${diskSizeGb} GB disk, even when stopped).`);
+        await op.info(`Estimated cost while running: about USD ${costPerHour.toFixed(2)}/hour` +
+          ` (+ about USD ${(diskSizeGb * catalog.diskPerGbMonth).toFixed(2)}/month for the ${diskSizeGb} GB disk, even when stopped).`);
         await op.info('Loading your encrypted cloud credentials…');
         const provider = await providerFor(userId, req.provider, op.reporter);
         if ((provider as any).projectId) op.projectId = (provider as any).projectId;
@@ -266,7 +266,7 @@ export class MachineService {
         if (status.ipAddress && status.ipAddress !== machine.ip_address) {
           await op.warn(`The machine's public IP changed to ${status.ipAddress}. If Moonlight can't find it, add this new IP there.`);
         }
-        await op.info(`Billing resumed: about $${Number(machine.cost_per_hour || 0).toFixed(2)}/hour while it runs.`);
+        await op.info(`Billing resumed: about USD ${Number(machine.cost_per_hour || 0).toFixed(2)}/hour while it runs.`);
         return { ipAddress: status.ipAddress };
       } catch (error) {
         await MachineService.resyncQuietly(userId, machine);
@@ -301,7 +301,7 @@ export class MachineService {
         await setStatus(machineId, 'stopped', { last_error: null, last_synced_at: new Date(), stopped_at: new Date() });
         const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
         const diskMonthly = (Number(machine.disk_size_gb) || catalog.defaultDiskGb) * catalog.diskPerGbMonth;
-        await op.info(`Compute billing has stopped. The ${machine.disk_size_gb || catalog.defaultDiskGb} GB disk is kept so your games are still there next time — about $${diskMonthly.toFixed(2)}/month while it exists. ` +
+        await op.info(`Compute billing has stopped. The ${machine.disk_size_gb || catalog.defaultDiskGb} GB disk is kept so your games are still there next time — about USD ${diskMonthly.toFixed(2)}/month while it exists. ` +
           'Not playing for a while? "Shelve" it: snapshot + delete the disk, typically cutting that by 70–90%.');
         return { stopped: true };
       } catch (error) {
@@ -401,7 +401,7 @@ export class MachineService {
         const provider = await providerFor(userId, machine.provider, op.reporter);
         if ((provider as any).projectId) op.projectId = (provider as any).projectId;
         if (reason === 'auto') await op.info(`It has been stopped for ${machine.auto_shelve_days}+ days, so it is being shelved automatically (you chose this).`);
-        await op.info(`Today its ${diskGb} GB disk costs about $${(diskGb * catalog.diskPerGbMonth).toFixed(2)}/month even while stopped. Shelving keeps a snapshot instead.`);
+        await op.info(`Today its ${diskGb} GB disk costs about USD ${(diskGb * catalog.diskPerGbMonth).toFixed(2)}/month even while stopped. Shelving keeps a snapshot instead.`);
 
         // 1. Stopped disks give clean snapshots.
         if (machine.status === 'running') {
@@ -443,8 +443,8 @@ export class MachineService {
         });
         const billedGb = storedGb ?? diskGb;
         const shelfMonthly = billedGb * catalog.snapshotPerGbMonth;
-        await op.info(`Shelved. Standing cost now about $${shelfMonthly.toFixed(2)}/month${storedGb ? '' : ' at most (billed on the data stored, usually less)'}, ` +
-          `down from $${(diskGb * catalog.diskPerGbMonth).toFixed(2)}. Press Restore to play again — it takes a few minutes longer than Start.`);
+        await op.info(`Shelved. Standing cost now about USD ${shelfMonthly.toFixed(2)}/month${storedGb ? '' : ' at most (billed on the data stored, usually less)'}, ` +
+          `down from USD ${(diskGb * catalog.diskPerGbMonth).toFixed(2)}. Press Restore to play again — it takes a few minutes longer than Start.`);
         return { shelved: true, storedGb };
       } catch (error) {
         if (!deleted) await MachineService.resyncQuietly(userId, machine);
@@ -509,7 +509,7 @@ export class MachineService {
         } else {
           await op.info('The snapshot is kept as a backup (it keeps a small monthly charge — delete it on the Costs page when you no longer need it).');
         }
-        await op.info(`Billing: about $${costPerHour.toFixed(2)}/hour while running, plus the disk while it exists.`);
+        await op.info(`Billing: about USD ${costPerHour.toFixed(2)}/hour while running, plus the disk while it exists.`);
         return { instanceId: result.instanceId, ipAddress: result.ipAddress };
       } catch (error) {
         await setStatus(machineId, 'shelved', { last_error: null }).catch(() => {});
