@@ -47,8 +47,8 @@ export default function NavLinks() {
 
   return (
     <>
-      {/* ---- Wide screens (md = 768px+): the usual row of links ---- */}
-      <div className="hidden md:flex items-center gap-0.5">
+      {/* ---- Wide screens (lg = 1024px+): the usual row of links; below that, the menu button ---- */}
+      <div className="hidden lg:flex items-center gap-0.5">
         {/* .map turns each item in LINKS into a <Link> element. */}
         {LINKS.map(({ href, label }) => {
           const active = isActive(href);
@@ -60,14 +60,14 @@ export default function NavLinks() {
               href={href}
               // Template string: fixed classes, plus cyan if active or grey
               // (lighter on hover) if not.
-              className={`relative px-3 h-12 inline-flex items-center text-[0.72rem] uppercase tracking-label whitespace-nowrap transition-colors ${
+              className={`relative px-2 xl:px-3 h-12 inline-flex items-center text-[0.72rem] uppercase tracking-label whitespace-nowrap transition-colors ${
                 active ? 'text-neon-cyan' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               {label}
               {/* The 1px glowing line along the bottom edge of the active link. */}
               {active && (
-                <span className="absolute left-3 right-3 bottom-0 h-px bg-neon-cyan shadow-[0_0_8px_rgba(95,215,224,0.8)]" />
+                <span className="absolute left-2 right-2 xl:left-3 xl:right-3 bottom-0 h-px bg-neon-cyan shadow-[0_0_8px_rgba(95,215,224,0.8)]" />
               )}
             </Link>
           );
@@ -75,7 +75,7 @@ export default function NavLinks() {
       </div>
 
       {/* ---- Small screens: current page name + ☰ menu button ---- */}
-      <div className="md:hidden flex items-center">
+      <div className="lg:hidden flex items-center">
         <button
           type="button"
           onClick={() => setMenuOpen((o) => !o)}
@@ -91,7 +91,7 @@ export default function NavLinks() {
       {/* The drop-down: full width under the header, big finger-sized rows.
           It scrolls itself if the screen is very short. */}
       {menuOpen && (
-        <div id="mobile-menu" className="md:hidden fixed left-0 right-0 top-12 z-[60] border-b border-white/10 bg-cyber-darker max-h-[calc(100dvh-3rem)] overflow-y-auto shadow-2xl">
+        <div id="mobile-menu" className="lg:hidden fixed left-0 right-0 top-12 z-[60] border-b border-white/10 bg-cyber-darker max-h-[calc(100dvh-3rem)] overflow-y-auto shadow-2xl">
           <nav className="grid grid-cols-2 gap-px bg-white/5 p-px" aria-label="Pages">
             {LINKS.map(({ href, label }) => (
               <Link

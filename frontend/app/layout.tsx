@@ -117,8 +117,9 @@ export default function RootLayout({
                       <span className="xl:hidden"><span className="hidden xs:inline">HUBJOB</span><span className="xs:hidden">HJ</span></span>
                     </span>
                   </span>
-                  {/* Version chip — "hidden md:inline-block" = only shown on medium+ screens */}
-                  <span className="hidden md:inline-block text-[0.62rem] tracking-label text-slate-500 border border-white/10 rounded-sm px-1.5 py-px">
+                  {/* Version chip — shown on tablets (md) and wide screens (xl); hidden
+                      in between (lg), where the page links need the room. */}
+                  <span className="hidden md:inline-block lg:hidden xl:inline-block text-[0.62rem] tracking-label text-slate-500 border border-white/10 rounded-sm px-1.5 py-px">
                     NEON_CORE v0.1
                   </span>
                 </a>

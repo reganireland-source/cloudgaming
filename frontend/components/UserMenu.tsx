@@ -62,7 +62,7 @@ export default function UserMenu() {
     <div className="flex items-center gap-3 flex-shrink-0 min-w-0">
       {/* "title" shows the full name/email on hover when it's been truncated */}
       <span
-        className="hidden sm:inline-flex items-center gap-2 min-w-0 text-[0.72rem] uppercase tracking-label text-slate-300"
+        className="hidden sm:inline-flex lg:hidden xl:inline-flex items-center gap-2 min-w-0 text-[0.72rem] uppercase tracking-label text-slate-300"
         title={user.email}
       >
         <span className="w-1.5 h-1.5 rounded-full bg-neon-lime shadow-[0_0_6px_rgba(143,214,148,0.8)] flex-shrink-0" />
