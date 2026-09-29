@@ -187,6 +187,7 @@ export const ORACLE_CATALOG: ProviderCatalog = {
   diskPerGbMonth: BOOT_VOLUME_PER_GB_MONTH,
   snapshotPerGbMonth: BACKUP_PER_GB_MONTH,
   restoreAnyRegion: false,
+  bigScreen: { available: false, extraPerHour: 0, note: 'Not available: Oracle requires your own NVIDIA virtual-workstation licence (bring your own licence).' },
   priceNote:
     'Approximate Oracle list prices (same in every region; GPU price includes CPU and memory), not fetched live. ' +
     'First 10 TB/month of internet egress is free, so streaming data is usually USD 0. ' +

@@ -69,7 +69,29 @@ export interface SetupScriptOptions {
    * downloads. 0 = never. Default 15 (CloudyPad's default).
    */
   autoStopMinutes?: number;
+  /**
+   * EXPERIMENTAL "big screen": install NVIDIA's GRID (virtual workstation)
+   * driver instead of the datacenter one, which lifts the headless screen
+   * limit from 2560x1600 to 4096x2160. `gridSource` says whose build and
+   * licence to use: AWS and Azure include the licence; Google needs the
+   * machine created with a "vWS" GPU (licence billed by Google).
+   */
+  displayDriver?: 'standard' | 'grid';
+  gridSource?: 'aws' | 'azure' | 'gcp';
 }
+
+/** Where each cloud publishes its licensed GRID driver (Linux). */
+export const GRID_DRIVER = {
+  // Listed anonymously; "latest/" holds one NVIDIA-Linux-x86_64-<ver>-grid-aws.run.
+  aws: 'https://ec2-linux-nvidia-drivers.s3.amazonaws.com',
+  // Microsoft's build for NCasT4_v3 on Ubuntu 22.04 (vGPU 20.2), from its N-series driver docs.
+  azure: 'https://download.microsoft.com/download/51239696-ec04-4c02-a6b3-1d9c608fb57c/NVIDIA-Linux-x86_64-595.58.03-grid-azure.run',
+  // Google's public bucket; the newest GRID/vGPU*/ folder's -grid .run is used.
+  gcp: 'https://storage.googleapis.com/nvidia-drivers-us-public',
+} as const;
+
+/** Largest virtual screen per driver (NVIDIA's headless cap vs. GRID's 4K head). */
+export const SCREEN_MAX = { standard: { w: 2560, h: 1600 }, grid: { w: 4096, h: 2160 } } as const;
 
 /** Only allow characters that are safe inside single quotes in bash. */
 function bashSafe(value: string, what: string, pattern = /^[A-Za-z0-9_.@+=-]+$/): string {
@@ -91,6 +113,11 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__SUN_PASS_B64__').join(passB64)
     .split('__AUTOSTOP_MINUTES__').join(String(minutes))
     .split('__DRIVER_VERSION__').join(NVIDIA_DRIVER_VERSION)
+    .split('__DISPLAY_DRIVER__').join(opts.displayDriver === 'grid' ? 'grid' : 'standard')
+    .split('__GRID_SOURCE__').join(opts.displayDriver === 'grid' ? (opts.gridSource || 'aws') : 'none')
+    .split('__GRID_AWS__').join(GRID_DRIVER.aws)
+    .split('__GRID_AZURE__').join(GRID_DRIVER.azure)
+    .split('__GRID_GCP__').join(GRID_DRIVER.gcp)
     .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE);
 }
 
@@ -108,6 +135,9 @@ SUN_USER='__SUN_USER__'
 SUN_PASS_B64='__SUN_PASS_B64__'
 AUTOSTOP_MINUTES='__AUTOSTOP_MINUTES__'
 DRIVER_VERSION='__DRIVER_VERSION__'
+DISPLAY_DRIVER='__DISPLAY_DRIVER__'   # standard | grid (experimental big screen)
+GRID_SOURCE='__GRID_SOURCE__'         # aws | azure | gcp | none
+GRID_DIR=/var/lib/cloudgaming/grid
 SUNSHINE_IMAGE='__SUNSHINE_IMAGE__'
 APT="apt-get -o DPkg::Lock::Timeout=900 -y"
 
@@ -202,7 +232,51 @@ fi
 # 2. NVIDIA datacenter driver (once), then reboot
 # ============================================================================
 CURRENT_DRIVER=$(cat /sys/module/nvidia/version 2>/dev/null || echo none)
-if [ "$CURRENT_DRIVER" != "$DRIVER_VERSION" ] && ! is_done driver; then
+if [ "$DISPLAY_DRIVER" = "grid" ] && ! is_done driver-grid; then
+  # EXPERIMENTAL big screen: NVIDIA's GRID (virtual workstation) driver, in
+  # the cloud's own licensed build. Lifts the 2560x1600 headless limit.
+  stage 20 drivers "Installing the NVIDIA GRID driver for big screens (experimental, 5-10 minutes)"
+  mkdir -p "$GRID_DIR"
+  GRID_RUN=$(ls "$GRID_DIR"/NVIDIA-Linux-x86_64-*.run 2>/dev/null | head -1)
+  if [ -z "$GRID_RUN" ]; then
+    case "$GRID_SOURCE" in
+      aws)
+        KEY=$(curl -fsS --retry 3 "__GRID_AWS__/?list-type=2&prefix=latest/" | grep -o '<Key>[^<]*grid[^<]*[.]run</Key>' | sed -e 's#<Key>##' -e 's#</Key>##' | head -1)
+        GRID_URL="__GRID_AWS__/$KEY"
+        [ -n "$KEY" ] || fail 20 "could not find the GRID driver in AWS's driver bucket" ;;
+      azure)
+        GRID_URL='__GRID_AZURE__' ;;
+      gcp)
+        NAME=$(curl -fsS --retry 3 "https://storage.googleapis.com/storage/v1/b/nvidia-drivers-us-public/o?prefix=GRID/vGPU&maxResults=1000&fields=items(name)" \
+          | grep -o '"GRID/vGPU[0-9.]*/NVIDIA-Linux-x86_64-[0-9.]*-grid[a-z-]*[.]run"' | tr -d '"' | sort -V | tail -1)
+        GRID_URL="__GRID_GCP__/$NAME"
+        [ -n "$NAME" ] || fail 20 "could not find the GRID driver in Google's driver bucket" ;;
+      *) fail 20 "big screen isn't available on this cloud" ;;
+    esac
+    say "GRID driver: $GRID_URL"
+    GRID_RUN="$GRID_DIR/$(basename "$GRID_URL")"
+    curl -fSL --retry 3 -o "$GRID_RUN.part" "$GRID_URL" && mv "$GRID_RUN.part" "$GRID_RUN" \
+      || fail 20 "could not download the GRID driver"
+  fi
+  chmod +x "$GRID_RUN"
+  # GPU pass-through + GRID: the GSP firmware must be off (NVIDIA; AWS for G4dn/G5).
+  grep -q NVreg_EnableGpuFirmware /etc/modprobe.d/nvidia.conf 2>/dev/null \
+    || echo 'options nvidia NVreg_EnableGpuFirmware=0' >> /etc/modprobe.d/nvidia.conf
+  "$GRID_RUN" --no-questions --ui=none --accept-license --dkms || fail 20 "GRID driver install failed - see /var/log/nvidia-installer.log"
+  if [ "$GRID_SOURCE" = "azure" ] && [ -f /etc/nvidia/gridd.conf.template ]; then
+    # Azure licenses GRID itself; its docs: no FeatureType, IgnoreSP/EnableUI off.
+    cp /etc/nvidia/gridd.conf.template /etc/nvidia/gridd.conf
+    sed -i '/^FeatureType/d;/^IgnoreSP/d;/^EnableUI/d' /etc/nvidia/gridd.conf
+    printf 'IgnoreSP=FALSE\nEnableUI=FALSE\n' >> /etc/nvidia/gridd.conf
+  fi
+  update-initramfs -u || true
+  done_step driver-grid
+  stage 30 reboot "GRID driver installed, rebooting once to load it"
+  sleep 2
+  reboot
+  exit 0
+fi
+if [ "$DISPLAY_DRIVER" != "grid" ] && [ "$CURRENT_DRIVER" != "$DRIVER_VERSION" ] && ! is_done driver; then
   stage 20 drivers "Installing NVIDIA driver $DRIVER_VERSION (5-10 minutes)"
   RUN=/tmp/NVIDIA-Linux-x86_64-$DRIVER_VERSION.run
   curl -fSL --retry 3 -o "$RUN" "https://us.download.nvidia.com/tesla/$DRIVER_VERSION/NVIDIA-Linux-x86_64-$DRIVER_VERSION.run" \
@@ -222,6 +296,11 @@ if ! nvidia-smi >/dev/null 2>&1; then
 fi
 GPU_NAME=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader | head -1)
 say "GPU: $GPU_NAME, driver $(cat /sys/module/nvidia/version)"
+if [ "$DISPLAY_DRIVER" = "grid" ]; then
+  # Unlicensed GRID drivers slow down after ~20 minutes, so say what we see.
+  GRID_LICENSE=$(nvidia-smi -q 2>/dev/null | grep -i -m1 'License Status' | sed 's/.*: *//')
+  say "GRID driver (big screen, experimental): licence status '$GRID_LICENSE'"
+fi
 
 # Some /dev/nvidia* device files aren't created at boot on some clouds (e.g.
 # AWS G5); create them now and on every boot (CloudyPad does the same).
@@ -280,6 +359,22 @@ P_DEV=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $(NF-1)}')
 P_FN=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $NF}')
 PCI_ID="$((16#$P_BUS))@$((16#$P_DOMAIN)):$((16#$P_DEV)):$((16#$P_FN))"
 HOST_DRIVER=$(cat /sys/module/nvidia/version)
+CONTAINER_DRIVER_TYPE=datacenter; SCREEN_MAX_W=2560; SCREEN_MAX_H=1600
+if [ "$DISPLAY_DRIVER" = "grid" ]; then
+  # The container installs the driver's user-space part matching the host.
+  # CloudyPad only downloads datacenter/display builds, so hand it the GRID
+  # installer we already have, under the name and marker it looks for.
+  CONTAINER_DRIVER_TYPE=grid; SCREEN_MAX_W=4096; SCREEN_MAX_H=2160
+  GRID_RUN=$(ls "$GRID_DIR"/NVIDIA-Linux-x86_64-*.run 2>/dev/null | head -1)
+  [ -n "$GRID_RUN" ] || fail 60 "the GRID driver installer is missing from $GRID_DIR"
+  mkdir -p "$SUN_DIR/data/nvidia"
+  if [ ! -f "$SUN_DIR/data/nvidia/nvidia-driver-grid-$HOST_DRIVER.downloaded" ]; then
+    rm -f "$SUN_DIR/data/nvidia/"nvidia-*.run "$SUN_DIR/data/nvidia/"nvidia-driver-*.downloaded
+    cp "$GRID_RUN" "$SUN_DIR/data/nvidia/nvidia-grid-$HOST_DRIVER.run"
+    chmod 755 "$SUN_DIR/data/nvidia/nvidia-grid-$HOST_DRIVER.run"
+    touch "$SUN_DIR/data/nvidia/nvidia-driver-grid-$HOST_DRIVER.downloaded"
+  fi
+fi
 MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 # Shared memory for the container: half the RAM, as CloudyPad uses (Steam needs a lot).
 SHM_SIZE="$((MEM_MB / 2))m"
@@ -375,11 +470,11 @@ services:
     environment:
       NVIDIA_ENABLE: "true"
       NVIDIA_DRIVER_VERSION: "$HOST_DRIVER"
-      NVIDIA_DRIVER_TYPE: "datacenter"
+      NVIDIA_DRIVER_TYPE: "$CONTAINER_DRIVER_TYPE"
       NVIDIA_PCI_BUS_ID: "$PCI_ID"
       NVIDIA_DRIVER_CAPABILITIES: "all"
-      CLOUDYPAD_SCREEN_MAX_WIDTH: "2560"
-      CLOUDYPAD_SCREEN_MAX_HEIGHT: "1600"
+      CLOUDYPAD_SCREEN_MAX_WIDTH: "$SCREEN_MAX_W"
+      CLOUDYPAD_SCREEN_MAX_HEIGHT: "$SCREEN_MAX_H"
       CLOUDYPAD_KEYBOARD_LAYOUT: "us"
       CLOUDYPAD_KEYBOARD_MODEL: "pc105"
       CLOUDYPAD_KEYBOARD_VARIANT: ""

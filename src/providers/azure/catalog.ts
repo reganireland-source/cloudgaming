@@ -207,6 +207,7 @@ export const AZURE_CATALOG: ProviderCatalog = {
   diskPerGbMonth: PREMIUM_DISK_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
   restoreAnyRegion: false,
+  bigScreen: { available: true, extraPerHour: 0, note: 'Microsoft\'s GRID driver build for NCasT4_v3; Azure includes the licence. Same quota as normal machines.' },
   priceNote:
     'Rough estimates from Azure\'s East US list prices × a region factor (±20%); excludes tax. ' +
     'Spot prices change constantly. Disks are billed by size tier rounded up (150 GB → 256 GB tier), even while stopped. ' +

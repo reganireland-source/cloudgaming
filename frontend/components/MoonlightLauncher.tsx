@@ -42,7 +42,7 @@ import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import ThemedSelect from './ThemedSelect';
 import FriendlyErrorCard from './FriendlyErrorCard';
-import { SCREENS, fitResolution, detectScreen, detectAllScreens, canListScreens, MAX_W, MAX_H, type AttachedScreen } from '@/lib/screens';
+import { SCREENS, fitResolution, detectScreen, detectAllScreens, canListScreens, MAX_W, MAX_H, GRID_MAX, type AttachedScreen } from '@/lib/screens';
 
 type OS = 'windows' | 'macos' | 'linux';
 
@@ -112,8 +112,10 @@ function download(filename: string, content: string) {
 }
 
 export default function MoonlightLauncher({
-  machineId, host, quality, ready,
+  machineId, host, quality, ready, bigScreen = false,
 }: {
+  /** EXPERIMENTAL GRID-driver machine: screens up to 4096x2160 instead of 2560x1600. */
+  bigScreen?: boolean;
   machineId: string;
   host: string;
   quality: string;        // the machine's streaming preset
@@ -163,11 +165,15 @@ export default function MoonlightLauncher({
     : screenId.startsWith('attached:') ? attached?.find((x) => `attached:${x.key}` === screenId) || detected
     : SCREENS.find((x) => x.id === screenId) || null;
   const [bw, bh] = base.resolution.split('x').map(Number);
-  const fitted = screen && screenId !== '16x9' ? fitResolution(screen, bw * bh) : { w: bw, h: bh };
+  const capW = bigScreen ? GRID_MAX.w : MAX_W;
+  const capH = bigScreen ? GRID_MAX.h : MAX_H;
+  // Big-screen machines on High/Ultra aim for the screen's full size.
+  const budget = bigScreen && screen && (preset === 'high' || preset === 'ultra') ? screen.w * screen.h : bw * bh;
+  const fitted = screen && screenId !== '16x9' ? fitResolution(screen, budget, capW, capH) : { w: bw, h: bh };
   // Bitrate follows the pixel count (within ±40% of the preset's).
-  const scale = Math.min(1.4, Math.max(0.6, (fitted.w * fitted.h) / (bw * bh)));
+  const scale = Math.min(bigScreen ? 2.5 : 1.4, Math.max(0.6, (fitted.w * fitted.h) / (bw * bh)));
   const p = { ...base, resolution: `${fitted.w}x${fitted.h}`, bitrateKbps: Math.round((base.bitrateKbps * scale) / 500) * 500 };
-  const capped = !!screen && (screen.w > MAX_W || screen.h > MAX_H) && fitted.w * fitted.h < screen.w * screen.h && (fitted.w === MAX_W || fitted.h === MAX_H);
+  const capped = !!screen && (screen.w > capW || screen.h > capH) && fitted.w * fitted.h < screen.w * screen.h && (fitted.w === capW || fitted.h === capH);
 
   const streamCommand = useMemo(() => [
     exe, 'stream', host, quote(app, os),
@@ -288,7 +294,7 @@ export default function MoonlightLauncher({
         {screen && screenId !== '16x9' && (
           <p className="text-[0.7rem] text-slate-500 leading-relaxed">
             The machine makes its screen exactly this shape, so games and the desktop fill your display with no black bars.
-            {capped && <> Your screen is bigger than the {MAX_W}×{MAX_H} a datacenter GPU can drive, so the stream keeps its shape at up to that size and Moonlight scales it up to fill the display.</>}
+            {capped && <> Your screen is bigger than the {capW}×{capH} {bigScreen ? 'this big-screen machine' : 'a datacenter GPU'} can drive, so the stream keeps its shape at up to that size and Moonlight scales it up to fill the display.</>}
             {/* Notched MacBooks are ~1.54:1 across the whole panel (16:10 below the notch). */}
             {Math.abs(screen.w / screen.h - 1.543) < 0.008 && <> Using the whole screen puts the top strip behind the notch; pick “below the notch” if the menu bar of games gets hidden.</>}
           </p>

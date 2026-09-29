@@ -216,5 +216,6 @@ export const GCP_CATALOG: ProviderCatalog = {
   diskPerGbMonth: BALANCED_DISK_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
   restoreAnyRegion: true,
+  bigScreen: { available: true, extraPerHour: 0.2, note: 'Uses Google\'s "vWS" (virtual workstation) GPUs: an extra licence charge per GPU-hour (≈USD 0.20, estimate) and their OWN quota — request "NVIDIA T4 Virtual Workstation GPUs" or "NVIDIA L4 Virtual Workstation GPUs" in the region first.' },
   priceNote: 'Estimates from Google\'s list prices (±15%); excludes tax and discounts. Spot prices move daily.',
 };

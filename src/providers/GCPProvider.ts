@@ -72,6 +72,9 @@ function isNotFound(error: any): boolean {
   return error?.code === 404 || error?.code === 5 || /not found|was not found|NOT_FOUND/i.test(String(error?.message));
 }
 
+/** Google's licensed "virtual workstation" GPU types (GRID driver allowed), per our GPU model. */
+const VWS_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4-vws', L4: 'nvidia-l4-vws' };
+
 /** Live GPU zones per project (see getGpuZones). */
 const GPU_ZONES_CACHE = new Map<string, { at: number; value: Record<string, Partial<Record<'T4' | 'L4', string[]>>> }>();
 
@@ -332,7 +335,8 @@ export class GCPProvider extends CloudProvider {
   private async createMachine(
     config: ProviderConfig,
     options: { spot: boolean; diskSizeGb: number; sourceSnapshot?: string;
-               sunshineUsername: string; sunshinePassword: string; autoStopMinutes?: number }
+               sunshineUsername: string; sunshinePassword: string; autoStopMinutes?: number;
+               displayDriver?: 'standard' | 'grid' }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
     const shape = findShape(config.instanceType);
     if (!shape) {
@@ -430,13 +434,19 @@ export class GCPProvider extends CloudProvider {
           : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD' },
         metadata: {
           items: [
-            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes }) },
+            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp' }) },
             { key: 'sunshine-username', value: options.sunshineUsername },
             { key: 'sunshine-password', value: options.sunshinePassword },
           ],
         },
       };
-      if (shape.gpuType) {
+      if (options.displayDriver === 'grid') {
+        // Big screen (experimental): Google licenses GRID only on its "vWS"
+        // GPU types, billed extra per GPU-hour, with their own quota.
+        resource.guestAccelerators = [
+          { acceleratorCount: 1, acceleratorType: `zones/${zone}/acceleratorTypes/${VWS_ACCELERATOR[shape.gpuModel]}` },
+        ];
+      } else if (shape.gpuType) {
         resource.guestAccelerators = [
           { acceleratorCount: 1, acceleratorType: `zones/${zone}/acceleratorTypes/${shape.gpuType}` },
         ];
@@ -485,6 +495,7 @@ export class GCPProvider extends CloudProvider {
       sunshineUsername: options.sunshineUsername || 'gamer',
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: options.autoStopMinutes,
+      displayDriver: options.displayDriver,
     });
   }
 
@@ -692,6 +703,7 @@ export class GCPProvider extends CloudProvider {
       sunshineUsername: opts.sunshineUsername || 'gamer',
       sunshinePassword: opts.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: opts.autoStopMinutes,
+      displayDriver: opts.displayDriver,
     });
     return { instanceId, ipAddress };
   }

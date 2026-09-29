@@ -300,7 +300,7 @@ export default function InfrastructureMapPage() {
             <button key={key} type="button" onClick={() => toggleCloud(key)} aria-pressed={visible.has(key)}
               className={`inline-flex items-center gap-1.5 text-xs rounded border px-2.5 py-1 ${visible.has(key) ? 'border-white/25 text-slate-200' : 'border-white/10 text-slate-500 line-through'}`}>
               <ShapeIcon provider={key} /> {s.label}
-              {t && <span className="text-slate-400 tabular-nums">· {t.items} · ${t.hourly.toFixed(2)}/h · ${t.monthly.toFixed(0)}/mo</span>}
+              {t && <span className="text-slate-400 tabular-nums">· {t.items} · USD {t.hourly.toFixed(2)}/h · USD {t.monthly.toFixed(0)}/mo</span>}
             </button>
           );
         })}

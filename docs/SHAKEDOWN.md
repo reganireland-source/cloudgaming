@@ -273,3 +273,34 @@ returns.
 - For setup failures: the last lines of the GCP **serial console**
   (Compute Engine → VM → *Serial port 1*). Look for `CLOUDGAMING_STAGE`
   lines.
+
+## Big screen (experimental): GRID driver, screens up to 4096×2160
+
+Datacenter GPUs stream at most **2560×1600** with NVIDIA's standard driver.
+Ticking **Big screen** in the launch form installs the cloud's licensed
+**GRID** (virtual workstation) driver instead, which allows up to
+**4096×2160** per screen.
+
+| Cloud | Driver | Licence | Extra cost | Quota |
+|---|---|---|---|---|
+| AWS (g4dn T4, g5 A10G) | AWS's `…-grid-aws.run` (anonymous S3 bucket, newest in `latest/`) | Included | None | Same as normal |
+| Azure (NCasT4_v3) | Microsoft's `NVIDIA-Linux-x86_64-595.58.03-grid-azure.run` | Included (`gridd.conf` set up automatically) | None | Same as normal |
+| Google (T4, L4) | Newest `GRID/vGPU*/…-grid*.run` in Google's public bucket | Via **vWS** GPUs (`nvidia-tesla-t4-vws`, `nvidia-l4-vws`) | ≈USD 0.20 per GPU-hour (estimate) | **Separate**: request "NVIDIA T4/L4 Virtual Workstation GPUs" first |
+| Oracle | — | Bring-your-own NVIDIA licence | — | Not offered |
+
+**What to check when testing** (not yet tested end to end):
+
+1. Launch with **Big screen** ticked (AWS or Azure first: no extra cost or quota).
+2. Setup progress should say *"Installing the NVIDIA GRID driver…"*, reboot once, then
+   the activity log shows **`GRID driver … licence status '…'`**. Expect
+   `Licensed` (or similar). *Unlicensed* GRID drivers slow down after about
+   20 minutes, so note what it says.
+3. In the machine card: **BIG SCREEN · EXP** badge. In *Play with Moonlight*,
+   pick your ultrawide: the stream should be **3440×1440**, not 2560×1072.
+4. On the machine's desktop: *Settings → Display* should show 3440×1440.
+5. Watch FPS (WoW Ctrl+R, Moonlight Ctrl+Alt+Shift+S): bigger screens cost more
+   GPU time and data.
+
+If setup stops at the driver stage, the activity log names the step; launch
+again without Big screen. Details: `/var/log/cloudgaming-setup.log` and
+`/var/log/nvidia-installer.log` on the machine.

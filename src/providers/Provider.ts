@@ -54,6 +54,8 @@ export interface RestoreOptions {
   autoStopMinutes?: number;
   diskSizeGb?: number;
   spot?: boolean;
+  /** EXPERIMENTAL big screen: NVIDIA's GRID driver (4096x2160) instead of the datacenter one (2560x1600). */
+  displayDriver?: 'standard' | 'grid';
 }
 
 export interface LaunchOptions {
@@ -67,6 +69,8 @@ export interface LaunchOptions {
   sunshinePassword?: string;
   /** Minutes without streaming before the machine shuts itself down (0 = never). */
   autoStopMinutes?: number;
+  /** EXPERIMENTAL big screen: NVIDIA's GRID driver (4096x2160) instead of the datacenter one (2560x1600). */
+  displayDriver?: 'standard' | 'grid';
 }
 
 /** Basic facts about an existing snapshot. */

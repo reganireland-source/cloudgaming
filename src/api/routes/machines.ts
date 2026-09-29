@@ -56,7 +56,7 @@ export function sendRouteError(res: Response, error: unknown, fallback: string) 
 // The columns the frontend needs. connection_secret is deliberately NOT listed.
 const MACHINE_COLUMNS = `id, provider, region, instance_type, instance_id, status, cost_per_hour, streaming_quality,
   game_title, spot, disk_size_gb, ip_address, last_error, created_at, last_started, last_synced_at, snapshot_id,
-  shelved_at, stopped_at, auto_shelve_days, auto_stop_minutes`;
+  shelved_at, stopped_at, auto_shelve_days, auto_stop_minutes, display_driver`;
 
 /**
  * What a machine costs per month while you AREN'T playing, and what it would
@@ -127,6 +127,7 @@ router.get('/options', async (req: Request, res: Response) => {
         restoreAnyRegion: c.restoreAnyRegion,
         priceNote: c.priceNote,
         regions: c.regions,
+        bigScreen: c.bigScreen,                  // experimental GRID driver option
         // Price every shape in every region up front, so the form updates
         // instantly. Spot prices are live where the cloud publishes them
         // (src/services/SpotPriceService.ts).

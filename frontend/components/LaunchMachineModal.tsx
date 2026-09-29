@@ -38,6 +38,7 @@ interface ProviderOption {
   provider: string; label: string; configured: boolean; lastCheckOk: boolean | null; lastCheckSummary: string | null;
   available: boolean; supportsSpot: boolean; spotLabel: string; spotOnReclaim?: string; defaultRegion: string; defaultDiskGb: number;
   minDiskGb: number; diskPerGbMonth: number; snapshotPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
+  bigScreen?: { available: boolean; extraPerHour: number; note: string };
 }
 interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[] }
 
@@ -59,6 +60,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [shapeId, setShapeId] = useState('');
   const [diskGb, setDiskGb] = useState(150);
   const [spot, setSpot] = useState(false);
+  const [bigScreen, setBigScreen] = useState(false); // EXPERIMENTAL GRID driver
   const [game, setGame] = useState(preset?.game || '');
   const [quality, setQuality] = useState(preset?.quality || 'high');
   // The preset's region/size/spot must survive the "cloud changed → reset
@@ -120,7 +122,8 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
 
   const shape = shapesHere.find((s) => s.id === shapeId);
   const price = shape?.prices[region];
-  const hourly = spot && price?.spot != null ? price.spot : price?.onDemand || 0;
+  const bigOk = !!current?.bigScreen?.available;
+  const hourly = (spot && price?.spot != null ? price.spot : price?.onDemand || 0) + (bigScreen && bigOk ? current!.bigScreen!.extraPerHour : 0);
   const diskMonthly = current ? diskGb * current.diskPerGbMonth : 0;
   // Shelved: snapshot billed on data stored — ~30 GB fresh install … full disk.
   const shelfLow = current ? Math.min(30, diskGb) * current.snapshotPerGbMonth : 0;
@@ -140,7 +143,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
     try {
       const res = await apiFetch<{ machineId: string; operationId: string }>('/machines', {
         method: 'POST',
-        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null },
+        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null, bigScreen: bigScreen && bigOk },
       });
       setOperationId(res.operationId);
       onLaunched(); // show the new "creating" machine in the list straight away
@@ -241,7 +244,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                         value={diskGb} onChange={(e) => setDiskGb(Number(e.target.value))}
                         className="input-neon w-full px-3 py-2"
                       />
-                      <p className="text-xs text-slate-500 mt-1">≈ ${diskMonthly.toFixed(2)}/month, charged even while stopped.</p>
+                      <p className="text-xs text-slate-500 mt-1">≈ USD {diskMonthly.toFixed(2)}/month, charged even while stopped.</p>
                     </div>
                   </div>
 
@@ -283,7 +286,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     <label className="flex items-start gap-3 text-sm text-slate-300 rounded border border-white/10 p-3 cursor-pointer">
                       <input type="checkbox" className="mt-1" checked={spot} onChange={(e) => setSpot(e.target.checked)} />
                       <span>
-                        Use a <strong>{current.spotLabel}</strong> — about ${price.spot.toFixed(2)}/h instead of ${price.onDemand.toFixed(2)}/h
+                        Use a <strong>{current.spotLabel}</strong> — about USD {price.spot.toFixed(2)}/h instead of USD {price.onDemand.toFixed(2)}/h
                         {price.spotDiscountPct != null && (
                           <span className={`ml-1.5 inline-block whitespace-nowrap rounded border px-1 text-[0.66rem] uppercase tracking-label align-middle ${
                             price.spotSource === 'live' && price.spotDiscountPct >= 65 ? 'border-neon-lime/60 bg-neon-lime/10 text-neon-lime'
@@ -296,6 +299,22 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                           Not guaranteed: the cloud can take it back at short notice. {current.spotOnReclaim || 'Your game stops.'}
                           {price.spotInterruption && <> Here it’s reclaimed <span className={price.spotInterruption.level >= 3 ? 'text-neon-amber' : 'text-slate-300'}>{price.spotInterruption.label}</span> of the time.</>}
                           {' '}Great for casual play, risky for long sessions.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+
+                  {/* Big screen (experimental) */}
+                  {current.bigScreen && (
+                    <label className={`flex items-start gap-3 text-sm rounded border p-3 ${bigOk ? 'text-slate-300 border-neon-magenta/30 cursor-pointer' : 'text-slate-500 border-white/5'}`}>
+                      <input type="checkbox" className="mt-1" disabled={!bigOk} checked={bigScreen && bigOk} onChange={(e) => setBigScreen(e.target.checked)} />
+                      <span>
+                        <span className="mr-1.5 inline-block rounded border border-neon-magenta/50 text-neon-magenta px-1 text-[0.62rem] uppercase tracking-label align-middle">Experimental</span>
+                        <strong>Big screen</strong> — screens up to 4096×2160 (e.g. a 3440×1440 ultrawide at full size) instead of 2560×1600
+                        {bigOk && current.bigScreen.extraPerHour > 0 && <> · <span className="text-neon-amber">+≈USD {current.bigScreen.extraPerHour.toFixed(2)}/h</span></>}
+                        <span className="block text-xs text-slate-500 mt-0.5">
+                          Installs NVIDIA&apos;s GRID (virtual workstation) driver instead of the standard one. {current.bigScreen.note}
+                          {bigOk && ' Not tested end to end yet — if setup fails, launch again without it. Bigger screens need more GPU power and data.'}
                         </span>
                       </span>
                     </label>
@@ -355,7 +374,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   {/* Summary + launch */}
                   <div className="rounded border border-neon-cyan/20 bg-neon-cyan/[0.03] p-4 text-sm">
                     <p className="text-slate-200">
-                      <span className="text-neon-lime font-semibold tabular-nums">≈ ${hourly.toFixed(2)}/hour</span> while running
+                      <span className="text-neon-lime font-semibold tabular-nums">≈ USD {hourly.toFixed(2)}/hour</span> while running
                       {' '}+ <span className="tabular-nums">USD {diskMonthly.toFixed(2)}/month</span> for the disk (also while stopped).
                     </p>
                     <p className="text-xs text-slate-400 mt-1">Shelved when you&apos;re not using it: ≈USD {shelfLow.toFixed(2)}–{shelfHigh.toFixed(2)}/month.</p>

@@ -22,6 +22,8 @@ export interface ScreenPreset {
 
 export const MAX_W = 2560;
 export const MAX_H = 1600;
+/** EXPERIMENTAL big-screen machines (GRID driver): up to 4096x2160. */
+export const GRID_MAX = { w: 4096, h: 2160 };
 
 export const SCREENS: ScreenPreset[] = [
   { id: '16x9', label: 'Standard 16:9 (most monitors & TVs)', group: 'Common', w: 3840, h: 2160 },
@@ -55,15 +57,15 @@ const down8 = (n: number) => Math.max(8, Math.floor(n / 8) * 8);
  * itself or the GPU's 2560×1600 box. Multiples of 8 (what the machine's
  * screen-mode tool rounds to anyway, so request and stream match exactly).
  */
-export function fitResolution(screen: { w: number; h: number }, presetPixels: number): { w: number; h: number } {
+export function fitResolution(screen: { w: number; h: number }, presetPixels: number, maxW = MAX_W, maxH = MAX_H): { w: number; h: number } {
   const aspect = screen.w / screen.h;
   let h = Math.sqrt(Math.min(presetPixels, screen.w * screen.h) / aspect);
   let w = h * aspect;
-  if (w > MAX_W) { w = MAX_W; h = w / aspect; }
-  if (h > MAX_H) { h = MAX_H; w = h * aspect; }
+  if (w > maxW) { w = maxW; h = w / aspect; }
+  if (h > maxH) { h = maxH; w = h * aspect; }
   // Width to a multiple of 8, then the height that best keeps the shape.
   const W = down8(w);
-  const H = Math.min(down8(MAX_H), Math.max(8, Math.round(W / aspect / 8) * 8));
+  const H = Math.min(down8(maxH), Math.max(8, Math.round(W / aspect / 8) * 8));
   return { w: W, h: H };
 }
 

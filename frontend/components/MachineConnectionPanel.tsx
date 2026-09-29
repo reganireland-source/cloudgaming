@@ -116,8 +116,10 @@ function CopyButton({ value }: { value: string }) {
 }
 
 export default function MachineConnectionPanel({
-  machineId, status, quality = 'high', onStage,
+  machineId, status, quality = 'high', onStage, bigScreen = false,
 }: {
+  /** EXPERIMENTAL GRID-driver machine (screens up to 4096x2160). */
+  bigScreen?: boolean;
   machineId: string;
   status: string;
   /** The machine's streaming preset, so the Moonlight command matches it. */
@@ -240,7 +242,7 @@ export default function MachineConnectionPanel({
       {info.ipAddress && info.status === 'running' && (
         <div className="rounded-md border border-neon-magenta/25 bg-neon-magenta/[0.03] p-4">
           <p className="text-sm font-semibold text-slate-100 mb-3">▶ Play with Moonlight</p>
-          <MoonlightLauncher machineId={machineId} host={info.ipAddress} quality={quality} ready={info.setup.ready} />
+          <MoonlightLauncher machineId={machineId} host={info.ipAddress} quality={quality} ready={info.setup.ready} bigScreen={bigScreen} />
         </div>
       )}
 

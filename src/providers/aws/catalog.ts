@@ -193,6 +193,7 @@ export const AWS_CATALOG: ProviderCatalog = {
   diskPerGbMonth: GP3_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
   restoreAnyRegion: true,
+  bigScreen: { available: true, extraPerHour: 0, note: 'AWS\'s own GRID driver build; the licence is included in the machine price. Same GPU quota as normal machines.' },
   priceNote:
     'Estimates from AWS\'s us-east-1 Linux list prices scaled per region (±15%); excludes tax, and data sent to you (~USD 0.09–0.12/GB) is extra. Spot prices move with demand — assumed ~35% of on-demand.',
 };

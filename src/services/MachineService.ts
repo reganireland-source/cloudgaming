@@ -69,6 +69,8 @@ export interface LaunchRequest {
   autoStopMinutes?: number;
   /** Shelve automatically after this many days stopped; null/0 = off. */
   autoShelveDays?: number | null;
+  /** EXPERIMENTAL: GRID driver for screens up to 4096x2160 (AWS, Azure, Google vWS). */
+  bigScreen?: boolean;
 }
 
 /** Auto-shelve choices the UI offers (days stopped). */
@@ -156,6 +158,10 @@ export class MachineService {
       throw new MachineRequestError(400, `Unknown streaming quality "${req.quality}".`, `Use one of: ${VALID_QUALITIES.join(', ')}.`);
     }
     const spot = !!req.spot && catalog.supportsSpot;
+    const bigScreen = !!req.bigScreen;
+    if (bigScreen && !catalog.bigScreen.available) {
+      throw new MachineRequestError(400, `Big screen isn't available on ${catalog.label}.`, catalog.bigScreen.note);
+    }
     const autoStopMinutes = req.autoStopMinutes === undefined ? 15 : Math.round(Number(req.autoStopMinutes));
     if (!Number.isFinite(autoStopMinutes) || autoStopMinutes < 0 || autoStopMinutes > 1440) {
       throw new MachineRequestError(400, 'Auto-stop must be between 0 (off) and 1440 minutes.', 'The default, 15 minutes, suits most people.');
@@ -174,23 +180,23 @@ export class MachineService {
     // Spot: use the live price where the cloud publishes one (AWS/Azure), so
     // the Costs page reflects what's actually charged; otherwise the estimate.
     const spotOffer = spot ? await getSpotInfo(req.provider, region.id, shape.id).catch(() => null) : null;
-    const costPerHour = spotOffer?.spotPerHour || catalog.estimateHourly(shape.id, region.id, spot);
+    const costPerHour = (spotOffer?.spotPerHour || catalog.estimateHourly(shape.id, region.id, spot)) + (bigScreen ? catalog.bigScreen.extraPerHour : 0);
     // The streaming server's admin login for this machine: random, and stored
     // encrypted. base64url only uses letters, digits, '-' and '_'.
     const sunshine = { username: 'gamer', password: crypto.randomBytes(12).toString('base64url') };
     const machineId = crypto.randomUUID();
     await query(
       `INSERT INTO machines (id, user_id, provider, region, instance_type, instance_id, status, cost_per_hour,
-                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, NOW())`,
+                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, display_driver, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())`,
       [machineId, userId, req.provider, region.id, shape.id, `pending:${machineId}`, costPerHour, quality,
-       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays]
+       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays, bigScreen ? 'grid' : 'standard']
     );
 
     // ---- 3. Create it in the background, narrating every step --------------
     const op = await Operation.start({
       userId, provider: req.provider, action: 'launch', machineId,
-      title: `Launch ${shape.label} on ${catalog.label} in ${region.name}${spot ? ` (${catalog.spotLabel})` : ''}`,
+      title: `Launch ${shape.label} on ${catalog.label} in ${region.name}${spot ? ` (${catalog.spotLabel})` : ''}${bigScreen ? ' · big screen (experimental)' : ''}`,
     });
     op.runInBackground(async () => {
       try {
@@ -203,6 +209,9 @@ export class MachineService {
         }
         await op.info(`Estimated cost while running: about USD ${costPerHour.toFixed(2)}/hour` +
           ` (+ about USD ${(diskSizeGb * catalog.diskPerGbMonth).toFixed(2)}/month for the ${diskSizeGb} GB disk, even when stopped).`);
+        if (bigScreen) {
+          await op.info(`Big screen (EXPERIMENTAL): installs NVIDIA's GRID driver so screens up to 4096×2160 work (standard: 2560×1600). ${catalog.bigScreen.note}`);
+        }
         await op.info('Loading your encrypted cloud credentials…');
         const provider = await providerFor(userId, req.provider, op.reporter);
         if ((provider as any).projectId) op.projectId = (provider as any).projectId;
@@ -216,6 +225,7 @@ export class MachineService {
             sunshineUsername: sunshine.username,
             sunshinePassword: sunshine.password,
             autoStopMinutes,
+            displayDriver: bigScreen ? 'grid' : 'standard',
           }
         );
 
@@ -491,8 +501,9 @@ export class MachineService {
         const result = await provider.restoreFromSnapshot(cloudSnapId, { region: regionId, instanceType: shape.id }, {
           sunshineUsername: login.username, sunshinePassword: login.password,
           autoStopMinutes: machine.auto_stop_minutes ?? 15, diskSizeGb: Number(machine.disk_size_gb) || undefined, spot: !!machine.spot,
+          displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard',
         });
-        const costPerHour = catalog.estimateHourly(shape.id, regionId, !!machine.spot) || Number(machine.cost_per_hour) || 0;
+        const costPerHour = (catalog.estimateHourly(shape.id, regionId, !!machine.spot) + (machine.display_driver === 'grid' ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
         await setStatus(machineId, 'running', {
           instance_id: result.instanceId, ip_address: result.ipAddress || null, region: regionId, cost_per_hour: costPerHour,
           shelved_at: null, stopped_at: null, last_started: new Date(), last_error: null, last_synced_at: new Date(),

@@ -432,6 +432,7 @@ export class AWSProvider extends CloudProvider {
       sunshineUsername: string;
       sunshinePassword: string;
       autoStopMinutes?: number;
+      displayDriver?: 'standard' | 'grid';
       /** Boot from this image instead of the newest Ubuntu (used by restore). */
       image?: { imageId: string; rootDeviceName: string; label: string };
     }
@@ -480,6 +481,8 @@ export class AWSProvider extends CloudProvider {
       sunshineUsername: options.sunshineUsername,
       sunshinePassword: options.sunshinePassword,
       autoStopMinutes: options.autoStopMinutes,
+      displayDriver: options.displayDriver,
+      gridSource: 'aws',
     })).toString('base64');
 
     // A short unique name, shown in the AWS console's Name column.
@@ -602,6 +605,7 @@ export class AWSProvider extends CloudProvider {
       sunshineUsername: options.sunshineUsername || 'gamer',
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: options.autoStopMinutes,
+      displayDriver: options.displayDriver,
     });
   }
 
@@ -795,6 +799,7 @@ export class AWSProvider extends CloudProvider {
         sunshineUsername: opts.sunshineUsername || 'gamer',
         sunshinePassword: opts.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
         autoStopMinutes: opts.autoStopMinutes,
+        displayDriver: opts.displayDriver,
         image: { imageId, rootDeviceName, label: `restore of ${snapId}` },
       });
       return { instanceId, ipAddress };

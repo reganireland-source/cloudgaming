@@ -60,6 +60,11 @@ export interface ProviderCatalog {
   /** Can a shelved machine come back in a DIFFERENT region? (GCP: snapshots are global; AWS: copied automatically.) */
   restoreAnyRegion: boolean;
   priceNote: string;          // e.g. 'Estimates from list prices; excludes tax.'
+  /**
+   * EXPERIMENTAL "big screen" (GRID driver, screens up to 4096x2160): can this
+   * cloud do it, what extra it costs per hour (USD, estimate), and the catch.
+   */
+  bigScreen: { available: boolean; extraPerHour: number; note: string };
 }
 
 // ---------------------------------------------------------------------------

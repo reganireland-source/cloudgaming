@@ -696,6 +696,10 @@ function GpuCompareNote() {
         benchmarks of the same chips — real results vary by game. None of the GPUs these clouds rent for gaming reaches an RTX 3080 Ti; the A10 / A10G
         come closest at roughly two-thirds of one. Streaming also adds a little lag and compression on top.
       </p>
+      <p className="mt-2 leading-relaxed">
+        <span className="text-neon-magenta">Big screen (experimental):</span> these GPUs normally stream at most 2560×1600. Tick “Big screen” when launching
+        to get up to 4096×2160 (a 3440×1440 ultrawide at full size): AWS and Azure at no extra cost, Google with its paid “vWS” GPUs, not Oracle.
+      </p>
     </details>
   );
 }

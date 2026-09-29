@@ -67,6 +67,7 @@ interface Machine {
   stopped_at: string | null;
   auto_shelve_days: number | null;
   standing: Standing | null;
+  display_driver?: 'standard' | 'grid';
 }
 
 /** Monthly cost while not playing (see standingFor in src/api/routes/machines.ts). */
@@ -233,6 +234,10 @@ function MachineCard({
             </span>
             <span className="text-sm font-semibold text-slate-100">{machine.instance_type}</span>
             {shape && <TierBadge shape={shape} />}
+            {machine.display_driver === 'grid' && (
+              <span className="text-[0.62rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/50 rounded px-1.5 py-0.5"
+                title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">big screen · exp</span>
+            )}
             <span className="text-xs text-slate-400">{PROVIDER_LABEL[machine.provider] || machine.provider} · {machine.region}{zone && zone !== machine.region ? ` · ${zone}` : ''}</span>
             {machine.spot && <span className="text-[0.62rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>}
           </div>
@@ -409,7 +414,7 @@ function MachineCard({
           {machine.status === 'shelved'
             ? <p className="text-xs text-slate-500">Shelved — restore it to connect. Moonlight&apos;s pairing is kept; only the IP address changes.</p>
             : ['running', 'stopped', 'starting'].includes(machine.status)
-            ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} />
+            ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} bigScreen={machine.display_driver === 'grid'} />
             : <p className="text-xs text-slate-500">Connection details appear once the machine exists and is running.</p>}
         </div>
       )}

@@ -269,8 +269,8 @@ fi
 # --- end Azure extra ---
 `;
 
-function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number): string {
-  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes });
+function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, displayDriver?: 'standard' | 'grid'): string {
+  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure' });
   // Keep the "#!/bin/bash" line first (cloud-init needs it to run the file as a script).
   const firstNewline = script.indexOf('\n');
   return script.slice(0, firstNewline + 1) + AZURE_SCRIPT_PRELUDE + script.slice(firstNewline + 1);
@@ -547,6 +547,7 @@ export class AzureProvider extends CloudProvider {
       sunshineUsername: string;
       sunshinePassword: string;
       autoStopMinutes?: number;
+      displayDriver?: 'standard' | 'grid';
       fromSnapshot?: Snapshot;
     }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
@@ -667,7 +668,7 @@ export class AzureProvider extends CloudProvider {
               computerName: vmName,
               adminUsername: ADMIN_USER,
               // The setup script, base64-encoded. cloud-init runs it on first boot.
-              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes)).toString('base64'),
+              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver)).toString('base64'),
               linuxConfiguration: {
                 disablePasswordAuthentication: true,
                 ssh: { publicKeys: [{ path: `/home/${ADMIN_USER}/.ssh/authorized_keys`, keyData: throwawaySshPublicKey() }] },
@@ -742,6 +743,7 @@ export class AzureProvider extends CloudProvider {
       sunshineUsername: options.sunshineUsername || 'gamer',
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: options.autoStopMinutes,
+      displayDriver: options.displayDriver,
     });
   }
 
