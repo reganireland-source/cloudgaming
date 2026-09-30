@@ -166,11 +166,14 @@ router.get('/:id', async (req: Request, res: Response) => {
 /** POST /api/machines — body { provider, region, shapeId, gameTitle?, quality?, spot?, diskSizeGb? } */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { provider, region, shapeId, gameTitle, quality, spot, diskSizeGb, autoStopMinutes, autoShelveDays } = req.body || {};
+    const { provider, region, shapeId, gameTitle, quality, spot, diskSizeGb, autoStopMinutes, autoShelveDays, bigScreen } = req.body || {};
     if (!provider || !region || !shapeId) {
       return res.status(400).json({ error: 'Choose a cloud, a region and a machine size.', tip: 'All three are required to launch.' });
     }
-    const started = await MachineService.launch(req.userId!, { provider, region, shapeId, gameTitle, quality, spot, diskSizeGb, autoStopMinutes, autoShelveDays });
+    const started = await MachineService.launch(req.userId!, {
+      provider, region, shapeId, gameTitle, quality, spot, diskSizeGb, autoStopMinutes, autoShelveDays,
+      bigScreen: bigScreen === true, // experimental GRID driver (screens up to 4096×2160)
+    });
     res.status(202).json(started);
   } catch (error) {
     sendRouteError(res, error, 'Failed to start the launch');
