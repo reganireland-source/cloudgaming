@@ -83,7 +83,9 @@ interface Standing {
   restoreAnyRegion: boolean;
 }
 type Region = { id: string; name: string; gpus: string[]; lat?: number; lng?: number };
-type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup';
+type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing';
+/** Clouds that switch an existing (stopped) machine between spot and on-demand in place; others do it via Shelve → Restore. */
+const PRICING_IN_PLACE = new Set(['gcp']);
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
 const money = (n: number) => usd(n);
 const daysSince = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null);
@@ -156,7 +158,7 @@ function AutoShelvePicker({ value, saving, onChange, inline }: { value: number |
   );
 }
 
-interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string }
+interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string; prices?: Record<string, { onDemand: number; spot: number | null }> }
 type TierId = 'good' | 'better' | 'best';
 
 /** Recon's hardware tiers (same rule as tierOf in src/services/ReconService.ts). */
@@ -187,19 +189,29 @@ function TierBadge({ shape }: { shape: ShapeInfo }) {
 }
 
 function MachineCard({
-  machine, activeOp, onAction, onOpFinished, regions, shape,
+  machine, activeOp, onAction, onOpFinished, regions, shape, bigExtra = 0,
 }: {
   machine: Machine;
   shape?: ShapeInfo;
+  /** Big-screen surcharge per hour on this cloud (added to grid machines' prices). */
+  bigExtra?: number;
   activeOp: string | null;
-  onAction: (machine: Machine, action: Action, body?: Record<string, unknown>) => void;
+  onAction: (machine: Machine, action: Action, body?: Record<string, unknown>) => Promise<void> | void;
   onOpFinished: () => void;
   regions: Region[];
 }) {
   const place = useMyPlace(); // restore regions nearest-first
+  // Spot <-> on-demand: price per hour for either, where known.
+  const priceFor = (spot: boolean, region = machine.region) => {
+    const p = shape?.prices?.[region];
+    const v = p ? (spot ? p.spot : p.onDemand) : null;
+    return v != null ? v + (machine.display_driver === 'grid' ? bigExtra : 0) : null;
+  };
+  const canSwitchNow = machine.status === 'shelved' || (PRICING_IN_PLACE.has(machine.provider) && ['stopped', 'running'].includes(machine.status));
   const [tab, setTab] = useState<'connect' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
-  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | null>(null);
+  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | null>(null);
   const [restoreRegion, setRestoreRegion] = useState(machine.region);
+  const [restoreSpot, setRestoreSpot] = useState(!!machine.spot);
   const [keepSnapshot, setKeepSnapshot] = useState(false);
   const [autoShelve, setAutoShelve] = useState<number | null>(machine.auto_shelve_days);
   const [autoSaving, setAutoSaving] = useState(false);
@@ -240,7 +252,15 @@ function MachineCard({
                 title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">▣ big screen · experimental</span>
             )}
             <span className="text-xs text-slate-400">{PROVIDER_LABEL[machine.provider] || machine.provider} · {machine.region}{zone && zone !== machine.region ? ` · ${zone}` : ''}</span>
-            {machine.spot && <span className="text-[0.66rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>}
+            {machine.spot
+              ? <span className="text-[0.66rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>
+              : <span className="text-[0.66rem] uppercase tracking-label text-slate-400 border border-white/15 rounded px-1.5">on-demand</span>}
+            {canSwitchNow && (
+              <button type="button" disabled={busy} onClick={() => setConfirm('pricing')} className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40"
+                title={machine.spot ? 'Full price, never reclaimed (e.g. for the first setup)' : 'Cheaper, but the cloud can reclaim it'}>
+                ⇄ {machine.spot ? 'switch to on-demand' : 'switch to spot'}
+              </button>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-1">
             {st.hint}
@@ -357,6 +377,31 @@ function MachineCard({
           </div>
         </div>
       )}
+      {confirm === 'pricing' && (() => {
+        const to = !machine.spot;
+        const now = priceFor(machine.spot);
+        const next = priceFor(to);
+        return (
+          <div className="mt-3 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
+            <p>
+              <strong className="text-slate-100">Switch to {to ? 'spot' : 'on-demand'}?</strong>{' '}
+              {next != null && <>≈{money(next)}/hour while running{now != null && <> (now ≈{money(now)})</>}. </>}
+              {to
+                ? 'Spot is much cheaper, but the cloud can reclaim it at short notice — fine for playing, risky during the first setup. The disk and games are kept when that happens.'
+                : 'On-demand is full price and never reclaimed — the safe choice for the first setup or a long session. It uses your normal GPU quota, not the spot one.'}
+            </p>
+            <p className="text-slate-400">
+              {machine.status === 'shelved' ? 'Applied when you restore it.'
+                : machine.status === 'running' ? 'The cloud only switches a stopped machine: it is stopped, switched and started again (a couple of minutes; setup and games carry on).'
+                : 'Switched in place (same disk); start it when you’re ready.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'pricing', { spot: to }); }}>Switch to {to ? 'spot' : 'on-demand'}</button>
+              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
       {confirm === 'restore' && (
         <div className="mt-3 rounded border border-neon-lime/30 p-3 text-xs text-slate-300 space-y-2">
           <p><strong className="text-slate-100">Restore this machine?</strong> A new machine is built from the snapshot (typically 5–15 minutes, then its quick start-up check). Billing then resumes at ≈{money(machine.cost_per_hour)}/hour while running, plus the disk.</p>
@@ -370,12 +415,30 @@ function MachineCard({
                 }))} />
             </label>
           ) : <p className="text-slate-400">It comes back in {machine.region} (this cloud restores snapshots only where they were taken).</p>}
+          <div>
+            <span className="text-slate-400">Pricing:</span>
+            <div role="radiogroup" aria-label="Pricing" className="mt-1 inline-flex rounded border border-white/10 overflow-hidden ml-2">
+              {[false, true].map((sp) => {
+                const p = priceFor(sp, restoreRegion);
+                return (
+                  <button key={String(sp)} type="button" role="radio" aria-checked={restoreSpot === sp} onClick={() => setRestoreSpot(sp)}
+                    className={`px-2.5 py-1 border-r last:border-r-0 border-white/10 ${restoreSpot === sp ? (sp ? 'bg-neon-amber/15 text-neon-amber' : 'bg-neon-cyan/15 text-neon-cyan') : 'text-slate-400 hover:text-slate-200'}`}>
+                    {sp ? 'Spot' : 'On-demand'}{p != null && <span className="tabular-nums"> · {money(p)}/h</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <label className="flex items-start gap-2">
             <input type="checkbox" checked={keepSnapshot} onChange={(e) => setKeepSnapshot(e.target.checked)} className="mt-0.5" />
             <span>Keep the snapshot as a backup afterwards <span className="text-slate-500">(off = deleted once the machine is back, so you don&apos;t pay twice; {sd?.shelfMonthly ? `≈${money(sd.shelfMonthly)}/month` : 'a small monthly charge'} if kept)</span></span>
           </label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-neon-lime text-xs" onClick={() => { setConfirm(null); onAction(machine, 'restore', { region: restoreRegion, keepSnapshot }); }}>Restore</button>
+            <button type="button" className="btn-neon-lime text-xs" onClick={async () => {
+              setConfirm(null);
+              if (restoreSpot !== !!machine.spot) await onAction(machine, 'pricing', { spot: restoreSpot }); // shelved: recorded instantly
+              await onAction(machine, 'restore', { region: restoreRegion, keepSnapshot });
+            }}>Restore</button>
             <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
           </div>
         </div>
@@ -427,7 +490,8 @@ function MachineCard({
             ? <p className="text-xs text-slate-500">Shelved — restore it to connect. Moonlight&apos;s pairing is kept; only the IP address changes.</p>
             : ['running', 'stopped', 'starting'].includes(machine.status)
             ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} bigScreen={machine.display_driver === 'grid'}
-                onResume={activeOp ? undefined : () => onAction(machine, 'resume-setup')} onStatusChange={onOpFinished} />
+                onResume={activeOp ? undefined : () => onAction(machine, 'resume-setup')} onStatusChange={onOpFinished}
+                onResumeOnDemand={activeOp || !machine.spot || !PRICING_IN_PLACE.has(machine.provider) ? undefined : () => onAction(machine, 'pricing', { spot: false, start: true })} />
             : <p className="text-xs text-slate-500">Connection details appear once the machine exists and is running.</p>}
         </div>
       )}
@@ -470,14 +534,16 @@ function MachinesPageInner() {
   const [regionsBy, setRegionsBy] = useState<Record<string, Region[]>>({});
   const [gpuOf, setGpuOf] = useState<Record<string, string>>({});
   const [shapeOf, setShapeOf] = useState<Record<string, ShapeInfo>>({});
+  const [bigExtraOf, setBigExtraOf] = useState<Record<string, number>>({});
   // Regions this machine's GPU is offered in.
   const regionsFor = (m: Machine) => (regionsBy[m.provider] || []).filter((r) => !gpuOf[`${m.provider}:${m.instance_type}`] || r.gpus.includes(gpuOf[`${m.provider}:${m.instance_type}`]));
   useEffect(() => {
-    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: ShapeInfo[] }> }>('/machines/options')
+    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: ShapeInfo[]; bigScreen?: { extraPerHour: number } }> }>('/machines/options')
       .then((o) => {
         setRegionsBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.regions])));
         setGpuOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh.gpuModel]))));
         setShapeOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh]))));
+        setBigExtraOf(Object.fromEntries(o.providers.map((p) => [p.provider, p.bigScreen?.extraPerHour || 0])));
       })
       .catch(() => undefined);
   }, []);
@@ -622,7 +688,7 @@ function MachinesPageInner() {
             onAction={runAction}
             onOpFinished={() => finished(m.id)}
             regions={regionsFor(m)}
-            shape={shapeOf[`${m.provider}:${m.instance_type}`]}
+            shape={shapeOf[`${m.provider}:${m.instance_type}`]} bigExtra={bigExtraOf[m.provider]}
           />
         ))}
       </div>
@@ -640,7 +706,7 @@ function MachinesPageInner() {
                 onAction={runAction}
                 onOpFinished={() => finished(m.id)}
                 regions={regionsFor(m)}
-                shape={shapeOf[`${m.provider}:${m.instance_type}`]}
+                shape={shapeOf[`${m.provider}:${m.instance_type}`]} bigExtra={bigExtraOf[m.provider]}
               />
             ))}
           </div>

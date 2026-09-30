@@ -366,6 +366,71 @@ export class MachineService {
     return { operationId: op.id };
   }
 
+  /**
+   * SWITCH PRICING: spot <-> on-demand (e.g. set up at full price so Google
+   * can't reclaim it mid-install, then play on spot).
+   * - Shelved (any cloud): recorded now, applied when it's restored.
+   * - Google, stopped or running: switched in place (a running machine is
+   *   stopped, switched and started again — setup/games carry on).
+   * - AWS / Azure / Oracle with a machine: not possible in place; shelve first.
+   * startAfter: start a stopped machine once switched (e.g. "on-demand & resume setup").
+   */
+  static async setPricing(userId: string, machineId: string, spot: boolean, startAfter = false): Promise<{ operationId: string | null; spot: boolean }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+    const cost = (catalog.estimateHourly(machine.instance_type, machine.region, spot)
+      + (machine.display_driver === 'grid' ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
+    if (!!machine.spot === spot) return { operationId: null, spot };
+
+    if (machine.status === 'shelved' || neverCreated(machine)) {
+      await query('UPDATE machines SET spot = $2, cost_per_hour = $3 WHERE id = $1', [machineId, spot, cost]);
+      return { operationId: null, spot };
+    }
+    const provider0 = await providerFor(userId, machine.provider);
+    if (!provider0.canSwitchSpotInPlace) {
+      throw new MachineRequestError(409, `${catalog.label} can't switch an existing machine between spot and on-demand.`,
+        'Shelve it (your games are kept in a snapshot), switch the pricing, then Restore — it comes back with the new pricing.');
+    }
+    if (!['stopped', 'running'].includes(machine.status)) {
+      throw new MachineRequestError(409, 'The machine must be stopped or running to switch its pricing.', 'Wait for the current change to finish, or press Sync.');
+    }
+
+    const wasRunning = machine.status === 'running';
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'set-pricing', machineId,
+      title: `Switch ${machine.instance_type} in ${machine.region} to ${spot ? 'spot' : 'on-demand'}` });
+    await setStatus(machineId, wasRunning ? 'stopping' : 'stopped');
+    op.runInBackground(async () => {
+      try {
+        const provider = await providerFor(userId, machine.provider, op.reporter);
+        if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+        if (wasRunning) {
+          await op.info('The cloud only switches a stopped machine: stopping it first (setup and games carry on afterwards)…');
+          await provider.stopInstance(machine.instance_id);
+          await setStatus(machineId, 'stopped', { stopped_at: new Date() });
+        }
+        await provider.setSpot(machine.instance_id, spot);
+        await query('UPDATE machines SET spot = $2, cost_per_hour = $3 WHERE id = $1', [machineId, spot, cost]);
+        await op.info(`Now about USD ${cost.toFixed(2)}/hour while running${spot ? ' (spot: can be reclaimed; the disk is kept)' : ' (on-demand: never reclaimed)'}.`);
+        if (!spot) await op.info('On-demand uses your normal GPU quota (not the spot/preemptible one): if Start fails with a quota error, request it on the Regions page.');
+        if (wasRunning || startAfter) {
+          await op.info(wasRunning ? 'Starting it again…' : 'Starting it — its setup carries on from where it got to…');
+          await setStatus(machineId, 'starting');
+          await provider.startInstance(machine.instance_id);
+          const status = await provider.getInstanceStatus(machine.instance_id);
+          await setStatus(machineId, status.status === 'terminated' ? 'failed' : status.status, {
+            ip_address: status.ipAddress || null, last_started: new Date(), last_synced_at: new Date(), stopped_at: null,
+          });
+        }
+        return { spot, costPerHour: cost };
+      } catch (error) {
+        await MachineService.resyncQuietly(userId, machine);
+        throw error;
+      }
+    }, `Switched to ${spot ? 'spot' : 'on-demand'}.`);
+    return { operationId: op.id, spot };
+  }
+
   static async stop(userId: string, machineId: string, snapshotFirst = false): Promise<{ operationId: string }> {
     const machine = await loadOwnedMachine(machineId, userId);
     await assertNotBusy(machine);

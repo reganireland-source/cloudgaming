@@ -188,6 +188,16 @@ router.post('/:id/start', async (req: Request, res: Response) => {
   }
 });
 
+// Spot <-> on-demand: { spot: boolean }. Shelved: applied at Restore.
+router.post('/:id/pricing', async (req: Request, res: Response) => {
+  try {
+    if (typeof req.body?.spot !== 'boolean') return res.status(400).json({ error: 'Send { "spot": true } or { "spot": false }.' });
+    res.status(202).json(await MachineService.setPricing(req.userId!, req.params.id, req.body.spot, req.body?.start === true));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to switch the pricing');
+  }
+});
+
 // Rescue an unfinished setup: start the machine if it stopped (e.g. a
 // reclaimed spot machine), restart it if its setup went quiet.
 router.post('/:id/resume-setup', async (req: Request, res: Response) => {

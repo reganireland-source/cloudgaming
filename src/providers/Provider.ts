@@ -136,6 +136,19 @@ export abstract class CloudProvider {
   }
 
   /**
+   * Can a STOPPED machine switch between spot and on-demand in place (same
+   * disk, same machine)? Google: yes. AWS, Azure and Oracle can't convert an
+   * existing machine; there the switch applies when it's rebuilt from its
+   * snapshot (Shelve, then Restore).
+   */
+  readonly canSwitchSpotInPlace: boolean = false;
+
+  /** Switch a stopped machine between spot (true) and on-demand (false). */
+  async setSpot(_instanceId: string, _spot: boolean): Promise<void> {
+    throw new Error('This cloud can’t switch an existing machine between spot and on-demand. Shelve it, change the pricing, then Restore.');
+  }
+
+  /**
    * Everything the app has created in the user's account on this cloud —
    * machines AND supporting resources (disks, networks, firewalls, public
    * IPs, snapshots...) — for the infrastructure map. Found by our tag/label

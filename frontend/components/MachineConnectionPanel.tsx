@@ -124,8 +124,10 @@ function CopyButton({ value }: { value: string }) {
 }
 
 export default function MachineConnectionPanel({
-  machineId, status, quality = 'high', onStage, bigScreen = false, onResume, onStatusChange,
+  machineId, status, quality = 'high', onStage, bigScreen = false, onResume, onStatusChange, onResumeOnDemand,
 }: {
+  /** Spot machine on a cloud that can switch in place: switch to on-demand, then start (setup carries on). */
+  onResumeOnDemand?: () => void;
   /** Start / restart the machine so its setup carries on (POST …/resume-setup via the card). */
   onResume?: () => void;
   /** The backend found the machine in another state than the card shows (e.g. stopped). */
@@ -219,8 +221,19 @@ export default function MachineConnectionPanel({
                 Nothing is lost: the setup keeps its finished steps on the disk and carries on from where it got to.{' '}
                 {info.status === 'stopped' ? 'Resume starts the machine again (billing resumes).' : 'Resume restarts the machine (a couple of minutes).'}
               </p>
-              {onResume && (
-                <button type="button" onClick={onResume} className="btn-neon-lime text-xs">↻ Resume setup</button>
+              {(onResume || onResumeOnDemand) && (
+                <div className="flex flex-wrap gap-2">
+                  {onResumeOnDemand && info.status === 'stopped' && (
+                    <button type="button" onClick={onResumeOnDemand} className="btn-neon-lime text-xs"
+                      title="Full price while it sets up, so the cloud can't reclaim it again; switch back to spot for playing">
+                      ⇄ Switch to on-demand &amp; resume
+                    </button>
+                  )}
+                  {onResume && <button type="button" onClick={onResume} className="btn-neon text-xs">↻ Resume setup{onResumeOnDemand && info.status === 'stopped' ? ' (stay on spot)' : ''}</button>}
+                </div>
+              )}
+              {onResumeOnDemand && info.status === 'stopped' && /reclaimed/.test(s.stopReason || '') && (
+                <p className="text-slate-500">Reclaimed spot machines tend to be reclaimed again while capacity is tight. Setting up on on-demand (full price, about 25 minutes) and playing on spot afterwards avoids that.</p>
               )}
             </div>
           )}

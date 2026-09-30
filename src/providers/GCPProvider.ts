@@ -507,6 +507,25 @@ export class GCPProvider extends CloudProvider {
     await this.report('success', `${name} is stopped.`);
   }
 
+  readonly canSwitchSpotInPlace = true;
+
+  /**
+   * Spot <-> on-demand on a stopped VM (Google allows changing the
+   * provisioning model while TERMINATED). Same scheduling as at launch.
+   */
+  async setSpot(instanceId: string, spot: boolean): Promise<void> {
+    const { zone, name } = this.splitId(instanceId);
+    await this.report('info', `Switching ${name} to ${spot ? 'spot (cheaper; Google can reclaim it)' : 'on-demand (full price; never reclaimed)'}…`);
+    const [lro] = await this.instances.setScheduling({
+      project: this.projectId, zone, instance: name,
+      schedulingResource: spot
+        ? { onHostMaintenance: 'TERMINATE', automaticRestart: false, provisioningModel: 'SPOT', instanceTerminationAction: 'STOP', preemptible: false }
+        : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD', preemptible: false },
+    } as any);
+    await this.waitZoneOp(lro, zone);
+    await this.report('success', `${name} is now ${spot ? 'spot' : 'on-demand'}.`);
+  }
+
   async rebootInstance(instanceId: string): Promise<void> {
     const { zone, name } = this.splitId(instanceId);
     await this.report('info', `Asking Google to restart ${name} (a hard reset: same machine, same disk and IP)…`);
