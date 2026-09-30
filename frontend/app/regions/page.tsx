@@ -40,8 +40,19 @@ function km(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(x)));
 }
 const pingMs = (d: number) => Math.round(5 + d * 0.015); // same estimate as Recon and the map
-const area = (p: { lat: number; lng: number }) =>
-  p.lng > 60 ? (p.lat < -10 ? 'Australia' : 'Asia') : p.lng < -30 ? 'Americas' : 'Europe';
+/** Rough world region of a place, for grouping (not political). */
+const area = ({ lat, lng }: { lat: number; lng: number }) =>
+  lng < -30 ? 'Americas'
+  : lng > 110 && lat < -10 ? 'Oceania'
+  : lat > 12 && lat < 42 && lng > 34 && lng < 62 ? 'Middle East'
+  : lat < 35 && lng > -20 && lng < 52 ? 'Africa'
+  : lng > 60 ? 'Asia'
+  : 'Europe';
+
+type SortBy = 'distance' | 'city' | 'region';
+const SORTS: Array<{ id: SortBy; label: string }> = [
+  { id: 'distance', label: 'Distance' }, { id: 'city', label: 'City A–Z' }, { id: 'region', label: 'Region' },
+];
 const cityOf = (name: string) => name.replace(/\s*\(.*\)$/, '').replace(/^Ashburn$/, 'N. Virginia');
 
 interface Cell { provider: string; regions: RegionAccess[] }
@@ -69,6 +80,32 @@ export default function RegionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<{ place: string; provider: string } | null>(null);
   const [me, setMe] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  const [sortBy, setSortBy] = useState<SortBy>('distance');
+  const [locating, setLocating] = useState(false);
+  const [locateNote, setLocateNote] = useState<string | null>(null);
+  const pickSort = (v: SortBy) => { setSortBy(v); try { localStorage.setItem('regions.sort', v); } catch { /* ignore */ } };
+  // Same saved place as Recon ("recon.place"), so both pages agree.
+  const savePlace = useCallback((p: { lat: number; lng: number; label: string; source: string }) => {
+    setMe(p);
+    try { localStorage.setItem('recon.place', JSON.stringify(p)); } catch { /* ignore */ }
+  }, []);
+  /** Where am I? quiet: only the no-prompt guess from the internet connection. */
+  const locate = useCallback(async (quiet: boolean) => {
+    setLocating(true); setLocateNote(null);
+    try {
+      const geo = await fetch('/api/geo').then((res) => res.json()).catch(() => ({ available: false }));
+      if (geo.available) {
+        savePlace({ label: [geo.city, geo.region, geo.country].filter(Boolean).join(', ') || 'Your connection', lat: geo.lat, lng: geo.lng, source: 'ip' });
+        return;
+      }
+      if (quiet) return;
+      if (!navigator.geolocation) throw new Error('This browser can’t share its location.');
+      const pos = await new Promise<GeolocationPosition>((ok, fail) => navigator.geolocation.getCurrentPosition(ok, fail, { timeout: 10000, maximumAge: 600000 }));
+      savePlace({ label: 'Your location', lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' });
+    } catch (e: any) {
+      if (!quiet) setLocateNote(e?.code === 1 ? 'Location permission was refused — set your place on Recon instead.' : (e?.message || 'Couldn’t find your location.'));
+    } finally { setLocating(false); }
+  }, [savePlace]);
 
   // Live log of the check: every cloud API call as it happens.
   const [lines, setLines] = useState<CheckLine[]>([]);
@@ -82,14 +119,30 @@ export default function RegionsPage() {
   }, []);
   useEffect(() => { if (user) load(); }, [user, load]);
   useEffect(() => {
-    try { const s = localStorage.getItem('recon.place'); if (s) { const p = JSON.parse(s); setMe({ lat: p.lat, lng: p.lng, label: p.label }); } } catch { /* ignore */ }
-  }, []);
+    let known = false;
+    try {
+      const s = localStorage.getItem('recon.place');
+      if (s) { const p = JSON.parse(s); setMe({ lat: p.lat, lng: p.lng, label: p.label }); known = true; }
+      const saved = localStorage.getItem('regions.sort') as SortBy | null;
+      if (saved && SORTS.some((x) => x.id === saved)) setSortBy(saved);
+    } catch { /* ignore */ }
+    // Distance is the default sort: find a location without prompting if none is saved.
+    if (!known) locate(true);
+  }, [locate]);
 
   const places = useMemo(() => {
     if (!report) return [];
     const list = buildPlaces(report);
-    return me ? list.sort((a, b) => km(me, a) - km(me, b)) : list.sort((a, b) => a.area.localeCompare(b.area) || a.label.localeCompare(b.label));
-  }, [report, me]);
+    const byCity = (a: Place, b: Place) => a.label.localeCompare(b.label);
+    if (sortBy === 'distance' && me) return list.sort((a, b) => km(me, a) - km(me, b));
+    if (sortBy === 'region') {
+      // Regions ordered by their nearest place when we know where you are, else A–Z.
+      const regionKey = (x: string) => (me ? Math.min(...list.filter((p) => p.area === x).map((p) => km(me, p))) : 0);
+      const order = Array.from(new Set(list.map((p) => p.area))).sort((a, b) => regionKey(a) - regionKey(b) || a.localeCompare(b));
+      return list.sort((a, b) => order.indexOf(a.area) - order.indexOf(b.area) || (me ? km(me, a) - km(me, b) : byCity(a, b)));
+    }
+    return list.sort(byCity);
+  }, [report, me, sortBy]);
 
   if (authLoading) return <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; LOADING…</p>;
   if (!user) {
@@ -170,24 +223,52 @@ export default function RegionsPage() {
             <li className="col-span-2 sm:hidden text-slate-500">Tap a symbol in the table for the details and the fix.</li>
           </ul>
 
+          {/* ---- Sort ---- */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="text-[0.66rem] uppercase tracking-label text-slate-500">Sort</span>
+            <div role="radiogroup" aria-label="Sort places" className="inline-flex rounded border border-white/10 overflow-hidden">
+              {SORTS.map((o) => (
+                <button key={o.id} type="button" role="radio" aria-checked={sortBy === o.id} onClick={() => pickSort(o.id)}
+                  className={`px-2.5 py-1 text-xs border-l first:border-l-0 border-white/10 ${sortBy === o.id ? 'bg-neon-cyan/10 text-neon-cyan' : 'text-slate-400 hover:text-slate-200'}`}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {me ? (
+              <span className="text-[0.7rem] text-slate-500">📍 {me.label} · <button type="button" onClick={() => locate(false)} className="text-neon-cyan hover:underline">{locating ? 'locating…' : 'update'}</button></span>
+            ) : (
+              <button type="button" onClick={() => locate(false)} className="text-[0.7rem] text-neon-cyan hover:underline">{locating ? 'Locating…' : '📍 Use my location for distance'}</button>
+            )}
+            {!me && sortBy === 'distance' && !locating && <span className="text-[0.7rem] text-slate-500">(showing A–Z until your location is known)</span>}
+            {locateNote && <span className="text-[0.7rem] text-neon-amber">{locateNote}</span>}
+          </div>
+
           {/* ---- Places × clouds ---- */}
           <div className="rounded-lg border border-white/10 overflow-hidden">
             <table className="w-full text-sm table-fixed">
               <thead>
                 <tr className="text-left text-[0.66rem] uppercase tracking-label text-slate-500 bg-white/[0.03]">
-                  <th className="py-2 pl-2.5 pr-1 font-normal">{me ? <>Nearest to {me.label.split(',')[0]}</> : 'Place'}</th>
+                  <th className="py-2 pl-2.5 pr-1 font-normal">{sortBy === 'distance' && me ? <>Nearest to {me.label.split(',')[0]}</> : sortBy === 'region' ? 'Place by region' : 'Place'}</th>
                   {CLOUDS.map((c) => <th key={c.id} className="py-2 px-0.5 font-normal text-center w-10 sm:w-28"><span className="inline-flex flex-col sm:flex-row items-center gap-1"><CloudLogo provider={c.id} size={18} /><span className="hidden sm:inline">{c.short}</span></span></th>)}
                 </tr>
               </thead>
               <tbody>
-                {places.map((p) => {
+                {places.map((p, i) => {
                   const isOpen = open?.place === p.key && openCell;
+                  const newRegion = sortBy === 'region' && (i === 0 || places[i - 1].area !== p.area);
                   return (
                     <Fragment key={p.key}>
+                      {newRegion && (
+                        <tr className="bg-white/[0.04]">
+                          <td colSpan={5} className="py-1 pl-2.5 text-[0.66rem] uppercase tracking-label text-neon-cyan/80">
+                            {p.area} <span className="text-slate-500 normal-case tracking-normal">· {places.filter((x) => x.area === p.area).length} places</span>
+                          </td>
+                        </tr>
+                      )}
                       <tr className="border-t border-white/5">
                         <td className="py-1.5 pl-2.5 pr-1 min-w-0">
                           <p className="text-slate-100 truncate leading-tight">{p.label}</p>
-                          <p className="text-[0.64rem] text-slate-500 tabular-nums">{me ? `~${pingMs(km(me, p))} ms` : p.area}</p>
+                          <p className="text-[0.64rem] text-slate-500 tabular-nums">{me ? `~${pingMs(km(me, p))} ms` : ''}{me && sortBy !== 'region' ? ' · ' : ''}{sortBy !== 'region' || !me ? p.area : ''}</p>
                         </td>
                         {CLOUDS.map((c) => {
                           const cell = p.cells[c.id];
