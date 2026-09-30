@@ -45,6 +45,8 @@ import OperationConsole from '@/components/OperationConsole';
 import FriendlyErrorCard from '@/components/FriendlyErrorCard';
 import MachineConnectionPanel, { type ConnectionInfo } from '@/components/MachineConnectionPanel';
 import ArchitectureDiagram from '@/components/ArchitectureDiagram';
+import ThemedSelect from '@/components/ThemedSelect';
+import { byDistance, useMyPlace } from '@/lib/myPlace';
 
 interface Machine {
   id: string;
@@ -80,7 +82,7 @@ interface Standing {
   shelfEstimate: { low: number; high: number }; // if shelved now: fresh install … full disk
   restoreAnyRegion: boolean;
 }
-type Region = { id: string; name: string; gpus: string[] };
+type Region = { id: string; name: string; gpus: string[]; lat?: number; lng?: number };
 type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete';
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
 const money = (n: number) => usd(n);
@@ -146,11 +148,9 @@ function AutoShelvePicker({ value, saving, onChange, inline }: { value: number |
   return (
     <label className={`${inline ? 'inline-flex' : 'flex'} flex-wrap items-center gap-1.5 text-slate-400`}>
       <span>Auto-shelve after</span>
-      <select value={value ?? 0} disabled={saving} onChange={(e) => onChange(Number(e.target.value) || null)}
-        className="input-neon px-1.5 py-0.5 text-xs">
-        <option value={0}>off</option>
-        {AUTO_SHELVE.map((d) => <option key={d} value={d}>{d} day{d === 1 ? '' : 's'} stopped</option>)}
-      </select>
+      <ThemedSelect compact value={String(value ?? 0)} disabled={saving} onChange={(v) => onChange(Number(v) || null)} ariaLabel="Auto-shelve after"
+        className="inline-block min-w-[9rem]"
+        options={[{ value: '0', label: 'off' }, ...AUTO_SHELVE.map((d) => ({ value: String(d), label: `${d} day${d === 1 ? '' : 's'} stopped` }))]} />
       {saving && <span className="text-neon-cyan animate-pulse">saving…</span>}
     </label>
   );
@@ -196,6 +196,7 @@ function MachineCard({
   onOpFinished: () => void;
   regions: Region[];
 }) {
+  const place = useMyPlace(); // restore regions nearest-first
   const [tab, setTab] = useState<'connect' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
   const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | null>(null);
   const [restoreRegion, setRestoreRegion] = useState(machine.region);
@@ -362,9 +363,11 @@ function MachineCard({
           {sd?.restoreAnyRegion && regions.length > 0 ? (
             <label className="block">
               <span className="text-slate-400">Region — this cloud can restore your games anywhere, handy when you travel:</span>
-              <select value={restoreRegion} onChange={(e) => setRestoreRegion(e.target.value)} className="input-neon w-full mt-1 px-2 py-1.5">
-                {regions.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.id}){r.id === machine.region ? ' · where it was' : ''}</option>)}
-              </select>
+              <ThemedSelect className="mt-1" value={restoreRegion} onChange={setRestoreRegion} ariaLabel="Restore region"
+                options={byDistance(regions, place).map((r) => ({
+                  value: r.id, label: `${r.name} (${r.id})`, hint: r.id === machine.region ? 'where it was' : undefined,
+                  aside: r.pingMs != null ? `~${r.pingMs} ms` : undefined,
+                }))} />
             </label>
           ) : <p className="text-slate-400">It comes back in {machine.region} (this cloud restores snapshots only where they were taken).</p>}
           <label className="flex items-start gap-2">

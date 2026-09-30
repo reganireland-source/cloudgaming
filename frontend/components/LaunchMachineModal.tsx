@@ -22,9 +22,11 @@ import Link from 'next/link';
 import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
+import ThemedSelect from './ThemedSelect';
+import { byDistance, useMyPlace } from '@/lib/myPlace';
 import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
 
-interface Region { id: string; name: string; gpus: string[]; egressPerGb: number }
+interface Region { id: string; name: string; gpus: string[]; egressPerGb: number; lat?: number; lng?: number }
 interface Shape {
   id: string; label: string; gpuModel: string; vcpus: number; memoryGb: number; bestFor: string;
   prices: Record<string, {
@@ -57,6 +59,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [provider, setProvider] = useState('');
   const [region, setRegion] = useState('');
+  const place = useMyPlace(); // regions listed nearest-first
   const [shapeId, setShapeId] = useState('');
   const [diskGb, setDiskGb] = useState(150);
   const [spot, setSpot] = useState(false);
@@ -219,11 +222,16 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <label htmlFor="launch-region" className="label block mb-2">2 · Region</label>
-                      <select id="launch-region" value={region} onChange={(e) => setRegion(e.target.value)} className="input-neon w-full px-3 py-2">
-                        {current.regions.map((r) => (
-                          <option key={r.id} value={r.id}>{access[`${provider}:${r.id}`] ? `${ACCESS_STYLE[access[`${provider}:${r.id}`].status].icon} ` : ''}{r.name} ({r.id}) · {r.gpus.join('/')}</option>
-                        ))}
-                      </select>
+                      <ThemedSelect id="launch-region" value={region} onChange={setRegion} ariaLabel="Region"
+                        options={byDistance(current.regions, place).map((r) => {
+                          const a = access[`${provider}:${r.id}`];
+                          const st = a ? ACCESS_STYLE[a.status] : null;
+                          return {
+                            value: r.id, label: `${r.name} (${r.id}) · ${r.gpus.join('/')}`,
+                            icon: st?.icon, iconClass: st?.className.match(/\btext-[\w-]+(\/\d+)?/)?.[0], hint: st && a!.status !== 'ready' ? st.label : undefined,
+                            aside: r.pingMs != null ? `~${r.pingMs} ms` : undefined,
+                          };
+                        })} />
                       {(() => {
                         const a = access[`${provider}:${region}`];
                         const st = a ? statusFor(a, shape?.gpuModel) : null;
@@ -324,16 +332,13 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <label htmlFor="launch-game" className="label block mb-2">5 · Main game (optional)</label>
-                      <select id="launch-game" value={game} onChange={(e) => setGame(e.target.value)} className="input-neon w-full px-3 py-2">
-                        <option value="">— none —</option>
-                        {options.games.map((g) => <option key={g.title} value={g.title}>{g.title}</option>)}
-                      </select>
+                      <ThemedSelect id="launch-game" value={game} onChange={setGame} ariaLabel="Main game"
+                        options={[{ value: '', label: '— none —' }, ...options.games.map((g) => ({ value: g.title, label: g.title }))]} />
                     </div>
                     <div>
                       <label htmlFor="launch-quality" className="label block mb-2">6 · Streaming quality</label>
-                      <select id="launch-quality" value={quality} onChange={(e) => setQuality(e.target.value)} className="input-neon w-full px-3 py-2">
-                        {options.qualities.map((q) => <option key={q} value={q}>{q[0].toUpperCase() + q.slice(1)} — {QUALITY_HINT[q]}</option>)}
-                      </select>
+                      <ThemedSelect id="launch-quality" value={quality} onChange={setQuality} ariaLabel="Streaming quality"
+                        options={options.qualities.map((q) => ({ value: q, label: q[0].toUpperCase() + q.slice(1), aside: QUALITY_HINT[q] }))} />
                       <p className="text-xs text-slate-500 mt-1">Streamed data is billed by the cloud (≈USD {regionInfo?.egressPerGb.toFixed(2)}/GB here).</p>
                     </div>
                   </div>
@@ -341,12 +346,8 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   {/* Auto-stop */}
                   <div>
                     <label htmlFor="launch-autostop" className="label block mb-2">7 · Auto-stop when idle</label>
-                    <select id="launch-autostop" value={autoStop} onChange={(e) => setAutoStop(Number(e.target.value))} className="input-neon w-full sm:w-1/2 px-3 py-2">
-                      <option value={15}>After 15 minutes without streaming (recommended)</option>
-                      <option value={30}>After 30 minutes</option>
-                      <option value={60}>After 1 hour</option>
-                      <option value={0}>Never — I&apos;ll stop it myself</option>
-                    </select>
+                    <div className="w-full sm:w-1/2"><ThemedSelect id="launch-autostop" value={String(autoStop)} onChange={(v) => setAutoStop(Number(v))}
+                      options={[{ value: '15', label: 'After 15 minutes without streaming (recommended)' }, { value: '30', label: 'After 30 minutes' }, { value: '60', label: 'After 1 hour' }, { value: '0', label: 'Never — I’ll stop it myself' }]} /></div>
                     <p className="text-xs text-slate-500 mt-1">
                       The machine watches for Moonlight traffic and big downloads, and shuts itself down when there&apos;s none — so a forgotten
                       machine stops billing. (Idle time during the first setup doesn&apos;t count.)
@@ -356,14 +357,8 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   {/* Auto-shelve */}
                   <div>
                     <label htmlFor="launch-autoshelve" className="label block mb-2">8 · Auto-shelve when unused</label>
-                    <select id="launch-autoshelve" value={autoShelve} onChange={(e) => setAutoShelve(Number(e.target.value))} className="input-neon w-full sm:w-1/2 px-3 py-2">
-                      <option value={1}>After 1 day stopped</option>
-                      <option value={3}>After 3 days stopped</option>
-                      <option value={7}>After 7 days stopped (recommended)</option>
-                      <option value={14}>After 14 days stopped</option>
-                      <option value={30}>After 30 days stopped</option>
-                      <option value={0}>Never — keep the disk</option>
-                    </select>
+                    <div className="w-full sm:w-1/2"><ThemedSelect id="launch-autoshelve" value={String(autoShelve)} onChange={(v) => setAutoShelve(Number(v))}
+                      options={[{ value: '1', label: 'After 1 day stopped' }, { value: '3', label: 'After 3 days stopped' }, { value: '7', label: 'After 7 days stopped (recommended)' }, { value: '14', label: 'After 14 days stopped' }, { value: '30', label: 'After 30 days stopped' }, { value: '0', label: 'Never — keep the disk' }]} /></div>
                     <p className="text-xs text-slate-500 mt-1">
                       A stopped machine still pays for its whole disk (≈USD {diskMonthly.toFixed(2)}/month here). Shelving snapshots the disk and deletes it,
                       cutting that to ≈USD {shelfLow.toFixed(2)}–{shelfHigh.toFixed(2)}/month; Restore brings it back with your games (a few minutes longer than Start).

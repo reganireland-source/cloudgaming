@@ -33,6 +33,7 @@ import BillingReconciliation, { withAlso, type Reconciliation } from '@/componen
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
+import ThemedSelect from '@/components/ThemedSelect';
 
 interface Day { date: string; compute: string | number; egress: string | number; storage: string | number; total: string | number }
 interface Forecast { totalSoFar: number; dailyAverage: number; projectedTotal: number; daysElapsed: number; daysInMonth: number }
@@ -126,10 +127,8 @@ export default function CostsPage() {
         <div className="flex flex-wrap items-center gap-2">
           {currencies.length > 0 && (
             <label className="inline-flex items-center gap-1.5 text-xs text-slate-400">Also show in
-              <select value={alsoIn} onChange={(e) => pickAlso(e.target.value)} className="input-neon px-1.5 py-1 text-xs">
-                <option value="">— (USD only)</option>
-                {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <ThemedSelect compact align="right" value={alsoIn} onChange={pickAlso} ariaLabel="Also show in" className="min-w-[8rem] text-xs"
+                options={[{ value: '', label: '— (USD only)' }, ...currencies.map((c) => ({ value: c, label: c }))]} />
             </label>
           )}
           <button type="button" onClick={() => { load(); loadRecon(true); }} disabled={reconBusy} className="btn-neon text-xs">{reconBusy ? 'Checking bills…' : '↻ Refresh'}</button>

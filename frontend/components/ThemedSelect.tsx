@@ -12,9 +12,15 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
-export interface ThemedOption { value: string; label: string; hint?: string; group?: string; disabled?: boolean }
+export interface ThemedOption {
+  value: string; label: string; hint?: string; group?: string; disabled?: boolean;
+  /** A short marker before the label (e.g. ✓ / ! for region access), in its own colour. */
+  icon?: string; iconClass?: string;
+  /** Right-aligned extra (e.g. "~12 ms"). */
+  aside?: string;
+}
 
-export default function ThemedSelect({ value, options, onChange, ariaLabel, className = '', align = 'left' }: {
+export default function ThemedSelect({ value, options, onChange, ariaLabel, className = '', align = 'left', id: fieldId, disabled, compact }: {
   value: string;
   options: ThemedOption[];
   onChange: (value: string) => void;
@@ -22,6 +28,11 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
   className?: string;
   /** Which edge the (possibly wider) menu lines up with. */
   align?: 'left' | 'right';
+  /** For a <label htmlFor>. */
+  id?: string;
+  disabled?: boolean;
+  /** Small, inline (e.g. inside a sentence). */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -32,6 +43,8 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
   const id = useId();
   const enabled = useMemo(() => options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0), [options]);
   const current = options.find((o) => o.value === value);
+  // With status icons (✓ ! ✗) a selection tick would read as one; mark the chosen row with a bar instead.
+  const hasIcons = options.some((o) => o.icon);
 
   useEffect(() => {
     if (!open) return;
@@ -79,10 +92,14 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
   let lastGroup: string | undefined;
   return (
     <div ref={root} className={`relative ${className}`}>
-      <button type="button" onClick={() => (open ? setOpen(false) : openList())} onKeyDown={onKey}
+      <button type="button" id={fieldId} disabled={disabled} onClick={() => (open ? setOpen(false) : openList())} onKeyDown={onKey}
         aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-list`} aria-label={ariaLabel}
-        className={`input-neon w-full px-2 py-1.5 flex items-center justify-between gap-2 text-left ${open ? 'border-neon-cyan/70' : ''}`}>
-        <span className="truncate">{current?.label ?? '—'}</span>
+        className={`input-neon w-full ${compact ? 'px-1.5 py-0.5 text-xs' : 'px-2 py-1.5'} flex items-center justify-between gap-2 text-left disabled:opacity-50 ${open ? 'border-neon-cyan/70' : ''}`}>
+        <span className="truncate">
+          {current?.icon && <span aria-hidden className={`mr-1.5 ${current.iconClass || ''}`}>{current.icon}</span>}
+          {current?.label ?? '—'}
+          {current?.aside && <span className="ml-2 text-slate-500 tabular-nums">{current.aside}</span>}
+        </span>
         <span aria-hidden className={`text-neon-cyan/70 text-[0.6rem] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
       {open && (
@@ -98,12 +115,14 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
                 {header && <p className="px-3 pt-2 pb-1 text-[0.6rem] uppercase tracking-label text-slate-500">{header}</p>}
                 <div role="option" aria-selected={selected} aria-disabled={o.disabled || undefined} data-i={i}
                   onMouseEnter={() => !o.disabled && setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(i)}
-                  className={`flex items-start gap-2 px-3 py-1.5 text-xs cursor-pointer ${o.disabled ? 'opacity-40 cursor-not-allowed' : ''} ${i === active ? 'bg-neon-cyan/10 text-slate-100' : 'text-slate-300'}`}>
-                  <span aria-hidden className={`w-3 shrink-0 ${selected ? 'text-neon-cyan' : 'opacity-0'}`}>✓</span>
-                  <span className="min-w-0">
+                  className={`flex items-start gap-2 px-3 py-1.5 text-xs cursor-pointer border-l-2 ${selected && hasIcons ? 'border-neon-cyan bg-neon-cyan/[0.06]' : 'border-transparent'} ${o.disabled ? 'opacity-40 cursor-not-allowed' : ''} ${i === active ? 'bg-neon-cyan/10 text-slate-100' : 'text-slate-300'}`}>
+                  {!hasIcons && <span aria-hidden className={`w-3 shrink-0 ${selected ? 'text-neon-cyan' : 'opacity-0'}`}>✓</span>}
+                  {o.icon && <span aria-hidden className={`w-3 shrink-0 text-center ${o.iconClass || ''}`}>{o.icon}</span>}
+                  <span className="min-w-0 flex-1">
                     <span className={selected ? 'text-neon-cyan' : ''}>{o.label}</span>
                     {o.hint && <span className="block text-[0.66rem] text-slate-500">{o.hint}</span>}
                   </span>
+                  {o.aside && <span className="shrink-0 pl-3 text-[0.68rem] text-slate-500 tabular-nums">{o.aside}</span>}
                 </div>
               </li>
             );
