@@ -519,18 +519,22 @@ export class GCPProvider extends CloudProvider {
   async getStopReason(instanceId: string): Promise<string | null> {
     const { zone, name } = this.splitId(instanceId);
     const since = Date.now() - 48 * 3600_000;
+    // Filter on the machine only (a simple, well-supported filter) and pick
+    // the stop-type operations here.
     const [ops] = await this.zoneOps.list({
-      project: this.projectId, zone, maxResults: 50,
-      filter: '(operationType = "compute.instances.preempted") OR (operationType = "compute.instances.guestTerminate") OR (operationType = "compute.instances.hostError")',
+      project: this.projectId, zone, maxResults: 500,
+      filter: `targetLink eq ".*/instances/${name}"`,
     }) as any;
+    const kinds = ['compute.instances.preempted', 'compute.instances.guestTerminate', 'compute.instances.hostError', 'compute.instances.stop'];
     const mine = (ops || [])
-      .filter((o: any) => String(o.targetLink || '').endsWith(`/instances/${name}`) && Date.parse(o.insertTime || '') > since)
+      .filter((o: any) => kinds.includes(o.operationType) && String(o.targetLink || '').endsWith(`/instances/${name}`) && Date.parse(o.insertTime || '') > since)
       .sort((a: any, b: any) => Date.parse(b.insertTime) - Date.parse(a.insertTime))[0];
     if (!mine) return null;
     const at = new Date(mine.insertTime).toISOString().slice(11, 16) + ' UTC';
     switch (mine.operationType) {
       case 'compute.instances.preempted': return `Google reclaimed this spot machine at ${at} (spot machines can be taken back at any time). Your disk and progress are kept.`;
       case 'compute.instances.guestTerminate': return `The machine shut itself down at ${at} (auto-stop, or a shutdown from inside it).`;
+      case 'compute.instances.stop': return `It was stopped at ${at} with a Stop request (this app, the Google console or gcloud).`;
       default: return `Google stopped the machine at ${at} because of a problem with the physical host.`;
     }
   }

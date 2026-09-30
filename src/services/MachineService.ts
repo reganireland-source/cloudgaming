@@ -724,6 +724,12 @@ export class MachineService {
     const latest = stages[stages.length - 1];
     // The bar never goes backwards while the setup is still under way.
     const furthest = Math.max(0, ...stages.filter((x) => x.key !== 'failed').map((x) => x.percent));
+    // Stopped with the setup unfinished: ask the cloud why (spot reclaim?).
+    if (!stopReason && status === 'stopped' && latest && latest.key !== 'ready' && latest.key !== 'failed' && !neverCreated(machine)) {
+      stopReason = await providerFor(userId, machine.provider)
+        .then((p) => p.getStopReason(machine.instance_id))
+        .catch((e) => { console.warn(`[Stop reason] ${machine.instance_id}: ${cloudMessage(e)}`); return null; });
+    }
     const current = latest && latest.key !== 'failed' && latest.key !== 'ready' ? { ...latest, percent: Math.max(latest.percent, furthest) } : latest;
     const inProgress = !!current && current.key !== 'ready' && current.key !== 'failed';
     // Same stage for 30+ minutes while "running": the setup has most likely stalled.
