@@ -109,6 +109,13 @@ const STORE_KEY = 'recon.place';
 
 const money = (n: number) => usd(n);
 
+// Cloud override (off by default): rank only the clouds picked here, even
+// ones that wouldn't make the top of the list on their own.
+const CLOUDS: { id: string; label: string }[] = [
+  { id: 'aws', label: 'AWS' }, { id: 'gcp', label: 'Google' }, { id: 'azure', label: 'Azure' }, { id: 'oracle', label: 'Oracle' },
+];
+const cloudNames = (ids: string[]) => CLOUDS.filter((c) => ids.includes(c.id)).map((c) => c.label).join(' + ');
+
 // Discount highlight: deep (≥ 65% off, live) / good (≥ 55%, live) / plain.
 const DEAL_STYLE: Record<'deep' | 'good' | 'plain', { label: string; className: string }> = {
   deep: { label: 'Deep discount', className: 'border-neon-lime/60 bg-neon-lime/10 text-neon-lime' },
@@ -131,6 +138,7 @@ export default function RecommendationsPage() {
   const [game, setGame] = useState('');
   const [budget, setBudget] = useState('');
   const [spot, setSpot] = useState(false);
+  const [clouds, setClouds] = useState<string[]>([]); // empty = every cloud (override off)
   const [categoryId, setCategoryId] = useState('modern-aaa');
   const category = CATEGORIES.find((c) => c.id === categoryId)!;
   const [sortOverride, setSortOverride] = useState<Priority | null>(null); // set in Fine-tune
@@ -207,6 +215,7 @@ export default function RecommendationsPage() {
       if (budget && parseFloat(budget) > 0) qs.set('budget', budget);
       if (spot) qs.set('spot', 'true');
       if (game.trim()) qs.set('game', game.trim());
+      if (clouds.length) qs.set('clouds', clouds.join(','));
       try {
         const r = await apiFetch<ReconResult>(`/recon?${qs}`);
         setResult(r);
@@ -223,7 +232,7 @@ export default function RecommendationsPage() {
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [place, budget, spot, game, priority]);
+  }, [place, budget, spot, game, priority, clouds]);
 
   const tier = result?.tiers.find((t) => t.id === tierId);
 
@@ -314,7 +323,7 @@ export default function RecommendationsPage() {
         <div>
           <button type="button" onClick={() => setFineTune((v) => !v)} aria-expanded={fineTune}
             className="text-left text-xs text-slate-400 hover:text-neon-cyan">
-            {fineTune ? '▾' : '▸'} Fine-tune <span className="text-slate-500">— specific game, budget, sort order{(game.trim() || budget || sortOverride) ? ' · active' : ''}</span>
+            {fineTune ? '▾' : '▸'} Fine-tune <span className="text-slate-500">— specific game, budget, sort order, force a cloud{(game.trim() || budget || sortOverride || clouds.length) ? ' · active' : ''}</span>
           </button>
           {fineTune && (
             <div className="mt-2 grid grid-cols-2 sm:grid-cols-[2fr,1fr] gap-3 items-end">
@@ -340,6 +349,26 @@ export default function RecommendationsPage() {
                   ))}
                 </div>
               </div>
+              <div className="col-span-2">
+                <p id="recon-clouds" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">FORCE_CLOUD <span className="font-normal text-slate-500">(off)</span></p>
+                <div role="group" aria-labelledby="recon-clouds" className="flex flex-wrap items-center gap-1.5">
+                  <button type="button" aria-pressed={!clouds.length} onClick={() => setClouds([])}
+                    className={`px-2.5 py-1.5 rounded border text-xs ${!clouds.length ? 'border-neon-cyan bg-neon-cyan/15 text-neon-cyan' : 'border-white/10 text-slate-400 hover:text-slate-200'}`}>
+                    Any cloud
+                  </button>
+                  {CLOUDS.map((c) => {
+                    const on = clouds.includes(c.id);
+                    return (
+                      <button key={c.id} type="button" aria-pressed={on}
+                        onClick={() => setClouds((cur) => (on ? cur.filter((x) => x !== c.id) : [...cur, c.id]))}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs ${on ? 'border-neon-magenta bg-neon-magenta/15 text-neon-magenta' : 'border-white/10 text-slate-400 hover:text-slate-200'}`}>
+                        <CloudLogo provider={c.id} size={14} />{c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[0.68rem] text-slate-500">Only rank the clouds you pick, even if they wouldn’t make the top of the list — e.g. the one you already have quota or credits on.</p>
+              </div>
               {ANTI_CHEAT_BLOCKED.test(game) && (
                 <p className="col-span-2 text-xs text-neon-pink">⚠ {game.trim()} uses anti-cheat that blocks Linux, so it won’t run on these machines (they run Steam on Linux via Proton). Check protondb.com for a game before launching.</p>
               )}
@@ -352,6 +381,13 @@ export default function RecommendationsPage() {
       </section>
 
       {error && <p className="text-sm text-neon-amber">⚠ {error}</p>}
+
+      {clouds.length > 0 && (
+        <p className="text-xs text-neon-magenta">
+          ◆ Cloud override on: only showing {cloudNames(clouds)}.{' '}
+          <button type="button" onClick={() => setClouds([])} className="text-neon-cyan hover:underline">Show every cloud</button>
+        </p>
+      )}
 
       {!place ? null : !result ? (
         <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; SCANNING_REGIONS…</p>
@@ -414,7 +450,9 @@ export default function RecommendationsPage() {
               })()}
               {tier.options.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-slate-400">
-                  Nothing in this tier fits {money(parseFloat(budget) || 0)}/hour.{tier.cheapest && <> Cheapest is {money(tier.cheapest.totalPerHour)}/h in {tier.cheapest.regionName} ({tier.cheapest.providerLabel}).</>}
+                  {tier.totalOptions === 0 && clouds.length > 0
+                    ? <>{cloudNames(clouds)} {clouds.length === 1 ? 'has' : 'have'} nothing in this tier — try another tier or cloud.</>
+                    : <>Nothing in this tier fits {money(parseFloat(budget) || 0)}/hour.{tier.cheapest && <> Cheapest is {money(tier.cheapest.totalPerHour)}/h in {tier.cheapest.regionName} ({tier.cheapest.providerLabel}).</>}</>}
                 </div>
               ) : (
                 <ol className="space-y-2">

@@ -126,8 +126,10 @@ function dealOf(info: SpotInfo): 'deep' | 'good' | null {
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
-export async function recon(opts: { lat: number; lng: number; budgetPerHour?: number; spot?: boolean; gameTitle?: string; priority?: Priority; limit?: number }) {
+export async function recon(opts: { lat: number; lng: number; budgetPerHour?: number; spot?: boolean; gameTitle?: string; priority?: Priority; limit?: number; clouds?: ProviderName[] }) {
   const limit = opts.limit ?? 6;
+  // Cloud override (off unless the player picks clouds): only these clouds are ranked.
+  const catalogs = Object.values(CATALOGS).filter((c) => !opts.clouds?.length || opts.clouds.includes(c.provider));
 
   // Game → suggested tier (optional; the page still works if the DB is down).
   let game: { title: string; gpuClass: string; suggestedTier: TierId } | null = null;
@@ -148,7 +150,7 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
   // (live AWS/Azure data is cached; failures fall back to estimates).
   const spotKey = (p: string, r: string, s: string) => `${p}|${r}|${s}`;
   const spotOffers = new Map<string, SpotInfo | null>();
-  await Promise.all(Object.values(CATALOGS).flatMap((catalog) =>
+  await Promise.all(catalogs.flatMap((catalog) =>
     catalog.regions.flatMap((region) => catalog.shapes
       .filter((shape) => region.gpus.includes(shape.gpuModel))
       .map(async (shape) => {
@@ -158,7 +160,7 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
   const tiers = TIERS.map((tier) => {
     const all: ReconOption[] = [];
     const offeredBy = new Set<string>();
-    for (const catalog of Object.values(CATALOGS)) {
+    for (const catalog of catalogs) {
       const shapes = catalog.shapes.filter((s) => tierOf(s) === tier.id);
       if (shapes.length) offeredBy.add(catalog.label);
       for (const region of catalog.regions) {
@@ -219,9 +221,9 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
       } : null,
       bestDeal: bestDeal ? { discountPct: bestDeal.spotOffer!.discountPct, regionName: bestDeal.regionName, providerLabel: bestDeal.providerLabel, deal: bestDeal.spotOffer!.deal } : null,
       offeredBy: [...offeredBy],
-      notOfferedBy: Object.values(CATALOGS).map((c) => c.label).filter((l) => !offeredBy.has(l)),
+      notOfferedBy: catalogs.map((c) => c.label).filter((l) => !offeredBy.has(l)),
     };
   });
 
-  return { location: { lat: opts.lat, lng: opts.lng }, priority: opts.priority || 'balanced', spot: !!opts.spot, budgetPerHour: opts.budgetPerHour ?? null, game, gameNotFound, games, tiers };
+  return { location: { lat: opts.lat, lng: opts.lng }, priority: opts.priority || 'balanced', spot: !!opts.spot, budgetPerHour: opts.budgetPerHour ?? null, clouds: opts.clouds?.length ? opts.clouds : null, game, gameNotFound, games, tiers };
 }

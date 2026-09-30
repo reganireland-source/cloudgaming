@@ -34,6 +34,9 @@ router.get('/', async (req: Request, res: Response) => {
       budgetPerHour: Number.isFinite(budget) && budget > 0 ? budget : undefined,
       spot: req.query.spot === 'true',
       priority: (['latency', 'balanced', 'price'] as const).find((p) => p === req.query.priority) as Priority | undefined,
+      clouds: typeof req.query.clouds === 'string'
+        ? (['aws', 'azure', 'gcp', 'oracle'] as const).filter((c) => req.query.clouds!.toString().split(',').includes(c))
+        : undefined,
       gameTitle: typeof req.query.game === 'string' ? req.query.game.slice(0, 100) : undefined,
     }));
   } catch (error) {
