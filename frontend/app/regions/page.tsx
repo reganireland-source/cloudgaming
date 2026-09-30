@@ -22,7 +22,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import CloudLogo from '@/components/CloudLogo';
 import { useAuth } from '@/components/AuthProvider';
-import { ACCESS_STYLE, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type CheckLine } from '@/lib/regionAccess';
+import { ACCESS_STYLE, RUN_MODES, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type RunCell, type CheckLine } from '@/lib/regionAccess';
 
 const CLOUDS = [
   { id: 'gcp', short: 'GCP', color: '#3987e5' },
@@ -344,7 +344,9 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
           {!!r.notSold?.length && r.status !== 'not-offered' && (
             <p className="text-[0.7rem] text-slate-400">⊘ {r.notSold.join(' and ')} machines aren’t sold in this region — only the other GPU{r.notSold.length > 1 ? 's' : ''} can launch here.</p>
           )}
-          {(r.quotas.length > 0 || r.spot) && (
+          {r.run && <RunGrid r={r} />}
+          {r.quotaDetail && <QuotaList r={r} />}
+          {!r.quotaDetail && (r.quotas.length > 0 || r.spot) && (
             <ul className="text-[0.7rem] text-slate-400 tabular-nums space-y-0.5">
               {r.quotas.map((q) => <QuotaRow key={q.label} q={q} />)}
               {r.spot && <QuotaRow q={r.spot} suffix={r.spotReady === false ? ' — too low for a spot machine' : r.spotReady ? ' — spot OK' : ''} />}
@@ -365,6 +367,88 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
         </div>
       ))}
       <button type="button" onClick={onClose} className="text-[0.7rem] text-slate-500 hover:text-slate-300">Close</button>
+    </div>
+  );
+}
+
+/** "What can I run here": tiers × Normal / Spot / Big screen, then why the ✗s are ✗. */
+function RunGrid({ r }: { r: RegionAccess }) {
+  const rows = r.run!;
+  // Group the reasons for every "no" so each blocker is listed once.
+  const blockers = new Map<string, string[]>();
+  for (const row of rows) for (const m of RUN_MODES) {
+    const c = row.cells[m.id];
+    if (c.ok === false) blockers.set(c.why, [...(blockers.get(c.why) || []), `${row.label} ${m.label.toLowerCase()}`]);
+  }
+  const mark = (c: RunCell) => c.na ? { t: '—', cls: 'text-slate-600' } : c.ok === true ? { t: '✓', cls: 'text-neon-lime' } : c.ok === false ? { t: '✗', cls: 'text-neon-pink' } : { t: '?', cls: 'text-slate-400' };
+  return (
+    <div className="rounded border border-white/10 p-2 space-y-2">
+      <p className="label">What you can run here</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs tabular-nums">
+          <thead>
+            <tr className="text-[0.66rem] uppercase tracking-label text-slate-500">
+              <th className="text-left font-normal pb-1">Tier</th>
+              {RUN_MODES.map((m) => <th key={m.id} className="font-normal pb-1 px-1.5 text-center"><span className="hidden sm:inline">{m.label}</span><span className="sm:hidden">{m.short}</span></th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.tier} className="border-t border-white/5">
+                <td className="py-1 pr-2 whitespace-nowrap"><span className="text-slate-100 font-semibold">{row.label}</span> <span className="text-slate-500">{row.shape}</span></td>
+                {RUN_MODES.map((m) => {
+                  const c = row.cells[m.id];
+                  const k = mark(c);
+                  return <td key={m.id} className={`text-center px-1.5 font-bold ${k.cls}`} title={c.why} aria-label={`${row.label} ${m.label}: ${c.na ? 'not offered' : c.ok ? 'yes' : c.ok === false ? 'no' : 'unknown'} — ${c.why}`}>{k.t}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {blockers.size > 0 && (
+        <ul className="text-[0.7rem] text-slate-400 space-y-0.5">
+          {[...blockers.entries()].map(([why, what]) => (
+            <li key={why}><span className="text-neon-pink">✗</span> <span className="text-slate-300">{what.join(', ')}</span> — {why}</li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[0.66rem] text-slate-500">✓ can launch now · ✗ needs quota (why, above) · — not offered. Big screen = the experimental 4096×2160 option.</p>
+    </div>
+  );
+}
+
+/** Each quota: how much, what it unlocks, and any open increase request. */
+function QuotaList({ r }: { r: RegionAccess }) {
+  const offered = (r.run || []).reduce((n, row) => n + RUN_MODES.filter((m) => !row.cells[m.id].na).length, 0);
+  const ago = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
+  const pending = (r.quotaDetail || []).filter((q) => q.pending?.length);
+  return (
+    <div className="space-y-1.5">
+      {pending.length > 0 && (
+        <div className="rounded border border-neon-cyan/30 bg-neon-cyan/[0.05] p-2 text-xs text-slate-300 space-y-0.5">
+          {pending.flatMap((q) => q.pending!.map((p, i) => (
+            <p key={`${q.key}-${i}`}>⏳ <span className="text-neon-cyan">Request open:</span> {q.label} → {p.requested} <span className="text-slate-500">({p.status}{p.created ? `, since ${ago(p.created)}` : ''})</span></p>
+          )))}
+        </div>
+      )}
+      <p className="label">Quotas</p>
+      <ul className="text-[0.7rem] text-slate-400 tabular-nums space-y-1">
+        {(r.quotaDetail || []).map((q) => {
+          const free = q.used == null ? q.limit : q.limit - q.used;
+          return (
+            <li key={q.key}>
+              <span className="text-slate-200">{q.label}</span>{' '}
+              <span className={free > 0 ? 'text-neon-lime' : 'text-slate-500'}>{q.used == null ? `limit ${q.limit}` : `${q.used} used of ${q.limit}`} {q.unit}</span>
+              {q.pending?.length ? <span className="ml-1 text-neon-cyan">⏳ {q.pending[0].requested} requested</span> : null}
+              <span className="block text-slate-500">
+                unlocks: {q.unlocks.length && q.unlocks.length >= offered ? 'every machine on this cloud (a project-wide cap)' : q.unlocks.join(', ') || 'nothing we launch here'}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {r.pendingNote && <p className="text-[0.66rem] text-slate-500">{r.pendingNote}</p>}
     </div>
   );
 }

@@ -1339,6 +1339,22 @@ export class AWSProvider extends CloudProvider {
     return new Set((res.InstanceTypeOfferings || []).map((o) => String(o.InstanceType)));
   }
 
+  /**
+   * Open quota-increase requests for EC2 in a region (status PENDING or
+   * CASE_OPENED), from Service Quotas' request history. null = can't read.
+   */
+  async getQuotaRequests(region: string): Promise<Array<{ quota: string; requested: number; status: string; created?: string }> | null> {
+    try {
+      const sq = new AWS.ServiceQuotas(this.clientConfig(region));
+      const r = await sq.listRequestedServiceQuotaChangeHistory({ ServiceCode: 'ec2', MaxResults: 100 }).promise();
+      return (r.RequestedQuotas || [])
+        .filter((q) => q.Status === 'PENDING' || q.Status === 'CASE_OPENED')
+        .map((q) => ({ quota: String(q.QuotaCode), requested: Number(q.DesiredValue) || 0, status: q.Status === 'CASE_OPENED' ? 'support case open' : 'pending', created: q.Created ? new Date(q.Created).toISOString() : undefined }));
+    } catch {
+      return null;
+    }
+  }
+
   async getEc2Quota(region: string, quotaCode: string): Promise<number> {
     const sq = new AWS.ServiceQuotas(this.clientConfig(region));
     try {

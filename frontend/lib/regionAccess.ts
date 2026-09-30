@@ -31,7 +31,24 @@ export interface RegionAccess {
   missingGpus?: string[];   // ready, except for these GPU models (GCP: T4 vs L4 quota)
   notSold?: string[];       // GPU models the cloud doesn't sell in this region at all
   fix?: { steps: string[]; consoleUrl?: string; consoleLabel?: string; cli?: string };
+  /** "What can I run here": each tier × normal / spot / big screen. */
+  run?: RunRow[];
+  /** Every quota that matters here, what it unlocks, and open increase requests. */
+  quotaDetail?: QuotaDetail[];
+  pendingNote?: string;
 }
+
+export type RunMode = 'normal' | 'spot' | 'big' | 'bigSpot';
+export const RUN_MODES: Array<{ id: RunMode; label: string; short: string }> = [
+  { id: 'normal', label: 'Normal', short: 'Normal' },
+  { id: 'spot', label: 'Spot', short: 'Spot' },
+  { id: 'big', label: 'Big screen', short: 'Big' },
+  { id: 'bigSpot', label: 'Big screen + spot', short: 'Big+spot' },
+];
+export interface RunCell { ok: boolean | null; na?: boolean; why: string; uses?: string[] }
+export interface RunRow { tier: 'good' | 'better' | 'best'; label: string; shape: string; cells: Record<RunMode, RunCell> }
+export interface PendingRequest { requested: number; status: string; created?: string }
+export interface QuotaDetail { key: string; label: string; used: number | null; limit: number; unit: 'GPUs' | 'vCPUs'; unlocks: string[]; pending?: PendingRequest[] }
 
 export interface CloudAccess {
   provider: string; label: string; connected: boolean;

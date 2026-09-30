@@ -32,6 +32,7 @@
 
 import crypto from 'crypto';
 import compute from '@google-cloud/compute';
+import { JWT } from 'google-auth-library';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
@@ -854,6 +855,43 @@ export class GCPProvider extends CloudProvider {
   }
 
   /** A region's quotas (e.g. NVIDIA_T4_GPUS). */
+  /**
+   * Quota increase requests still being processed ("quota preferences" in
+   * the Cloud Quotas API, which the console's quota page also uses). Keyed
+   * like compute metrics: NVIDIA_L4_GPUS, PREEMPTIBLE_NVIDIA_T4_GPUS…
+   * null = can't read (API off or no permission). Region "" = global.
+   */
+  async getQuotaRequests(): Promise<Array<{ metric: string; region: string; requested: number; granted: number | null; status: string; created?: string }> | null> {
+    try {
+      const jwt = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const out: Array<{ metric: string; region: string; requested: number; granted: number | null; status: string; created?: string }> = [];
+      let pageToken = '';
+      for (let page = 0; page < 5; page++) {
+        const url = `https://cloudquotas.googleapis.com/v1/projects/${this.projectId}/locations/global/quotaPreferences?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
+        const res: any = await jwt.request({ url });
+        for (const p of res.data?.quotaPreferences || []) {
+          if (p.service !== 'compute.googleapis.com') continue;
+          const requested = Number(p.quotaConfig?.preferredValue);
+          const granted = p.quotaConfig?.grantedValue != null ? Number(p.quotaConfig.grantedValue) : null;
+          const pending = p.reconciling === true || (granted != null && requested > granted);
+          if (!pending) continue;
+          out.push({
+            metric: String(p.quotaId || '').replace(/-per-.*$/, '').replace(/-/g, '_').toUpperCase(),
+            region: String(p.dimensions?.region || ''),
+            requested, granted,
+            status: p.reconciling ? 'being processed' : (p.quotaConfig?.stateDetail || 'not granted yet'),
+            created: p.createTime,
+          });
+        }
+        pageToken = res.data?.nextPageToken || '';
+        if (!pageToken) break;
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
   async getRegionQuotas(region: string = DEFAULT_REGION): Promise<Array<{ metric: string; limit: number; usage: number }>> {
     const [info] = await this.regions.get({ project: this.projectId, region });
     return (info.quotas || []).map((q: any) => ({ metric: String(q.metric), limit: Number(q.limit) || 0, usage: Number(q.usage) || 0 }));

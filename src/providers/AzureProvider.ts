@@ -1403,6 +1403,32 @@ export class AzureProvider extends CloudProvider {
   }
 
   /** Compute quotas in a location (vCPU counts), e.g. 'standardNCASv3_T4Family', 'cores', 'lowPriorityCores'. */
+  /**
+   * Quota requests made through Azure's Quota API / portal "Quotas" page
+   * that haven't finished (support tickets don't show here). Keyed by the
+   * quota name (e.g. standardNCASv3_T4Family, lowPriorityCores). null = can't read.
+   */
+  async getQuotaRequests(location: string): Promise<Array<{ quota: string; requested: number; status: string; created?: string }> | null> {
+    try {
+      const token = await this.credential.getToken('https://management.azure.com/.default');
+      const url = `https://management.azure.com/subscriptions/${this.subscriptionId}/providers/Microsoft.Compute/locations/${location}/providers/Microsoft.Quota/quotaRequests?api-version=2023-02-01`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token?.token}` } });
+      if (!res.ok) return null;
+      const data: any = await res.json();
+      const out: Array<{ quota: string; requested: number; status: string; created?: string }> = [];
+      for (const r of data?.value || []) {
+        const state = String(r.properties?.provisioningState || '');
+        if (/^(Succeeded|Failed|Invalid|Canceled|Cancelled)$/i.test(state)) continue;
+        for (const v of r.properties?.value || []) {
+          out.push({ quota: String(v.properties?.name?.value || v.name?.value || ''), requested: Number(v.properties?.limit?.value ?? v.limit?.value) || 0, status: state || 'in progress', created: r.properties?.requestSubmitTime });
+        }
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
   async getComputeUsage(location: string): Promise<Array<{ name: string; label: string; limit: number; current: number }>> {
     const out: Array<{ name: string; label: string; limit: number; current: number }> = [];
     for await (const u of this.compute.usage.list(location)) {

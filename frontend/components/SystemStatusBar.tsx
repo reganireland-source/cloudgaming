@@ -194,38 +194,38 @@ export default function SystemStatusBar() {
           <Light
             label="Database"
             onClick={() => setDetailFor('database')}
-            connected={status?.database.connected ?? null}
+            connected={status?.database?.connected ?? null}
             loading={loading}
-            latencyMs={status?.database.latencyMs}
+            latencyMs={status?.database?.latencyMs}
           />
           <div className="h-3 w-px bg-neon-cyan/20" />
           <Light
             label="AWS"
             onClick={() => setDetailFor('aws')}
-            connected={status?.providers.aws.connected ?? null}
+            connected={status?.providers?.aws?.connected ?? null}
             loading={loading}
-            latencyMs={status?.providers.aws.latencyMs}
+            latencyMs={status?.providers?.aws?.latencyMs}
           />
           <Light
             label="Azure"
             onClick={() => setDetailFor('azure')}
-            connected={status?.providers.azure.connected ?? null}
+            connected={status?.providers?.azure?.connected ?? null}
             loading={loading}
-            latencyMs={status?.providers.azure.latencyMs}
+            latencyMs={status?.providers?.azure?.latencyMs}
           />
           <Light
             label="GCP"
             onClick={() => setDetailFor('gcp')}
-            connected={status?.providers.gcp.connected ?? null}
+            connected={status?.providers?.gcp?.connected ?? null}
             loading={loading}
-            latencyMs={status?.providers.gcp.latencyMs}
+            latencyMs={status?.providers?.gcp?.latencyMs}
           />
           <Light
             label="Oracle"
             onClick={() => setDetailFor('oracle')}
-            connected={status?.providers.oracle.connected ?? null}
+            connected={status?.providers?.oracle?.connected ?? null}
             loading={loading}
-            latencyMs={status?.providers.oracle.latencyMs}
+            latencyMs={status?.providers?.oracle?.latencyMs}
           />
         </div>
 

@@ -43,6 +43,8 @@ import { listCredentialSummaries, providerFor } from './CredentialService';
 import { GCP_SHAPES } from '../providers/gcp/catalog';
 import { AWS_SHAPES } from '../providers/aws/catalog';
 import { AZURE_SHAPES, T4_QUOTA_FAMILY } from '../providers/azure/catalog';
+import { ORACLE_SHAPES } from '../providers/oracle/catalog';
+import { TIERS, tierOf, type TierId } from './ReconService';
 
 export type RegionStatus = 'ready' | 'no-quota' | 'not-enabled' | 'not-offered' | 'unknown' | 'not-connected';
 
@@ -67,6 +69,63 @@ export interface RegionAccess {
   /** GPU models of ours the cloud doesn't sell in this region (asked live). */
   notSold?: string[];
   fix?: { steps: string[]; consoleUrl?: string; consoleLabel?: string; cli?: string };
+  /** "What can I run here": each tier × normal / spot / big screen, and why. */
+  run?: RunRow[];
+  /** Every quota that matters here, what it unlocks, and open increase requests. */
+  quotaDetail?: QuotaDetail[];
+  /** Set when open requests couldn't be read (or the cloud doesn't expose them). */
+  pendingNote?: string;
+}
+
+// ---------------------------------------------------------------------------
+// "What can I run" grid
+// ---------------------------------------------------------------------------
+export type RunMode = 'normal' | 'spot' | 'big' | 'bigSpot';
+export const RUN_MODES: RunMode[] = ['normal', 'spot', 'big', 'bigSpot'];
+const MODE_LABEL: Record<RunMode, string> = { normal: 'Normal', spot: 'Spot', big: 'Big screen', bigSpot: 'Big screen + spot' };
+export interface RunCell {
+  ok: boolean | null;   // null = can't tell
+  na?: boolean;         // not a thing here (tier/big screen not offered)
+  why: string;
+  uses?: string[];      // quota keys this depends on
+}
+export interface RunRow { tier: TierId; label: string; shape: string; cells: Record<RunMode, RunCell> }
+export interface PendingRequest { requested: number; status: string; created?: string }
+export interface QuotaDetail {
+  key: string;
+  label: string;
+  used: number | null;  // null = the cloud doesn't report usage (AWS)
+  limit: number;
+  unit: 'GPUs' | 'vCPUs';
+  unlocks: string[];    // "Good · Normal", …
+  pending?: PendingRequest[];
+}
+
+const na = (why: string): RunCell => ({ ok: null, na: true, why });
+const isSpotMode = (m: RunMode) => m === 'spot' || m === 'bigSpot';
+const isBigMode = (m: RunMode) => m === 'big' || m === 'bigSpot';
+
+/** One row per tier (its cheapest machine sold here), plus which quota unlocks what. */
+function buildRun<S extends { id: string; gpuModel: string; vcpus: number }>(
+  shapes: S[], isSold: (gpuModel: string) => boolean, bigScreen: boolean,
+  cell: (shape: S, mode: RunMode) => RunCell, quotas: QuotaDetail[],
+): { run: RunRow[]; quotaDetail: QuotaDetail[] } {
+  const run: RunRow[] = TIERS.map((t) => {
+    const ofTier = shapes.filter((s) => tierOf(s as any) === t.id).sort((a, b) => a.vcpus - b.vcpus);
+    const soldHere = ofTier.filter((s) => isSold(s.gpuModel));
+    const s = soldHere[0];
+    const cells = Object.fromEntries(RUN_MODES.map((m) => [m,
+      !ofTier.length ? na('This cloud has no machine in this tier')
+      : !s ? na(`No ${uniq(ofTier.map((x) => x.gpuModel)).join('/')} machines sold in this region`)
+      : isBigMode(m) && !bigScreen ? na('Big screen isn’t offered on this cloud')
+      : cell(s, m)])) as Record<RunMode, RunCell>;
+    return { tier: t.id, label: t.label, shape: s ? `${s.gpuModel} · ${s.vcpus} vCPU` : ofTier[0] ? `${ofTier[0].gpuModel}` : '—', cells };
+  });
+  const quotaDetail = quotas.map((q) => ({
+    ...q,
+    unlocks: run.flatMap((r) => RUN_MODES.filter((m) => r.cells[m].uses?.includes(q.key)).map((m) => `${r.label} · ${MODE_LABEL[m]}`)),
+  }));
+  return { run, quotaDetail };
 }
 
 export interface CloudAccess {
@@ -115,11 +174,13 @@ const API: Record<ProviderName, Record<string, Describe>> = {
     getRegionOptIn: (_a, r) => ({ api: 'EC2 DescribeRegions AllRegions=true', host: 'ec2.us-east-1.amazonaws.com',
       out: r && `${Object.keys(r).length} regions, ${Object.values(r).filter((v) => v === 'not-opted-in').length} not switched on` }),
     getGpuTypesOffered: ([reg], r) => ({ api: 'EC2 DescribeInstanceTypeOfferings g4dn/g5', host: `ec2.${reg}.amazonaws.com`, out: r && ([...r].join(', ') || 'none sold') }),
+    getQuotaRequests: ([reg], r) => ({ api: 'ServiceQuotas ListRequestedServiceQuotaChangeHistory ec2', host: `servicequotas.${reg}.amazonaws.com`, out: r === null ? 'not readable' : r && `${r.length} open request${r.length === 1 ? '' : 's'}` }),
     getEc2Quota: ([reg, code], r) => ({ api: `ServiceQuotas GetServiceQuota ec2/${code}${code === 'L-3819A6DF' ? ' (spot)' : ' (on-demand)'}`, host: `servicequotas.${reg}.amazonaws.com`, out: r == null ? undefined : `${r} vCPUs` }),
   },
   gcp: {
     getProject: (_a, r) => ({ api: 'compute.projects.get', host: 'compute.googleapis.com',
       out: r && `GPUS_ALL_REGIONS ${(r.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.usage ?? 0}/${(r.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.limit ?? 0}` }),
+    getQuotaRequests: (_a, r) => ({ api: 'cloudquotas.quotaPreferences.list', host: 'cloudquotas.googleapis.com', out: r === null ? 'not readable' : r && `${r.length} open request${r.length === 1 ? '' : 's'}` }),
     getGpuZones: (_a, r) => ({ api: 'compute.acceleratorTypes.aggregatedList', host: 'compute.googleapis.com', out: r && `T4/L4 sold in ${Object.keys(r).length} regions` }),
     getRegionQuotas: ([reg], r) => ({ api: `compute.regions.get ${reg}`, host: 'compute.googleapis.com',
       out: r && ((r as any[]).filter((q) => /T4|L4/.test(q.metric)).map((q) => `${q.metric} ${q.usage}/${q.limit}`).join(' · ') || 'no T4/L4 quotas') }),
@@ -127,6 +188,7 @@ const API: Record<ProviderName, Record<string, Describe>> = {
   azure: {
     getSizeAvailability: ([loc], r) => ({ api: `GET Microsoft.Compute/skus $filter=location eq '${loc}'`, host: 'management.azure.com',
       out: r && (Object.entries(r).map(([k, v]: any) => `${k}${v.restricted ? ` (${v.restricted})` : ''}`).join(', ') || 'no T4 sizes') }),
+    getQuotaRequests: ([loc], r) => ({ api: `GET Microsoft.Quota/quotaRequests (${loc})`, host: 'management.azure.com', out: r === null ? 'not readable' : r && `${r.length} open request${r.length === 1 ? '' : 's'}` }),
     getComputeUsage: ([loc], r) => ({ api: `GET Microsoft.Compute/locations/${loc}/usages`, host: 'management.azure.com', out: r && pairs(r, /ncasv3_?t4|^cores$|lowprioritycores/i) }),
   },
   oracle: {
@@ -188,6 +250,9 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
   const quotasUrl = `https://console.cloud.google.com/iam-admin/quotas?project=${pid}`;
   const metrics = Array.from(new Set(GCP_SHAPES.map((s) => s.gpuQuotaMetric)));   // NVIDIA_T4_GPUS, NVIDIA_L4_GPUS
 
+  // Open quota requests for the whole project (one call; null = can't read).
+  const gcpPending = await provider.getQuotaRequests?.().catch(() => null) ?? null;
+
   // Where Google actually sells T4 / L4 (one call; null if it can't be read).
   const gpuZones: Record<string, Record<string, string[]>> | null = await provider.getGpuZones().catch(() => null);
   const allModels = uniq(GCP_SHAPES.map((sh) => sh.gpuModel));
@@ -206,29 +271,60 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         return { label: metric.replace(/_/g, ' ').replace('NVIDIA ', 'NVIDIA ').replace(' GPUS', ' GPUs').replace('PREEMPTIBLE ', 'Spot '), limit: m?.limit || 0, used: m?.usage || 0, unit: 'GPUs' };
       };
       const quotas = [{ label: 'GPUs (all regions)', limit: globalLimit, used: globalUsage, unit: 'GPUs' as const }, ...metrics.map(line)];
+      // What can I run: each machine needs 1 GPU of its model's quota
+      // (spot: the PREEMPTIBLE_ one; big screen: the _VWS_ one), and the
+      // project-wide "GPUs (all regions)" must have room too.
+      const globalFree = globalLimit - globalUsage;
+      const metricFor = (s: { gpuQuotaMetric: string }, m: RunMode) =>
+        (isSpotMode(m) ? 'PREEMPTIBLE_' : '') + (isBigMode(m) ? s.gpuQuotaMetric.replace(/_GPUS$/, '_VWS_GPUS') : s.gpuQuotaMetric);
+      const gcpLabel = (metric: string) => {
+        if (metric === 'GPUS_ALL_REGIONS') return 'GPUs (all regions)';
+        const gpu = metric.match(/NVIDIA_([A-Z0-9]+)_/)?.[1] || '?';
+        return `${metric.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}${gpu}${metric.includes('_VWS_') ? ' vWS (big screen)' : ''} GPUs`;
+      };
+      const pendingFor = (metric: string) => (gcpPending || [])
+        .filter((x: any) => x.metric === metric && (metric === 'GPUS_ALL_REGIONS' ? !x.region : x.region === region))
+        .map((x: any) => ({ requested: x.requested, status: x.status, created: x.created }));
+      const gcpCell = (s: { gpuQuotaMetric: string }, m: RunMode): RunCell => {
+        const k = metricFor(s, m);
+        const l = line(k);
+        const free = l.limit - l.used;
+        const uses = [k, 'GPUS_ALL_REGIONS'];
+        if (globalFree < 1) return { ok: false, why: '“GPUs (all regions)” has no room for the project', uses };
+        if (free >= 1) return { ok: true, why: `${gcpLabel(k)}: ${free} free`, uses };
+        return { ok: false, why: l.limit > 0 ? `${gcpLabel(k)}: all ${l.limit} in use` : `No ${gcpLabel(k)} quota here`, uses };
+      };
+      const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.map((m) => metricFor(s, m)))]);
+      const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), true, gcpCell,
+        usedKeys.map((k) => {
+          const l = k === 'GPUS_ALL_REGIONS' ? { limit: globalLimit, used: globalUsage } : line(k);
+          const pend = pendingFor(k);
+          return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], ...(pend.length ? { pending: pend } : {}) };
+        }));
+      const extra = { ...detail, ...(gcpPending ? {} : { pendingNote: 'Couldn’t read open quota requests (needs the Cloud Quotas API and “Cloud Quotas Viewer” on the service account).' }) };
       const regional = soldMetrics.map(line).filter((l) => l.limit - l.used >= 1);
       const spotLines = soldMetrics.map((m) => line('PREEMPTIBLE_' + m));
       const spotOk = spotLines.some((l) => l.limit - l.used >= 1);
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
       const cli = `gcloud beta quotas preferences create --project=${pid} --service=compute.googleapis.com \\\n  --quota-id=<ID from: gcloud beta quotas info list --service=compute.googleapis.com --project=${pid} --filter="quotaId~GPU" --format="value(quotaId)"> \\\n  --preferred-value=1 --dimensions=region=${region} --email=<you> --justification="Personal cloud gaming VM"`;
       if (globalLimit - globalUsage < 1) {
-        return { region, status: 'no-quota', summary: 'Project allows 0 GPUs in total ("GPUs (all regions)")', quotas, spot: bestSpot, spotReady: false,
+        return { region, status: 'no-quota', summary: 'Project allows 0 GPUs in total ("GPUs (all regions)")', quotas, ...extra, spot: bestSpot, spotReady: false,
           fix: { steps: ['Request "GPUs (all regions)" = 1 (once for the whole project).', `Also request "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs" = 1 in ${region}.`, 'Free-trial accounts must "Activate full account" first.'],
             consoleUrl: `${quotasUrl}&metric=compute.googleapis.com%2Fgpus_all_regions`, consoleLabel: 'Request GPU quota', cli } };
       }
       if (!regional.length && spotOk) {
         // Spot VMs use the separate "Preemptible" GPU quotas.
-        return { region, status: 'ready', onDemandReady: false, summary: `Spot only: ${spotLines.filter((l) => l.limit - l.used >= 1).map((l) => `${l.label.replace('Spot NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · ')} · no on-demand GPU quota`, quotas, spot: bestSpot, spotReady: true,
+        return { region, status: 'ready', onDemandReady: false, summary: `Spot only: ${spotLines.filter((l) => l.limit - l.used >= 1).map((l) => `${l.label.replace('Spot NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · ')} · no on-demand GPU quota`, quotas, ...extra, spot: bestSpot, spotReady: true,
           fix: { steps: ['Spot machines can launch here. For on-demand ones:', `On the Quotas page, filter "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs", pick ${region}, request 1.`], consoleUrl: quotasUrl, consoleLabel: 'Open Quotas', cli } };
       }
       if (!regional.length) {
-        return { region, status: 'no-quota', onDemandReady: false, summary: `No T4 or L4 GPU quota in ${region}`, quotas, spot: bestSpot, spotReady: spotOk,
+        return { region, status: 'no-quota', onDemandReady: false, summary: `No T4 or L4 GPU quota in ${region}`, quotas, ...extra, spot: bestSpot, spotReady: spotOk,
           fix: { steps: [`On the Quotas page, filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs", pick ${region}, request 1.`, 'For spot machines also request the "Preemptible" version.', 'Approval: minutes to 2 business days.'],
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas', cli } };
       }
       const missingGpus = soldMetrics.filter((m) => { const l = line(m); return l.limit - l.used < 1; })
         .map((m) => GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!.gpuModel);
-      return { region, status: 'ready', onDemandReady: true, summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, spot: bestSpot, spotReady: spotOk, missingGpus,
+      return { region, status: 'ready', onDemandReady: true, summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, ...extra, spot: bestSpot, spotReady: spotOk, missingGpus,
         ...(missingGpus.length ? { fix: { steps: [`Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here. For ${missingGpus.join('/')} machines, request "NVIDIA ${missingGpus[0]} GPUs" = 1 in ${region}.`], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', cli } } : {}) };
       })());
     } catch (error) {
@@ -266,10 +362,28 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
     } catch { /* unknown: assume the catalog is right */ }
     const withSold = (a: RegionAccess): RegionAccess => (notSold.length ? { ...a, notSold, summary: `${a.summary} · no ${notSold.join('/')} machines sold here` } : a);
     try {
-      const [od, sp] = await Promise.all([
+      const [od, sp, awsPending] = await Promise.all([
         provider.getEc2Quota(region, AWS_ON_DEMAND),
         provider.getEc2Quota(region, AWS_SPOT).catch(() => null),
+        provider.getQuotaRequests?.(region).catch(() => null) ?? null,
       ]);
+      // What can I run: a machine needs its vCPUs within the limit (on-demand
+      // or spot). Big screen uses the same quotas. AWS reports limits, not usage.
+      const awsCell = (s: { vcpus: number }, m: RunMode): RunCell => {
+        const code = isSpotMode(m) ? AWS_SPOT : AWS_ON_DEMAND;
+        const lim = isSpotMode(m) ? sp : od;
+        if (lim == null) return { ok: null, why: 'Couldn’t read the spot quota', uses: [code] };
+        return lim >= s.vcpus
+          ? { ok: true, why: `Limit ${lim} vCPUs (a machine uses ${s.vcpus})`, uses: [code] }
+          : { ok: false, why: `Limit ${lim} vCPUs — needs ${s.vcpus}`, uses: [code] };
+      };
+      const pend = (code: string) => (awsPending || []).filter((x: any) => x.quota === code).map((x: any) => ({ requested: x.requested, status: x.status, created: x.created }));
+      const awsQ = (code: string, label: string, limit: number | null): QuotaDetail => ({ key: code, label, used: null, limit: limit ?? 0, unit: 'vCPUs', unlocks: [], ...(pend(code).length ? { pending: pend(code) } : {}) });
+      const extra = {
+        ...buildRun(AWS_SHAPES, (g) => !notSold.includes(g), true, awsCell,
+          [awsQ(AWS_ON_DEMAND, 'Running On-Demand G and VT instances (vCPUs)', od), awsQ(AWS_SPOT, 'All G and VT Spot Instance Requests (vCPUs)', sp)]),
+        ...(awsPending ? {} : { pendingNote: 'Couldn’t read open quota requests (the key needs “ServiceQuotasReadOnlyAccess”).' }),
+      };
       const quotas: QuotaLine[] = [{ label: 'G and VT on-demand vCPUs', limit: od, used: 0, unit: 'vCPUs' }];
       const spot: QuotaLine | null = sp == null ? null : { label: 'G and VT spot vCPUs', limit: sp, used: 0, unit: 'vCPUs' };
       const cli = `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${AWS_ON_DEMAND} --desired-value 8\n` +
@@ -277,16 +391,16 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const spotReady = sp == null ? null : sp >= AWS_MIN;
       if (od < AWS_MIN && spotReady) {
         // Spot machines use their own quota: this region works for spot.
-        return withSold({ region, status: 'ready' as const, onDemandReady: false, summary: `Spot only: ${sp} spot GPU vCPUs · on-demand quota is ${od}`, quotas, spot, spotReady,
+        return withSold({ region, status: 'ready' as const, onDemandReady: false, summary: `Spot only: ${sp} spot GPU vCPUs · on-demand quota is ${od}`, quotas, ...extra, spot, spotReady,
           fix: { steps: [`Spot machines can launch here. For on-demand ones: Service Quotas → EC2 → "Running On-Demand G and VT instances" in ${region} → Request increase → 8.`],
             consoleUrl: quotasUrl, consoleLabel: 'Request on-demand quota', cli } });
       }
       if (od < AWS_MIN) {
-        return withSold({ region, status: 'no-quota' as const, onDemandReady: false, summary: `GPU quota is ${od} vCPUs on-demand${sp == null ? '' : `, ${sp} spot`} (a machine needs ${AWS_MIN})`, quotas, spot, spotReady,
+        return withSold({ region, status: 'no-quota' as const, onDemandReady: false, summary: `GPU quota is ${od} vCPUs on-demand${sp == null ? '' : `, ${sp} spot`} (a machine needs ${AWS_MIN})`, quotas, ...extra, spot, spotReady,
           fix: { steps: [`Service Quotas → EC2 → "Running On-Demand G and VT instances" in ${region} → Request increase → 8.`, 'For spot machines also "All G and VT Spot Instance Requests" → 8.', 'Approval: minutes to a couple of days.'],
             consoleUrl: quotasUrl, consoleLabel: 'Request quota', cli } });
       }
-      return withSold({ region, status: 'ready' as const, onDemandReady: true, summary: `${od} GPU vCPUs on-demand${sp == null ? '' : ` · ${sp} spot`} (${Math.floor(od / AWS_MIN)} small machine${Math.floor(od / AWS_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady });
+      return withSold({ region, status: 'ready' as const, onDemandReady: true, summary: `${od} GPU vCPUs on-demand${sp == null ? '' : ` · ${sp} spot`} (${Math.floor(od / AWS_MIN)} small machine${Math.floor(od / AWS_MIN) === 1 ? '' : 's'})`, quotas, ...extra, spot, spotReady });
     } catch (error) {
       const r = unknown(region, error, 'aws');
       if (/AccessDenied|not authorized|servicequotas/i.test(String((error as any)?.code || (error as any)?.message))) {
@@ -320,7 +434,10 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
       }
     } catch { /* unknown: carry on with the quota check */ }
     try {
-      const usage: Array<{ name: string; limit: number; current: number }> = await provider.getComputeUsage(region);
+      const [usage, azPending]: [Array<{ name: string; limit: number; current: number }>, any[] | null] = await Promise.all([
+        provider.getComputeUsage(region),
+        provider.getQuotaRequests?.(region).catch(() => null) ?? null,
+      ]);
       const find = (n: string) => usage.find((u) => u.name.toLowerCase() === n.toLowerCase());
       // The T4 family's quota (Azure names it standardNCASv3_T4Family; match loosely in case the casing/format differs).
       const fam = find(T4_QUOTA_FAMILY) || usage.find((u) => /ncasv3_?t4/i.test(u.name));
@@ -347,19 +464,46 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
         : { steps: [`Quotas → Compute → filter region ${region} → "Standard NCASv3_T4 Family vCPUs" → request 8 (and "Total Regional vCPUs" ≥ 8).`, 'Auto-approved in minutes where Azure has capacity; otherwise follow up with a support request.'],
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas',
             cli: `${cliBase}az extension add --name quota\naz quota update --resource-name ${T4_QUOTA_FAMILY} --resource-type dedicated \\\n  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/${region}" --limit-object value=8` };
+      // What can I run: on-demand needs the vCPUs free in BOTH the T4 family
+      // and the regional total; spot only in the spot (low-priority) quota.
+      // Big screen uses the same quotas. Azure only has T4 machines (Good).
+      const famKey = fam?.name || T4_QUOTA_FAMILY;
+      const azCell = (s: { vcpus: number }, m: RunMode): RunCell => {
+        if (isSpotMode(m)) {
+          if (!spot) return { ok: null, why: 'Couldn’t read the spot quota', uses: ['lowPriorityCores'] };
+          return spotFree >= s.vcpus ? { ok: true, why: `Spot vCPUs: ${spotFree} free (a machine uses ${s.vcpus})`, uses: ['lowPriorityCores'] }
+            : { ok: false, why: `Spot vCPUs: ${spotFree} free — needs ${s.vcpus}`, uses: ['lowPriorityCores'] };
+        }
+        const uses = [famKey, 'cores'];
+        if (!fam) return { ok: false, why: 'No T4 quota entry for your subscription here', uses };
+        if (famFree < s.vcpus) return { ok: false, why: `T4 family vCPUs: ${famFree} free — needs ${s.vcpus}`, uses };
+        if (totFree < s.vcpus) return { ok: false, why: `Total regional vCPUs: ${totFree} free — needs ${s.vcpus}`, uses };
+        return { ok: true, why: `T4 family: ${famFree} free · regional: ${totFree === Infinity ? '?' : totFree} free`, uses };
+      };
+      const azPend = (key: string) => (azPending || []).filter((x) => String(x.quota).toLowerCase() === key.toLowerCase()).map((x) => ({ requested: x.requested, status: x.status, created: x.created }));
+      const azQ = (key: string, label: string, u?: { limit: number; current: number }): QuotaDetail =>
+        ({ key, label, used: u ? u.current : 0, limit: u ? u.limit : 0, unit: 'vCPUs', unlocks: [], ...(azPend(key).length ? { pending: azPend(key) } : {}) });
+      const extra = {
+        ...buildRun(AZURE_SHAPES, () => true, true, azCell, [
+          azQ(famKey, 'Standard NCASv3_T4 Family vCPUs (on-demand)', fam),
+          azQ('cores', 'Total Regional vCPUs (on-demand)', total),
+          azQ('lowPriorityCores', 'Total Regional Low-priority vCPUs (spot)', spotU),
+        ]),
+        pendingNote: azPending ? 'Requests made through a support ticket don’t show here — check Help + support → All support requests.' : 'Couldn’t read open quota requests.',
+      };
       const inUse = (u?: { limit: number; current: number }) => !!u && u.limit >= AZ_MIN && u.limit - u.current < AZ_MIN;
       const odWhy = !fam ? 'no T4 on-demand quota entry for your subscription here'
         : famFree < AZ_MIN ? (inUse(fam) ? `T4 on-demand quota in use (${fam.current} of ${fam.limit} vCPUs used by your machines)` : `T4 on-demand quota is ${fam.limit} vCPUs`)
         : `"Total Regional vCPUs" ${inUse(total) ? `in use (${total!.current} of ${total!.limit})` : `is only ${total!.limit}`}`;
       if (onDemandReady) {
-        return { region, status: 'ready' as const, onDemandReady: true, summary: `${famFree} T4 vCPUs free on-demand${spot ? ` · ${spotFree} spot` : ''} (${Math.floor(famFree / AZ_MIN)} small machine${Math.floor(famFree / AZ_MIN) === 1 ? '' : 's'})`, quotas, spot, spotReady };
+        return { region, status: 'ready' as const, onDemandReady: true, summary: `${famFree} T4 vCPUs free on-demand${spot ? ` · ${spotFree} spot` : ''} (${Math.floor(famFree / AZ_MIN)} small machine${Math.floor(famFree / AZ_MIN) === 1 ? '' : 's'})`, quotas, ...extra, spot, spotReady };
       }
       if (spotReady) {
-        return { region, status: 'ready' as const, onDemandReady: false, summary: `Spot only: ${spotFree} spot vCPUs free · ${odWhy}`, quotas, spot, spotReady,
+        return { region, status: 'ready' as const, onDemandReady: false, summary: `Spot only: ${spotFree} spot vCPUs free · ${odWhy}`, quotas, ...extra, spot, spotReady,
           fix: { ...odFix, steps: ['Spot machines can launch here (they use the separate spot quota). For on-demand machines:', ...odFix.steps] } };
       }
       const spotWhy = !spot ? '' : inUse(spotU) ? ` · spot quota in use (${spot.used} of ${spot.limit} vCPUs)` : ` · spot quota ${spot.limit} vCPUs`;
-      return { region, status: 'no-quota' as const, onDemandReady: false, summary: `${odWhy[0].toUpperCase()}${odWhy.slice(1)}${spotWhy} (a machine needs ${AZ_MIN})`, quotas, spot, spotReady, fix: odFix };
+      return { region, status: 'no-quota' as const, onDemandReady: false, summary: `${odWhy[0].toUpperCase()}${odWhy.slice(1)}${spotWhy} (a machine needs ${AZ_MIN})`, quotas, ...extra, spot, spotReady, fix: odFix };
     } catch (error) {
       const text = String((error as any)?.code || '') + String((error as any)?.message || '');
       if (/LocationNotAvailableForResourceType|NoRegisteredProviderFound|not available for subscription|InvalidLocation/i.test(text)) {
@@ -387,13 +531,22 @@ async function oracleAccess(provider: any, regionIds: string[], log: Log = noLog
     try {
       const lim = await provider.getGpuLimit(region);
       if (!lim) return notOffered(region, 'Oracle lists no A10 GPU limit here, so it doesn’t sell A10 machines in this region', 'https://docs.oracle.com/iaas/Content/Compute/References/computeshapes.htm', 'Oracle GPU shapes');
+      // What can I run: 1 A10 GPU per machine; preemptible (spot) machines
+      // count against the same limit. No big screen on Oracle.
+      const ociFree = lim.limit - lim.used;
+      const ociCell = (): RunCell => ociFree >= 1 ? { ok: true, why: `${ociFree} A10 GPU${ociFree === 1 ? '' : 's'} free`, uses: ['A10'] }
+        : { ok: false, why: lim.limit > 0 ? `All ${lim.limit} A10 GPUs in use` : 'A10 GPU limit is 0', uses: ['A10'] };
+      const extra = {
+        ...buildRun(ORACLE_SHAPES, () => true, false, ociCell, [{ key: 'A10', label: 'GPU.A10 GPUs (normal and preemptible)', used: lim.used, limit: lim.limit, unit: 'GPUs', unlocks: [] }]),
+        pendingNote: 'Oracle limit increases are support requests, which the app can’t see — check Help → Support requests in the Oracle console.',
+      };
       if (lim.limit - lim.used < 1) {
-        return { region, status: 'no-quota' as const, summary: `A10 GPU limit is ${lim.limit}`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }], spot: null, spotReady: null,
+        return { region, status: 'no-quota' as const, summary: `A10 GPU limit is ${lim.limit}`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }], ...extra, spot: null, spotReady: null,
           fix: { steps: ['Governance → Limits, Quotas and Usage → Service "Compute" → search "GPU.A10".', 'Click "Request a service limit increase" → 1 (per availability domain).', 'Approval: hours to a couple of days.'],
             consoleUrl: limitsUrl, consoleLabel: 'Open Limits',
             cli: `oci limits value list --service-name compute --compartment-id <tenancy-ocid> --region ${region} --all --query "data[?contains(name,'a10')]" --output table` } };
       }
-      return { region, status: 'ready' as const, summary: `${lim.limit - lim.used} A10 GPU${lim.limit - lim.used === 1 ? '' : 's'} available`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' }], spot: null, spotReady: null };
+      return { region, status: 'ready' as const, summary: `${lim.limit - lim.used} A10 GPU${lim.limit - lim.used === 1 ? '' : 's'} available`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' }], ...extra, spot: null, spotReady: null };
     } catch (error) {
       return unknown(region, error, 'oracle');
     }
