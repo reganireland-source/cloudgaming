@@ -39,8 +39,8 @@ const whole = (n: number) => usd(n, n >= 100 ? 0 : 2);
 function Item({ label, value, show = 'inline-flex', title }: { label: string; value: string; show?: string; title: string }) {
   return (
     <span className={`${show} items-baseline gap-1 whitespace-nowrap`} title={title}>
-      <span className="text-[0.62rem] tracking-label uppercase text-slate-500">{label}</span>
-      <span className="text-[0.68rem] text-slate-300 tabular-nums">{value}</span>
+      <span className="text-[0.66rem] tracking-label uppercase text-slate-500">{label}</span>
+      <span className="text-[0.72rem] text-slate-300 tabular-nums">{value}</span>
     </span>
   );
 }

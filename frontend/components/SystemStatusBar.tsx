@@ -110,12 +110,12 @@ function Light({
         }`}
       />
       {/* Full name from 640px wide, a short one below (e.g. "DB", "AZ"). */}
-      <span className="text-[0.66rem] tracking-label text-slate-400 uppercase">
+      <span className="text-[0.7rem] tracking-label text-slate-400 uppercase">
         <span className="hidden sm:inline">{label}</span>
         <span className="sm:hidden">{SHORT_LABEL[label] || label}</span>
       </span>
       {!loading && connected && latencyMs !== undefined && (
-        <span className="hidden xl:inline text-[0.62rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
+        <span className="hidden xl:inline text-[0.66rem] text-slate-600 tabular-nums">{latencyMs}ms</span>
       )}
     </button>
   );
@@ -233,7 +233,7 @@ export default function SystemStatusBar() {
         <SpendTicker />
         <button
           onClick={() => setPanelOpen(true)}
-          className="text-[0.66rem] tracking-label uppercase text-slate-500 hover:text-neon-cyan transition-colors flex-shrink-0"
+          className="text-[0.7rem] tracking-label uppercase text-slate-500 hover:text-neon-cyan transition-colors flex-shrink-0"
           aria-label="Build info"
         >
           <span className="hidden sm:inline">Build info ›</span><span className="sm:hidden">ⓘ</span>

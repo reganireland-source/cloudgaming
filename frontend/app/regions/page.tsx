@@ -225,7 +225,7 @@ export default function RegionsPage() {
 
           {/* ---- Sort ---- */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <span className="text-[0.66rem] uppercase tracking-label text-slate-500">Sort</span>
+            <span className="text-[0.7rem] uppercase tracking-label text-slate-500">Sort</span>
             <div role="radiogroup" aria-label="Sort places" className="inline-flex rounded border border-white/10 overflow-hidden">
               {SORTS.map((o) => (
                 <button key={o.id} type="button" role="radio" aria-checked={sortBy === o.id} onClick={() => pickSort(o.id)}
@@ -247,7 +247,7 @@ export default function RegionsPage() {
           <div className="rounded-lg border border-white/10 overflow-hidden">
             <table className="w-full text-sm table-fixed">
               <thead>
-                <tr className="text-left text-[0.66rem] uppercase tracking-label text-slate-500 bg-white/[0.03]">
+                <tr className="text-left text-[0.7rem] uppercase tracking-label text-slate-500 bg-white/[0.03]">
                   <th className="py-2 pl-2.5 pr-1 font-normal">{sortBy === 'distance' && me ? <>Nearest to {me.label.split(',')[0]}</> : sortBy === 'region' ? 'Place by region' : 'Place'}</th>
                   {CLOUDS.map((c) => <th key={c.id} className="py-2 px-0.5 font-normal text-center w-10 sm:w-28"><span className="inline-flex flex-col sm:flex-row items-center gap-1"><CloudLogo provider={c.id} size={18} /><span className="hidden sm:inline">{c.short}</span></span></th>)}
                 </tr>
@@ -260,7 +260,7 @@ export default function RegionsPage() {
                     <Fragment key={p.key}>
                       {newRegion && (
                         <tr className="bg-white/[0.04]">
-                          <td colSpan={5} className="py-1 pl-2.5 text-[0.66rem] uppercase tracking-label text-neon-cyan/80">
+                          <td colSpan={5} className="py-1 pl-2.5 text-[0.7rem] uppercase tracking-label text-neon-cyan/80">
                             {p.area} <span className="text-slate-500 normal-case tracking-normal">· {places.filter((x) => x.area === p.area).length} places</span>
                           </td>
                         </tr>
@@ -268,7 +268,7 @@ export default function RegionsPage() {
                       <tr className="border-t border-white/5">
                         <td className="py-1.5 pl-2.5 pr-1 min-w-0">
                           <p className="text-slate-100 truncate leading-tight">{p.label}</p>
-                          <p className="text-[0.64rem] text-slate-500 tabular-nums">{me ? `~${pingMs(km(me, p))} ms` : ''}{me && sortBy !== 'region' ? ' · ' : ''}{sortBy !== 'region' || !me ? p.area : ''}</p>
+                          <p className="text-[0.68rem] text-slate-500 tabular-nums">{me ? `~${pingMs(km(me, p))} ms` : ''}{me && sortBy !== 'region' ? ' · ' : ''}{sortBy !== 'region' || !me ? p.area : ''}</p>
                         </td>
                         {CLOUDS.map((c) => {
                           const cell = p.cells[c.id];
@@ -301,7 +301,7 @@ export default function RegionsPage() {
             </table>
           </div>
 
-          <p className="text-[0.68rem] text-slate-500">
+          <p className="text-[0.72rem] text-slate-500">
             Checked {new Date(report.generatedAt).toLocaleTimeString()} (results are kept 10 minutes; Re-check asks again).
             Quota is what your account is <em>allowed</em>; a region can still be temporarily out of GPUs, which only shows up when you launch.
             New to quotas? The <Link href="/settings" className="text-neon-cyan hover:underline">Config</Link> page has step-by-step guides for each cloud.
@@ -321,7 +321,7 @@ function Chip({ status, mode = 'auto' }: { status: AccessStatus; mode?: 'icon' |
   const s = ACCESS_STYLE[status];
   const size = mode === 'icon' ? 'w-6' : mode === 'auto' ? 'w-7 h-6 sm:w-auto sm:h-auto sm:min-w-[1.5rem]' : 'min-w-[1.5rem]';
   return (
-    <span className={`inline-flex items-center justify-center gap-1 rounded border px-1 py-0.5 text-[0.62rem] uppercase tracking-label whitespace-nowrap ${s.className} ${size}`}>
+    <span className={`inline-flex items-center justify-center gap-1 rounded border px-1 py-0.5 text-[0.66rem] uppercase tracking-label whitespace-nowrap ${s.className} ${size}`}>
       <span aria-hidden className="font-bold">{s.icon}</span>
       {mode !== 'icon' && <span className={mode === 'auto' ? 'hidden sm:inline' : ''}>{s.short}</span>}
     </span>
@@ -336,7 +336,7 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm text-slate-100">{cloudLabel} · {r.name}</p>
-              <p className="text-[0.66rem] text-slate-500 font-mono break-all">{r.region}</p>
+              <p className="text-[0.7rem] text-slate-500 font-mono break-all">{r.region}</p>
             </div>
             <Chip status={r.status} mode="full" />
           </div>
@@ -382,8 +382,8 @@ function Cli({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="relative">
-      <pre className="overflow-x-auto rounded bg-black/40 border border-white/10 p-2 pr-14 text-[0.66rem] text-slate-300 whitespace-pre"><code className="!bg-transparent !border-0 !p-0">{text}</code></pre>
-      <button type="button" className="absolute top-1 right-1 text-[0.62rem] text-neon-cyan border border-neon-cyan/40 rounded px-1.5 py-0.5 bg-cyber-darker"
+      <pre className="overflow-x-auto rounded bg-black/40 border border-white/10 p-2 pr-14 text-[0.7rem] text-slate-300 whitespace-pre"><code className="!bg-transparent !border-0 !p-0">{text}</code></pre>
+      <button type="button" className="absolute top-1 right-1 text-[0.66rem] text-neon-cyan border border-neon-cyan/40 rounded px-1.5 py-0.5 bg-cyber-darker"
         onClick={() => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined)}>
         {copied ? 'Copied' : 'Copy'}
       </button>
@@ -404,12 +404,12 @@ function CheckLog({ lines, running }: { lines: CheckLine[]; running: boolean }) 
   const answered = lines.filter((l) => l.level === 'ok' && l.text.includes(' ← ')).length + lines.filter((l) => l.level === 'err' && l.text.includes(' ✗ ')).length;
   return (
     <div className="rounded-lg border border-neon-cyan/20 bg-black/60 overflow-hidden">
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-white/10 text-[0.66rem] font-mono uppercase tracking-label text-slate-500">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-white/10 text-[0.7rem] font-mono uppercase tracking-label text-slate-500">
         <span>{running ? <span className="text-neon-cyan animate-pulse">● asking your clouds</span> : 'check log'}</span>
         <span className="tabular-nums">{answered}/{calls} API calls answered · {((lines[lines.length - 1]?.ms || 0) / 1000).toFixed(1)} s</span>
       </div>
       <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}
-        className="h-72 overflow-auto px-3 py-2 font-mono text-[0.66rem] leading-relaxed" role="log" aria-live="polite">
+        className="h-72 overflow-auto px-3 py-2 font-mono text-[0.7rem] leading-relaxed" role="log" aria-live="polite">
         {lines.length === 0 && <p className="text-neon-cyan animate-pulse">&gt; connecting…</p>}
         {lines.map((l) => (
           <p key={l.i} className={`whitespace-pre ${LINE_CLS[l.level]}`}>

@@ -91,7 +91,7 @@ function CopyBox({ text }: { text: string }) {
         onClick={async () => {
           try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* select manually */ }
         }}
-        className="absolute top-2 right-2 text-[0.66rem] uppercase tracking-label text-neon-cyan/80 hover:text-neon-cyan border border-neon-cyan/30 rounded px-2 py-0.5"
+        className="absolute top-2 right-2 text-[0.7rem] uppercase tracking-label text-neon-cyan/80 hover:text-neon-cyan border border-neon-cyan/30 rounded px-2 py-0.5"
       >
         {copied ? 'copied ✓' : 'copy'}
       </button>

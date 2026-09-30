@@ -119,7 +119,7 @@ export default function RootLayout({
                   </span>
                   {/* Version chip — shown on tablets (md) and wide screens (xl); hidden
                       in between (lg), where the page links need the room. */}
-                  <span className="hidden md:inline-block lg:hidden xl:inline-block text-[0.62rem] tracking-label text-slate-500 border border-white/10 rounded-sm px-1.5 py-px">
+                  <span className="hidden md:inline-block lg:hidden xl:inline-block text-[0.66rem] tracking-label text-slate-500 border border-white/10 rounded-sm px-1.5 py-px">
                     NEON_CORE v0.1
                   </span>
                 </a>
@@ -144,7 +144,7 @@ export default function RootLayout({
 
           {/* ---- Footer ---- */}
           <footer className="border-t border-white/[0.06] mt-12 short:mt-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row gap-2 justify-between items-center text-[0.68rem] tracking-label uppercase text-slate-500">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row gap-2 justify-between items-center text-[0.72rem] tracking-label uppercase text-slate-500">
               <span>
                 <span className="text-slate-300">Gints Global Gaming Hubjob</span> · multi-cloud gaming infrastructure
               </span>

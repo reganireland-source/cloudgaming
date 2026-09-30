@@ -138,7 +138,7 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
                 ))}
               </tbody>
             </table>
-            <p className="text-[0.68rem] text-slate-500 mt-1">* A fresh install stores about 30 GB; the upper figure is a completely full disk. Estimates from list prices.</p>
+            <p className="text-[0.72rem] text-slate-500 mt-1">* A fresh install stores about 30 GB; the upper figure is a completely full disk. Estimates from list prices.</p>
           </div>
         )}
         <ul className="mt-3 space-y-1 text-xs text-slate-300 list-disc pl-4">
@@ -172,10 +172,10 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-slate-100 leading-tight">
                         {it.machineLabel || it.name}
-                        <span className="ml-1.5 align-middle text-[0.6rem] uppercase tracking-label rounded border border-white/15 text-slate-400 px-1">{KIND_LABEL[it.kind]}</span>
-                        {it.estimated && <span className="ml-1 align-middle text-[0.6rem] text-slate-500">(estimated)</span>}
+                        <span className="ml-1.5 align-middle text-[0.64rem] uppercase tracking-label rounded border border-white/15 text-slate-400 px-1">{KIND_LABEL[it.kind]}</span>
+                        {it.estimated && <span className="ml-1 align-middle text-[0.64rem] text-slate-500">(estimated)</span>}
                       </p>
-                      <p className="text-[0.68rem] text-slate-500 truncate">{it.region}{it.sizeGb ? ` · ${it.sizeGb} GB` : ''}{it.machineLabel && it.name !== it.machineLabel ? ` · ${it.name}` : ''}</p>
+                      <p className="text-[0.72rem] text-slate-500 truncate">{it.region}{it.sizeGb ? ` · ${it.sizeGb} GB` : ''}{it.machineLabel && it.name !== it.machineLabel ? ` · ${it.name}` : ''}</p>
                       <p className="text-xs text-slate-300 mt-1">{it.advice.text}{it.advice.saving && it.advice.level === 'save' ? <> <span className="text-neon-amber whitespace-nowrap">Save {it.advice.saving.low === it.advice.saving.high ? money(it.advice.saving.low) : `${usdRange(it.advice.saving.low, it.advice.saving.high)}`}/month.</span></> : null}</p>
                       {confirm === it.key && (
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -188,13 +188,13 @@ export default function StandingCosts({ onTotal }: { onTotal?: (monthly: number)
                     <div className="shrink-0 text-right space-y-1">
                       <p className="text-sm text-slate-100 tabular-nums">{money(it.monthlyCost)}<span className="text-slate-500 text-xs">/mo</span></p>
                       {it.advice.action === 'shelve' && it.machineStatus === 'stopped' && (
-                        <button type="button" disabled={busy === it.key} onClick={() => setConfirm(it.key)} className="btn-neon text-[0.68rem] px-2 py-1 disabled:opacity-40">Shelve</button>
+                        <button type="button" disabled={busy === it.key} onClick={() => setConfirm(it.key)} className="btn-neon text-[0.72rem] px-2 py-1 disabled:opacity-40">Shelve</button>
                       )}
                       {it.advice.action === 'delete-snapshot' && it.snapshotRecordId && (
-                        <button type="button" disabled={busy === it.key} onClick={() => setConfirm(it.key)} className="text-[0.68rem] border border-red-600/50 text-red-400 hover:border-red-500 rounded px-2 py-1 disabled:opacity-40">Delete</button>
+                        <button type="button" disabled={busy === it.key} onClick={() => setConfirm(it.key)} className="text-[0.72rem] border border-red-600/50 text-red-400 hover:border-red-500 rounded px-2 py-1 disabled:opacity-40">Delete</button>
                       )}
-                      {it.advice.action === 'restore' && <Link href="/machines" className="block text-[0.68rem] text-neon-cyan hover:underline">Restore →</Link>}
-                      {it.advice.action === 'console' && it.consoleUrl && <a href={it.consoleUrl} target="_blank" rel="noreferrer" className="block text-[0.68rem] text-neon-cyan hover:underline">Console ↗</a>}
+                      {it.advice.action === 'restore' && <Link href="/machines" className="block text-[0.72rem] text-neon-cyan hover:underline">Restore →</Link>}
+                      {it.advice.action === 'console' && it.consoleUrl && <a href={it.consoleUrl} target="_blank" rel="noreferrer" className="block text-[0.72rem] text-neon-cyan hover:underline">Console ↗</a>}
                     </div>
                   </div>
                 </li>
@@ -212,7 +212,7 @@ function Tile({ label, value, sub, strong, warn }: { label: string; value: strin
     <div className={`rounded border px-3 py-2.5 ${warn ? 'border-neon-amber/40 bg-neon-amber/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
       <p className="label">{label}</p>
       <p className={`text-lg tabular-nums mt-0.5 ${warn ? 'text-neon-amber' : strong ? 'text-slate-50' : 'text-slate-100'}`}>{value}</p>
-      <p className="text-[0.68rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
+      <p className="text-[0.72rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
     </div>
   );
 }

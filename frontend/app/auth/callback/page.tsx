@@ -106,7 +106,7 @@ export default function AuthCallbackPage() {
                 <p className="font-semibold text-neon-pink">{status.message}</p>
                 {status.tip && <p className="mt-1 text-slate-300">{status.tip}</p>}
                 {status.code && (
-                  <p className="mt-2 text-[0.68rem] uppercase tracking-label text-slate-500">
+                  <p className="mt-2 text-[0.72rem] uppercase tracking-label text-slate-500">
                     Code: {status.code}
                   </p>
                 )}

@@ -185,8 +185,8 @@ export default function CostsPage() {
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={chart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="20%">
                 <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.06)" />
-                <XAxis dataKey="day" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={{ stroke: 'rgba(255,255,255,0.12)' }} minTickGap={12} />
-                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} width={36} />
+                <XAxis dataKey="day" tick={{ fill: '#a9b5c4', fontSize: 11 }} tickLine={false} axisLine={{ stroke: 'rgba(255,255,255,0.12)' }} minTickGap={12} />
+                <YAxis tick={{ fill: '#a9b5c4', fontSize: 11 }} tickLine={false} axisLine={false} width={36} />
                 <Tooltip
                   cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                   contentStyle={{ background: '#0c1018', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, fontSize: 12 }}
@@ -240,7 +240,7 @@ export default function CostsPage() {
         )}
       </section>
 
-      <p className="text-[0.68rem] text-slate-500">
+      <p className="text-[0.72rem] text-slate-500">
         Estimates from each machine’s hourly price (live spot price where the cloud publishes one) and its disk size; recorded every hour. Data streamed to you (egress, roughly USD 0.10/GB on most clouds) isn’t counted yet. For exact figures, see your cloud’s billing page.
       </p>
     </div>
@@ -252,7 +252,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub: string
     <div className="rounded border border-white/10 bg-white/[0.02] px-3 py-2.5">
       <p className="label">{label}</p>
       <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
-      <p className="text-[0.68rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
+      <p className="text-[0.72rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
     </div>
   );
 }

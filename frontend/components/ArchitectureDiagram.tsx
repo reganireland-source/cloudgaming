@@ -266,7 +266,7 @@ function Node({
           <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${DOT[health]}`} />
           <span className="text-[0.78rem] text-slate-100 font-medium">{label}</span>
         </span>
-        {sub && <span className="block text-[0.68rem] text-slate-500 mt-0.5 leading-snug break-words">{sub}</span>}
+        {sub && <span className="block text-[0.72rem] text-slate-500 mt-0.5 leading-snug break-words">{sub}</span>}
       </span>
     </button>
   );
@@ -277,7 +277,7 @@ function Layer({ name, note, children, tone = 'border-white/10' }: { name: strin
     <div className={`rounded-md border ${tone} p-3`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
         <span className="label">{name}</span>
-        <span className="text-[0.66rem] text-slate-500">{note}</span>
+        <span className="text-[0.7rem] text-slate-500">{note}</span>
       </div>
       {children}
     </div>
@@ -288,7 +288,7 @@ function Layer({ name, note, children, tone = 'border-white/10' }: { name: strin
 function Link({ label, kind }: { label: string; kind: 'control' | 'stream' | 'both' }) {
   const colour = kind === 'stream' ? 'text-neon-lime' : kind === 'both' ? 'text-slate-400' : 'text-neon-cyan';
   return (
-    <div className={`flex items-center gap-2 pl-4 py-1 text-[0.66rem] ${colour}`}>
+    <div className={`flex items-center gap-2 pl-4 py-1 text-[0.7rem] ${colour}`}>
       <span className="font-mono">│</span>
       <span>{label}</span>
     </div>
@@ -406,7 +406,7 @@ export default function ArchitectureDiagram({
           ⇅ Game stream: Moonlight ⇄ Sunshine directly over the internet (UDP) — it does NOT pass through Vercel or Railway.
           {' '}Browser access is direct too: <strong>Use the desktop</strong> (KasmVNC, HTTPS port 48200, inside the container) and <strong>Play in browser</strong> (Moonlight Web, experimental: HTTPS 48300 + WebRTC UDP 40000–40030, its own container next to Sunshine).
         </div>
-        <div className="mt-2 flex flex-wrap gap-3 text-[0.64rem] text-slate-500">
+        <div className="mt-2 flex flex-wrap gap-3 text-[0.68rem] text-slate-500">
           {(['ok', 'busy', 'idle', 'bad', 'unknown'] as Health[]).map((h) => (
             <span key={h} className="inline-flex items-center gap-1.5">
               <span className={`inline-block w-1.5 h-1.5 rounded-full ${DOT[h]}`} />
@@ -424,7 +424,7 @@ export default function ArchitectureDiagram({
           <div><p className="label mb-1">How it works</p><p className="text-slate-300 leading-relaxed">{info.how}</p></div>
           <div><p className="label mb-1">Who controls it</p><p className="text-slate-300 leading-relaxed">{info.control}</p></div>
           <div><p className="label mb-1">What it costs</p><p className="text-slate-300 leading-relaxed">{info.cost}</p></div>
-          <p className="text-[0.66rem] text-slate-500">Click any box on the left to learn about it.</p>
+          <p className="text-[0.7rem] text-slate-500">Click any box on the left to learn about it.</p>
         </aside>
       )}
     </div>

@@ -125,7 +125,7 @@ const DEAL_STYLE: Record<'deep' | 'good' | 'plain', { label: string; className: 
 function DiscountBadge({ pct, deal, source, compact }: { pct: number; deal: Deal; source: string; compact?: boolean }) {
   const st = DEAL_STYLE[deal || 'plain'];
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1 text-[0.62rem] uppercase tracking-label tabular-nums ${st.className}`}
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1 text-[0.66rem] uppercase tracking-label tabular-nums ${st.className}`}
       title={source === 'live' ? 'Live spot price from the cloud' : source === 'fixed' ? 'This cloud always gives this discount' : 'Estimated discount (no live feed for this cloud)'}>
       {deal === 'deep' && <span aria-hidden>🔥</span>}−{pct}%{!compact && st.label ? ` · ${st.label}` : ''}{source === 'estimate' ? ' est.' : ''}
     </span>
@@ -279,7 +279,7 @@ export default function RecommendationsPage() {
                 <button key={c.id} type="button" role="radio" aria-checked={on} onClick={() => pickCategory(c.id)}
                   className={`text-left rounded border px-2.5 py-2 transition ${on ? 'border-neon-cyan bg-neon-cyan/[0.07]' : 'border-white/10 hover:border-white/25'}`}>
                   <span className={`block text-sm font-semibold ${on ? 'text-neon-cyan' : 'text-slate-200'}`}>{c.label}</span>
-                  <span className="text-[0.68rem] text-slate-500 leading-snug line-clamp-1 sm:line-clamp-2">{c.examples}</span>
+                  <span className="text-[0.72rem] text-slate-500 leading-snug line-clamp-1 sm:line-clamp-2">{c.examples}</span>
                 </button>
               );
             })}
@@ -300,7 +300,7 @@ export default function RecommendationsPage() {
               <button key={m.title} type="button" role="radio" aria-checked={spot === m.on} onClick={() => setSpot(m.on)}
                 className={`text-left rounded border px-2.5 py-2 transition ${spot === m.on ? (m.on ? 'border-neon-lime bg-neon-lime/[0.07]' : 'border-neon-cyan bg-neon-cyan/[0.07]') : 'border-white/10 hover:border-white/25'}`}>
                 <span className={`block text-sm font-semibold ${spot === m.on ? (m.on ? 'text-neon-lime' : 'text-neon-cyan') : 'text-slate-200'}`}>{m.title}</span>
-                <span className="text-[0.68rem] text-slate-500 leading-snug line-clamp-1 sm:line-clamp-none">{m.sub}</span>
+                <span className="text-[0.72rem] text-slate-500 leading-snug line-clamp-1 sm:line-clamp-none">{m.sub}</span>
               </button>
             ))}
           </div>
@@ -367,7 +367,7 @@ export default function RecommendationsPage() {
                     );
                   })}
                 </div>
-                <p className="mt-1.5 text-[0.68rem] text-slate-500">Only rank the clouds you pick, even if they wouldn’t make the top of the list — e.g. the one you already have quota or credits on.</p>
+                <p className="mt-1.5 text-[0.72rem] text-slate-500">Only rank the clouds you pick, even if they wouldn’t make the top of the list — e.g. the one you already have quota or credits on.</p>
               </div>
               {ANTI_CHEAT_BLOCKED.test(game) && (
                 <p className="col-span-2 text-xs text-neon-pink">⚠ {game.trim()} uses anti-cheat that blocks Linux, so it won’t run on these machines (they run Steam on Linux via Proton). Check protondb.com for a game before launching.</p>
@@ -402,17 +402,17 @@ export default function RecommendationsPage() {
               return (
                 <button key={t.id} type="button" role="radio" aria-checked={selected} onClick={() => setTierId(t.id)}
                   className={`relative text-left rounded-lg border p-2 sm:p-3 transition ${selected ? 'border-neon-cyan bg-neon-cyan/[0.07]' : 'border-white/10 hover:border-white/25'}`}>
-                  {suggested && <span className="absolute -top-2 right-1.5 text-[0.6rem] rounded bg-cyber-dark border border-neon-magenta/60 text-neon-magenta px-1 leading-4">★ PICK</span>}
+                  {suggested && <span className="absolute -top-2 right-1.5 text-[0.64rem] rounded bg-cyber-dark border border-neon-magenta/60 text-neon-magenta px-1 leading-4">★ PICK</span>}
                   <span className={`block font-mono font-bold text-sm tracking-label ${selected ? 'text-neon-cyan' : 'text-slate-200'}`}>{t.label.toUpperCase()}</span>
                   <span className="block text-[0.7rem] text-slate-400">{t.resolution}{t.fps}</span>
                   <span className="block text-[0.7rem] text-slate-500 truncate" title={t.gpuClass}>{t.gpuShort}</span>
-                  <span className="block text-[0.66rem] text-slate-500 truncate" title="Rough gaming-PC equivalent (datacenter GPUs differ)">{TIER_CONSUMER[t.id]}</span>
+                  <span className="block text-[0.7rem] text-slate-500 truncate" title="Rough gaming-PC equivalent (datacenter GPUs differ)">{TIER_CONSUMER[t.id]}</span>
                   <span className="block mt-1 text-sm text-slate-100 tabular-nums">{pick ? <>{money(pick.totalPerHour)}<span className="text-slate-500 text-[0.7rem]">/h</span></> : <span className="text-slate-500 text-xs">over budget</span>}</span>
                   {pick && <span className={`block text-[0.7rem] tabular-nums ${RATING[pick.latencyRating].className}`}>~{pick.latencyMs} ms</span>}
                   {spot && pick?.spotOffer && pick.spot ? (
                     <span className="block mt-1"><DiscountBadge pct={pick.spotOffer.discountPct} deal={pick.spotOffer.deal} source={pick.spotOffer.source} compact /></span>
                   ) : !spot && t.spotFrom ? (
-                    <span className="block mt-1 text-[0.66rem] text-slate-500 tabular-nums">spot {money(t.spotFrom.totalPerHour)}{t.spotFrom.deal === 'deep' ? ' 🔥' : ''}</span>
+                    <span className="block mt-1 text-[0.7rem] text-slate-500 tabular-nums">spot {money(t.spotFrom.totalPerHour)}{t.spotFrom.deal === 'deep' ? ' 🔥' : ''}</span>
                   ) : null}
                 </button>
               );
@@ -464,7 +464,7 @@ export default function RecommendationsPage() {
                   ))}
                 </ol>
               )}
-              <p className="text-[0.68rem] text-slate-500">
+              <p className="text-[0.72rem] text-slate-500">
                 Ping is estimated from distance; real numbers depend on your internet provider. Price = machine{spot ? ' (spot)' : ''} + data streamed to you at {tier.resolution}{tier.fps} (~{tier.gbPerHour} GB/h). Estimates exclude tax and disk storage.{spot && ' Spot discounts marked “est.” are our assumption (Google publishes no live feed); others are live from the cloud or, for Oracle, its fixed 50%.'}
                 {tier.overBudget > 0 && <> {tier.overBudget} more region{tier.overBudget === 1 ? '' : 's'} hidden over your budget.</>}
                 {tier.tooFar > 0 && <> {tier.tooFar} far-away region{tier.tooFar === 1 ? '' : 's'} (over 80 ms) hidden.</>}
@@ -492,7 +492,7 @@ function OptionRow({ option: o, rank, tier, onLaunch, signedIn, showSpot, access
         <div className="min-w-0 flex-1">
           <p className="text-sm text-slate-100 leading-tight">
             {o.regionName} <span className="text-slate-500 text-xs">· {o.providerLabel}</span>
-            {tags.map((t) => <span key={t} className="ml-1.5 align-middle whitespace-nowrap text-[0.6rem] uppercase tracking-label rounded border border-neon-magenta/40 text-neon-magenta px-1">{t}</span>)}
+            {tags.map((t) => <span key={t} className="ml-1.5 align-middle whitespace-nowrap text-[0.64rem] uppercase tracking-label rounded border border-neon-magenta/40 text-neon-magenta px-1">{t}</span>)}
           </p>
           <p className="text-[0.7rem] text-slate-500 truncate">{o.region} · {o.shapeLabel}{GPU_COMPARE[o.gpuModel] && <span className="text-slate-400" title={`Rough gaming-PC equivalent of the ${o.gpuModel}: ${GPU_COMPARE[o.gpuModel].consumer}. Datacenter GPUs run lower clocks and differ in drivers; an idea only.`}> · {GPU_COMPARE[o.gpuModel].short}</span>}</p>
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs tabular-nums">
@@ -541,7 +541,7 @@ function AccessNote({ access: a, spot, rank, gpu }: { access: RegionAccess; spot
   if (spotOnly) {
     return (
       <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.7rem] text-slate-400">
-        <span className={`inline-flex items-center gap-1 rounded border px-1 uppercase tracking-label text-[0.6rem] ${ACCESS_STYLE['no-quota'].className}`}><span aria-hidden className="font-bold">!</span>Spot only</span>
+        <span className={`inline-flex items-center gap-1 rounded border px-1 uppercase tracking-label text-[0.64rem] ${ACCESS_STYLE['no-quota'].className}`}><span aria-hidden className="font-bold">!</span>Spot only</span>
         <span>Your quota here only covers spot machines — turn on spot, or</span>
         <Link href="/regions" className="text-neon-cyan hover:underline whitespace-nowrap">raise on-demand</Link>
       </p>
@@ -558,7 +558,7 @@ function AccessNote({ access: a, spot, rank, gpu }: { access: RegionAccess; spot
     : 'Couldn’t check your access here';
   return (
     <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.7rem] text-slate-400">
-      <span className={`inline-flex items-center gap-1 rounded border px-1 uppercase tracking-label text-[0.6rem] ${spotShort ? ACCESS_STYLE['no-quota'].className : st.className}`}>
+      <span className={`inline-flex items-center gap-1 rounded border px-1 uppercase tracking-label text-[0.64rem] ${spotShort ? ACCESS_STYLE['no-quota'].className : st.className}`}>
         <span aria-hidden className="font-bold">{spotShort ? '!' : st.icon}</span>{spotShort ? 'Spot quota' : st.short}
       </span>
       <span>{why} —</span>
@@ -712,7 +712,7 @@ function GpuCompareNote() {
       <summary className="cursor-pointer text-slate-300">How do these GPUs compare to a gaming PC? <span className="text-slate-500">(rough idea)</span></summary>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full text-left tabular-nums">
-          <thead className="text-[0.62rem] uppercase tracking-label text-slate-500">
+          <thead className="text-[0.66rem] uppercase tracking-label text-slate-500">
             <tr><th className="py-1 pr-3 font-normal">Cloud GPU</th><th className="py-1 pr-3 font-normal">≈ Gaming card</th><th className="py-1 pr-3 font-normal">vs RTX 3080 Ti</th><th className="py-1 pr-3 font-normal">Memory · power</th><th className="py-1 font-normal">Where</th></tr>
           </thead>
           <tbody>

@@ -72,7 +72,7 @@ export default function UserMenu() {
       <button
         type="button"
         onClick={handleSignOut}
-        className="text-[0.68rem] uppercase tracking-label text-slate-400 hover:text-neon-pink border border-white/10 hover:border-neon-pink/40 rounded-sm px-2 py-0.5 transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-1 focus-visible:ring-neon-pink/60"
+        className="text-[0.72rem] uppercase tracking-label text-slate-400 hover:text-neon-pink border border-white/10 hover:border-neon-pink/40 rounded-sm px-2 py-0.5 transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-1 focus-visible:ring-neon-pink/60"
       >
         Sign out
       </button>

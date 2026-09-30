@@ -94,7 +94,7 @@ function ShapeIcon({ provider, size = 14 }: { provider: string; size?: number })
 function StatusChip({ status }: { status: string }) {
   const st = STATUS_STYLE[vmState(status)];
   return (
-    <span className="inline-flex items-center gap-1 text-[0.66rem] uppercase tracking-label rounded border px-1.5 py-px" style={{ borderColor: `${st.color}80`, color: '#e2e8f0' }}>
+    <span className="inline-flex items-center gap-1 text-[0.7rem] uppercase tracking-label rounded border px-1.5 py-px" style={{ borderColor: `${st.color}80`, color: '#e2e8f0' }}>
       <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: st.color }} />{status}
     </span>
   );
@@ -105,7 +105,7 @@ function Tile({ label, value, sub, warn }: { label: string; value: string; sub?:
     <div className={`rounded border px-3 py-2.5 ${warn ? 'border-neon-pink/40 bg-neon-pink/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
       <p className="label">{label}</p>
       <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
-      {sub && <p className="text-[0.68rem] text-slate-500 mt-0.5">{sub}</p>}
+      {sub && <p className="text-[0.72rem] text-slate-500 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -332,7 +332,7 @@ export default function InfrastructureMapPage() {
 
         {/* ---- Below the map: details (left, wider) + legend ---- */}
         <div className="grid lg:grid-cols-[minmax(0,1fr),minmax(0,420px)] gap-4">
-          <div className="lg:order-2 flex flex-wrap content-start gap-x-4 gap-y-1 text-[0.68rem] text-slate-400">
+          <div className="lg:order-2 flex flex-wrap content-start gap-x-4 gap-y-1 text-[0.72rem] text-slate-400">
             {(Object.keys(STATUS_STYLE) as GroupStatus[]).map((k) => (
               <span key={k} className="inline-flex items-center gap-1.5">
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><circle cx="7" cy="7" r="5" fill="none" stroke={STATUS_STYLE[k].color} strokeWidth="2" strokeDasharray={STATUS_STYLE[k].dashed ? '2 2' : undefined} /></svg>
@@ -388,7 +388,7 @@ export default function InfrastructureMapPage() {
                   <li key={`${it.provider}-${it.id}`} className={`rounded border p-2.5 ${it.orphan ? 'border-neon-pink/40' : 'border-white/10'}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-[0.66rem] uppercase tracking-label text-slate-500">{TYPE_LABEL[it.type] || it.type}{it.zone ? ` · ${it.zone}` : ''}</p>
+                        <p className="text-[0.7rem] uppercase tracking-label text-slate-500">{TYPE_LABEL[it.type] || it.type}{it.zone ? ` · ${it.zone}` : ''}</p>
                         <p className="text-xs text-slate-100 break-all">{it.name}</p>
                       </div>
                       <StatusChip status={it.status} />

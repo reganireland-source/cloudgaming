@@ -62,7 +62,7 @@ function WaysToConnect({ info }: { info: ConnectionInfo }) {
     <div className="rounded-md border border-white/10 bg-white/[0.02] p-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-sm font-semibold text-slate-100">{title}</span>
-        <span className={`text-[0.6rem] uppercase tracking-label rounded border px-1.5 py-px ${badgeCls}`}>{badge}</span>
+        <span className={`text-[0.64rem] uppercase tracking-label rounded border px-1.5 py-px ${badgeCls}`}>{badge}</span>
       </div>
       <p className="text-xs text-slate-400 leading-relaxed flex-1">{children}</p>
       {href !== undefined && (available && href
@@ -108,7 +108,7 @@ function CopyButton({ value }: { value: string }) {
           setTimeout(() => setCopied(false), 1500);
         } catch { /* clipboard blocked: the text is selectable anyway */ }
       }}
-      className="text-[0.66rem] uppercase tracking-label text-neon-cyan/70 hover:text-neon-cyan"
+      className="text-[0.7rem] uppercase tracking-label text-neon-cyan/70 hover:text-neon-cyan"
     >
       {copied ? 'copied ✓' : 'copy'}
     </button>
@@ -229,7 +229,7 @@ export default function MachineConnectionPanel({
           <span className="font-mono text-slate-100">{info.password ? (showPassword ? info.password : '••••••••••••') : '—'}</span>
           {info.password && (
             <>
-              <button type="button" onClick={() => setShowPassword((v) => !v)} className="text-[0.66rem] uppercase tracking-label text-neon-cyan/70 hover:text-neon-cyan">
+              <button type="button" onClick={() => setShowPassword((v) => !v)} className="text-[0.7rem] uppercase tracking-label text-neon-cyan/70 hover:text-neon-cyan">
                 {showPassword ? 'hide' : 'show'}
               </button>
               <CopyButton value={info.password} />

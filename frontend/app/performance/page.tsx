@@ -139,7 +139,7 @@ export default function PerformancePage() {
                       <p className="text-sm text-slate-100 truncate">{m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</p>
                       <p className="text-[0.7rem] text-slate-500">{r?.cloud || m.provider.toUpperCase()} · {r?.name || m.region}{m.spot ? ' · spot' : ''}</p>
                     </div>
-                    <span className={`shrink-0 rounded border px-1.5 text-[0.66rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'border-white/20 text-slate-400'}`}>{m.status}</span>
+                    <span className={`shrink-0 rounded border px-1.5 text-[0.7rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'border-white/20 text-slate-400'}`}>{m.status}</span>
                   </div>
                   <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <Stat label="Up for" value={m.status === 'running' ? since(m.last_started) : '—'} />
@@ -173,7 +173,7 @@ export default function PerformancePage() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[0.62rem] uppercase tracking-label text-slate-500">{label}</dt>
+      <dt className="text-[0.66rem] uppercase tracking-label text-slate-500">{label}</dt>
       <dd className="text-slate-200 tabular-nums truncate">{value}</dd>
     </div>
   );

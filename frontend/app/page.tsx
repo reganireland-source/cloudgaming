@@ -138,7 +138,7 @@ export default function Dashboard() {
                         <span className="block text-[0.7rem] text-slate-500 truncate">{c.label} · {m.region}{m.spot ? ' · spot' : ''}</span>
                       </span>
                       <span className="shrink-0 text-right">
-                        <span className={`block text-[0.66rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'text-neon-cyan'}`}>{m.status}</span>
+                        <span className={`block text-[0.7rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'text-neon-cyan'}`}>{m.status}</span>
                         <span className="block text-[0.7rem] text-slate-400 tabular-nums">{money(m.cost_per_hour)}/h</span>
                       </span>
                     </Link>
@@ -178,7 +178,7 @@ function Tile({ label, value, sub, warn, href }: { label: string; value: string;
     <div className={`h-full rounded border px-3 py-2.5 ${warn ? 'border-neon-pink/40 bg-neon-pink/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
       <p className="label">{label}</p>
       <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
-      <p className="text-[0.68rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
+      <p className="text-[0.72rem] text-slate-500 mt-0.5 leading-snug">{sub}</p>
     </div>
   );
   return href ? <Link href={href} className="block">{body}</Link> : body;

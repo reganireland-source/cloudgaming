@@ -11,7 +11,7 @@
   --line: rgba(95, 215, 224, 0.14);
   --line-strong: rgba(95, 215, 224, 0.28);
   --text: #c4ceda;
-  --text-dim: #7d8a9a;
+  --text-dim: #8f9bac; /* ≈6.8:1 on --bg */
   --cyan: #5fd7e0;
   --magenta: #d487e8;
   --lime: #8fd694;

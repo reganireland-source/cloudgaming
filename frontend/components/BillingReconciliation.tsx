@@ -71,7 +71,7 @@ export default function BillingReconciliation({ data, alsoIn, onChanged }: { dat
       <div className="grid gap-2 lg:grid-cols-2">
         {data.clouds.map((c) => <CloudCard key={c.provider} c={c} alsoIn={alsoIn} rates={data.fx?.rates} onChanged={onChanged} />)}
       </div>
-      <p className="text-[0.68rem] text-slate-500 leading-relaxed">
+      <p className="text-[0.72rem] text-slate-500 leading-relaxed">
         Why they can differ: the bill may include things the app doesn&apos;t price (taxes, data transfer, IP addresses, other resources in the account), credits and discounts, and
         a price that differs from the list price. {data.fx
           ? <>Conversions use the {data.fx.source.split(' (')[0]} rate of {data.fx.date} (1 USD = {Object.entries(data.fx.rates).filter(([k]) => k !== 'USD' && data.clouds.some((c) => c.currency === k)).map(([k, v]) => `${v} ${k}`).join(', ') || 'see picker'}).</>
@@ -88,7 +88,7 @@ function CloudCard({ c, alsoIn, rates, onChanged }: { c: CloudRecon; alsoIn: str
     <div className={`rounded-lg border ${tone} bg-white/[0.02] p-3 space-y-2 min-w-0`}>
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-2 text-sm text-slate-100"><CloudLogo provider={c.provider} size={18} />{c.label}</span>
-        <span className="text-[0.62rem] uppercase tracking-label text-slate-500">
+        <span className="text-[0.66rem] uppercase tracking-label text-slate-500">
           {c.status === 'ok' ? (c.currency ? `billed in ${c.currency}` : 'connected') : c.status === 'not-connected' ? 'no keys' : c.status === 'needs-setup' ? 'needs setup' : 'couldn’t read'}
         </span>
       </div>
@@ -103,32 +103,32 @@ function CloudCard({ c, alsoIn, rates, onChanged }: { c: CloudRecon; alsoIn: str
         <>
           <dl className="grid grid-cols-3 gap-2 text-xs">
             <div className="min-w-0">
-              <dt className="text-[0.62rem] uppercase tracking-label text-slate-500">Billed</dt>
+              <dt className="text-[0.66rem] uppercase tracking-label text-slate-500">Billed</dt>
               <dd className="text-slate-100 tabular-nums">{money(c.actual.amount, c.actual.currency)}</dd>
-              {c.actual.currency !== 'USD' && <dd className="text-[0.66rem] text-slate-500 tabular-nums">{c.actual.usd != null ? `≈ ${usd(c.actual.usd)}` : 'no rate'}</dd>}
+              {c.actual.currency !== 'USD' && <dd className="text-[0.7rem] text-slate-500 tabular-nums">{c.actual.usd != null ? `≈ ${usd(c.actual.usd)}` : 'no rate'}</dd>}
             </div>
             <div className="min-w-0">
-              <dt className="text-[0.62rem] uppercase tracking-label text-slate-500">App estimate</dt>
+              <dt className="text-[0.66rem] uppercase tracking-label text-slate-500">App estimate</dt>
               <dd className="text-slate-300 tabular-nums">{usd(c.estimateSameDaysUsd)}</dd>
-              <dd className="text-[0.66rem] text-slate-500">same days</dd>
+              <dd className="text-[0.7rem] text-slate-500">same days</dd>
             </div>
             <div className="min-w-0">
-              <dt className="text-[0.62rem] uppercase tracking-label text-slate-500">Difference</dt>
+              <dt className="text-[0.66rem] uppercase tracking-label text-slate-500">Difference</dt>
               <dd className={`tabular-nums ${diff == null ? 'text-slate-500' : Math.abs(c.differencePct ?? 0) <= 10 ? 'text-neon-lime' : 'text-neon-amber'}`}>
                 {diff == null ? '—' : `${diff >= 0 ? '+' : '−'}${usd(Math.abs(diff))}`}
               </dd>
-              <dd className="text-[0.66rem] text-slate-500">{c.differencePct == null ? '' : `${c.differencePct >= 0 ? '+' : ''}${c.differencePct}% vs estimate`}</dd>
+              <dd className="text-[0.7rem] text-slate-500">{c.differencePct == null ? '' : `${c.differencePct >= 0 ? '+' : ''}${c.differencePct}% vs estimate`}</dd>
             </div>
           </dl>
           {alsoIn && alsoIn !== 'USD' && alsoIn !== c.actual.currency && c.actual.usd != null && (
-            <p className="text-[0.66rem] text-slate-500">Billed ≈ {money(fromUsd(c.actual.usd, alsoIn, rates) ?? 0, alsoIn)}</p>
+            <p className="text-[0.7rem] text-slate-500">Billed ≈ {money(fromUsd(c.actual.usd, alsoIn, rates) ?? 0, alsoIn)}</p>
           )}
-          <p className="text-[0.68rem] text-slate-500 leading-snug">
+          <p className="text-[0.72rem] text-slate-500 leading-snug">
             {c.scopeNote} · 1 {fmtDate(c.daily[0]?.date)} – {fmtDate(c.dataThrough)} (the cloud has reported up to here) · checked {ago(c.fetchedAt)}
             {c.accountActual && c.scope !== 'account' && <> · whole account: {money(c.accountActual.amount, c.accountActual.currency)}</>}
           </p>
-          {c.scope === 'account' && <p className="text-[0.68rem] text-neon-amber">Billed covers the whole account, so it includes anything else you run there.</p>}
-          {(c.notes || []).map((n, i) => <p key={i} className="text-[0.68rem] text-slate-400">ℹ {n}</p>)}
+          {c.scope === 'account' && <p className="text-[0.72rem] text-neon-amber">Billed covers the whole account, so it includes anything else you run there.</p>}
+          {(c.notes || []).map((n, i) => <p key={i} className="text-[0.72rem] text-slate-400">ℹ {n}</p>)}
         </>
       )}
     </div>
@@ -148,7 +148,7 @@ function SetupNeeded({ c, onChanged }: { c: CloudRecon; onChanged: () => void })
       {c.error?.explanation && <p className="text-slate-400">{c.error.explanation}</p>}
       {!!c.error?.fixes?.length && (
         <ol className="list-decimal pl-4 space-y-0.5 text-slate-300">
-          {c.error.fixes.map((f, i) => <li key={i} className={/^[{a-z]+ |^\{|^az |^gcloud |^Allow /.test(f) ? 'font-mono text-[0.66rem] break-all' : ''}>{f}</li>)}
+          {c.error.fixes.map((f, i) => <li key={i} className={/^[{a-z]+ |^\{|^az |^gcloud |^Allow /.test(f) ? 'font-mono text-[0.7rem] break-all' : ''}>{f}</li>)}
         </ol>
       )}
       {c.error?.consoleUrl && <a href={c.error.consoleUrl} target="_blank" rel="noreferrer" className="inline-block text-neon-cyan hover:underline">{c.error.consoleLabel || 'Open the console'} ↗</a>}

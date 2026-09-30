@@ -144,7 +144,7 @@ export default function PreflightPage() {
                             <dt className="flex items-center gap-2">
                               <span className={v.set ? 'text-neon-lime' : 'text-neon-amber'} aria-label={v.set ? 'set' : 'not set'}>{v.set ? '✓' : '○'}</span>
                               <code className="text-slate-100">{v.name}</code>
-                              <span className="text-[0.66rem] text-slate-500">{v.set ? 'set' : 'not set'}</span>
+                              <span className="text-[0.7rem] text-slate-500">{v.set ? 'set' : 'not set'}</span>
                             </dt>
                             <dd className="pl-5 text-slate-300">= {v.value}</dd>
                             <dd className="pl-5 text-slate-500">From: {v.where}</dd>

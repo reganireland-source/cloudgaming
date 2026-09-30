@@ -427,7 +427,7 @@ function CliBlock({ shell, href, code, note }: { shell: string; href: string; co
             {copied ? 'Copied' : 'Copy commands'}
           </button>
         </div>
-        <pre className="overflow-x-auto rounded bg-black/50 border border-white/10 p-2.5 text-[0.68rem] leading-relaxed text-slate-200"><code className="block whitespace-pre !bg-transparent !border-0 !p-0 !shadow-none">{code}</code></pre>
+        <pre className="overflow-x-auto rounded bg-black/50 border border-white/10 p-2.5 text-[0.72rem] leading-relaxed text-slate-200"><code className="block whitespace-pre !bg-transparent !border-0 !p-0 !shadow-none">{code}</code></pre>
         {note && <p className="text-[0.7rem] text-slate-400">{note}</p>}
       </div>
     </details>
@@ -585,7 +585,7 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
       {/* ---- Big screen (experimental): extra quota, if any ---- */}
       <section className="mb-6 rounded border border-neon-magenta/30 bg-neon-magenta/[0.04] p-4">
         <h4 className="text-[0.8rem] font-semibold mb-1 text-neon-magenta">
-          <span className="mr-1.5 inline-block rounded border border-neon-magenta/50 px-1 text-[0.6rem] uppercase tracking-label align-middle">Experimental</span>
+          <span className="mr-1.5 inline-block rounded border border-neon-magenta/50 px-1 text-[0.64rem] uppercase tracking-label align-middle">Experimental</span>
           Big screen (up to 4096×2160){guide.bigScreen.available ? '' : ' — not available'}
         </h4>
         <p className="text-xs text-slate-300 mb-2 leading-relaxed">{guide.bigScreen.summary}</p>

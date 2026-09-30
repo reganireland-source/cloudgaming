@@ -88,7 +88,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
     <div className="rounded border border-white/10 bg-white/[0.02] px-3 py-2.5">
       <p className="label">{label}</p>
       <p className="text-lg text-slate-100 tabular-nums mt-0.5">{value}</p>
-      {sub && <p className="text-[0.68rem] text-slate-500 mt-0.5">{sub}</p>}
+      {sub && <p className="text-[0.72rem] text-slate-500 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -134,7 +134,7 @@ function BarChart({
   return (
     <div className="relative">
       {/* Hover readout — text in text colours, never the bar colour. */}
-      <p className="text-[0.68rem] text-slate-400 h-4 mb-1 tabular-nums">
+      <p className="text-[0.72rem] text-slate-400 h-4 mb-1 tabular-nums">
         {h ? `${h.label} · ${h.failed ? '✗ failed' : `${h.value} ${unit}`}` : `max ${Math.round(max)} ${unit} · hover a bar for details`}
       </p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label={`Bar chart, ${points.length} values in ${unit}`}>
@@ -161,8 +161,8 @@ function BarChart({
           );
         })}
         {/* Oldest time label, unless it would collide with the newest one. */}
-        {offset < W - 140 && <text x={offset} y={H - 3} fontSize={9} fill="#64748b">{points[0].label}</text>}
-        <text x={W} y={H - 3} fontSize={9} fill="#64748b" textAnchor="end">{points[points.length - 1].label}</text>
+        {offset < W - 140 && <text x={offset} y={H - 3} fontSize={9} fill="#8492a6">{points[0].label}</text>}
+        <text x={W} y={H - 3} fontSize={9} fill="#8492a6" textAnchor="end">{points[points.length - 1].label}</text>
       </svg>
     </div>
   );
@@ -273,7 +273,7 @@ export default function StatusDetailPanel({ initial, onClose }: { initial: Light
         <div className="flex items-center justify-between border-b border-white/10 px-3 sm:px-5 py-3 sticky top-0 bg-cyber-dark z-10">
           <h2 className="text-sm tracking-label font-bold font-mono neon-text whitespace-nowrap">[ SYSTEM_STATUS ]</h2>
           <div className="flex items-center gap-3 sm:gap-4">
-            {details && <span className="text-[0.66rem] text-slate-500 hidden xs:inline">updated {time(details.generatedAt)} · every 10 s</span>}
+            {details && <span className="text-[0.7rem] text-slate-500 hidden xs:inline">updated {time(details.generatedAt)} · every 10 s</span>}
             <button onClick={onClose} className="text-slate-400 hover:text-slate-100 text-sm font-mono whitespace-nowrap">[ CLOSE ]</button>
           </div>
         </div>
@@ -284,7 +284,7 @@ export default function StatusDetailPanel({ initial, onClose }: { initial: Light
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className={`px-3 py-1.5 text-[0.68rem] uppercase tracking-label border-b-2 -mb-px ${
+              className={`px-3 py-1.5 text-[0.72rem] uppercase tracking-label border-b-2 -mb-px ${
                 tab === t.key ? 'border-neon-cyan text-neon-cyan' : 'border-transparent text-slate-500 hover:text-slate-300'
               }`}
             >
@@ -339,7 +339,7 @@ export default function StatusDetailPanel({ initial, onClose }: { initial: Light
                   </ul>
                 </div>
               </div>
-              <p className="text-[0.68rem] text-slate-500">Counts reset when the backend restarts (each Railway deploy).</p>
+              <p className="text-[0.72rem] text-slate-500">Counts reset when the backend restarts (each Railway deploy).</p>
             </>
           )}
 

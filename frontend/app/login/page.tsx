@@ -453,7 +453,7 @@ function LoginInner() {
 
       {/* "or" divider — only when there are social buttons above it */}
       {anySocial && !providersLoading && (
-        <div className="flex items-center gap-3 mb-5 text-[0.65rem] uppercase tracking-label text-slate-600" aria-hidden="true">
+        <div className="flex items-center gap-3 mb-5 text-[0.68rem] uppercase tracking-label text-slate-600" aria-hidden="true">
           <span className="flex-1 h-px bg-white/[0.08]" />
           or with email
           <span className="flex-1 h-px bg-white/[0.08]" />
@@ -538,7 +538,7 @@ function LoginInner() {
             <button
               type="button"
               onClick={() => setShowPassword((s) => !s)}
-              className="text-[0.68rem] uppercase tracking-label text-slate-500 hover:text-neon-cyan focus:outline-none focus-visible:text-neon-cyan"
+              className="text-[0.72rem] uppercase tracking-label text-slate-500 hover:text-neon-cyan focus:outline-none focus-visible:text-neon-cyan"
               aria-pressed={showPassword}
               aria-controls="password"
             >
@@ -678,7 +678,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <span className="text-neon-lime" aria-hidden="true">[ENC] </span>
           Your cloud keys are encrypted before they&apos;re stored and are never shown again after saving.
         </p>
-        <p className="mt-2 text-center text-[0.68rem] text-slate-600">
+        <p className="mt-2 text-center text-[0.72rem] text-slate-600">
           <Link href="/" className="hover:text-slate-300">← Back to dashboard</Link>
         </p>
       </div>

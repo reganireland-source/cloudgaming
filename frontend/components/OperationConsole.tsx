@@ -128,7 +128,7 @@ export default function OperationConsole({
       <div className="rounded-md border border-white/10 bg-black/40">
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
           <span className="label">Live log</span>
-          <span className={`text-[0.68rem] uppercase tracking-label ${
+          <span className={`text-[0.72rem] uppercase tracking-label ${
             running ? 'text-neon-cyan' : op?.status === 'succeeded' ? 'text-neon-lime' : 'text-neon-pink'
           }`}>
             {running ? (
@@ -149,7 +149,7 @@ export default function OperationConsole({
               <span className={COLOUR[e.level]}>
                 {e.message}
                 {e.detail && e.level !== 'info' && (
-                  <span className="block text-slate-500 text-[0.68rem] break-all">{e.detail}</span>
+                  <span className="block text-slate-500 text-[0.72rem] break-all">{e.detail}</span>
                 )}
               </span>
             </div>

@@ -277,7 +277,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                               <span className="text-neon-lime tabular-nums">≈USD {p?.onDemand.toFixed(2)}/h</span>
                             </span>
                             {p?.spot != null && (
-                              <span className="block mt-0.5 text-[0.68rem] text-slate-500 tabular-nums">
+                              <span className="block mt-0.5 text-[0.72rem] text-slate-500 tabular-nums">
                                 spot ≈USD {p.spot.toFixed(2)}/h
                                 {p.spotDiscountPct != null && <> · −{p.spotDiscountPct}%{p.spotSource === 'estimate' ? ' est.' : ''}{p.spotSource === 'live' && p.spotDiscountPct >= 65 ? ' 🔥' : ''}</>}
                               </span>
@@ -296,7 +296,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       <span>
                         Use a <strong>{current.spotLabel}</strong> — about USD {price.spot.toFixed(2)}/h instead of USD {price.onDemand.toFixed(2)}/h
                         {price.spotDiscountPct != null && (
-                          <span className={`ml-1.5 inline-block whitespace-nowrap rounded border px-1 text-[0.66rem] uppercase tracking-label align-middle ${
+                          <span className={`ml-1.5 inline-block whitespace-nowrap rounded border px-1 text-[0.7rem] uppercase tracking-label align-middle ${
                             price.spotSource === 'live' && price.spotDiscountPct >= 65 ? 'border-neon-lime/60 bg-neon-lime/10 text-neon-lime'
                             : price.spotSource === 'live' && price.spotDiscountPct >= 55 ? 'border-neon-cyan/50 bg-neon-cyan/10 text-neon-cyan' : 'border-white/15 text-slate-300'}`}>
                             {price.spotSource === 'live' && price.spotDiscountPct >= 65 ? '🔥 ' : ''}−{price.spotDiscountPct}%
@@ -317,7 +317,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     <label className={`flex items-start gap-3 text-sm rounded border p-3 ${bigOk ? 'text-slate-300 border-neon-magenta/30 cursor-pointer' : 'text-slate-500 border-white/5'}`}>
                       <input type="checkbox" className="mt-1" disabled={!bigOk} checked={bigScreen && bigOk} onChange={(e) => setBigScreen(e.target.checked)} />
                       <span>
-                        <span className="mr-1.5 inline-block rounded border border-neon-magenta/50 text-neon-magenta px-1 text-[0.62rem] uppercase tracking-label align-middle">Experimental</span>
+                        <span className="mr-1.5 inline-block rounded border border-neon-magenta/50 text-neon-magenta px-1 text-[0.66rem] uppercase tracking-label align-middle">Experimental</span>
                         <strong>Big screen</strong> — screens up to 4096×2160 (e.g. a 3440×1440 ultrawide at full size) instead of 2560×1600
                         {bigOk && current.bigScreen.extraPerHour > 0 && <> · <span className="text-neon-amber">+≈USD {current.bigScreen.extraPerHour.toFixed(2)}/h</span></>}
                         <span className="block text-xs text-slate-500 mt-0.5">

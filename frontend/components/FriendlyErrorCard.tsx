@@ -55,7 +55,7 @@ export default function FriendlyErrorCard({
       </p>
       {friendly?.cause && CAUSE[friendly.cause] && (
         <p className="mt-2 rounded border border-white/15 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 leading-relaxed">
-          <span className="mr-1.5 rounded bg-neon-amber/15 border border-neon-amber/50 px-1 uppercase tracking-label text-[0.62rem] text-neon-amber">Cause: {CAUSE[friendly.cause].label}</span>
+          <span className="mr-1.5 rounded bg-neon-amber/15 border border-neon-amber/50 px-1 uppercase tracking-label text-[0.66rem] text-neon-amber">Cause: {CAUSE[friendly.cause].label}</span>
           {CAUSE[friendly.cause].text}
           {CAUSE[friendly.cause].link && <> <Link href={CAUSE[friendly.cause].link!.href} className="text-neon-cyan hover:underline whitespace-nowrap">{CAUSE[friendly.cause].link!.label} →</Link></>}
         </p>

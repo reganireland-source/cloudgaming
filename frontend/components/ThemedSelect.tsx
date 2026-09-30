@@ -100,7 +100,7 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
           {current?.label ?? '—'}
           {current?.aside && <span className="ml-2 text-slate-500 tabular-nums">{current.aside}</span>}
         </span>
-        <span aria-hidden className={`text-neon-cyan/70 text-[0.6rem] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
+        <span aria-hidden className={`text-neon-cyan/70 text-[0.64rem] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
       {open && (
         <ul ref={list} id={`${id}-list`} role="listbox" aria-label={ariaLabel} tabIndex={-1}
@@ -112,7 +112,7 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
             const selected = o.value === value;
             return (
               <li key={o.value} role="presentation">
-                {header && <p className="px-3 pt-2 pb-1 text-[0.6rem] uppercase tracking-label text-slate-500">{header}</p>}
+                {header && <p className="px-3 pt-2 pb-1 text-[0.64rem] uppercase tracking-label text-slate-500">{header}</p>}
                 <div role="option" aria-selected={selected} aria-disabled={o.disabled || undefined} data-i={i}
                   onMouseEnter={() => !o.disabled && setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(i)}
                   className={`flex items-start gap-2 px-3 py-1.5 text-xs cursor-pointer border-l-2 ${selected && hasIcons ? 'border-neon-cyan bg-neon-cyan/[0.06]' : 'border-transparent'} ${o.disabled ? 'opacity-40 cursor-not-allowed' : ''} ${i === active ? 'bg-neon-cyan/10 text-slate-100' : 'text-slate-300'}`}>
@@ -120,9 +120,9 @@ export default function ThemedSelect({ value, options, onChange, ariaLabel, clas
                   {o.icon && <span aria-hidden className={`w-3 shrink-0 text-center ${o.iconClass || ''}`}>{o.icon}</span>}
                   <span className="min-w-0 flex-1">
                     <span className={selected ? 'text-neon-cyan' : ''}>{o.label}</span>
-                    {o.hint && <span className="block text-[0.66rem] text-slate-500">{o.hint}</span>}
+                    {o.hint && <span className="block text-[0.7rem] text-slate-500">{o.hint}</span>}
                   </span>
-                  {o.aside && <span className="shrink-0 pl-3 text-[0.68rem] text-slate-500 tabular-nums">{o.aside}</span>}
+                  {o.aside && <span className="shrink-0 pl-3 text-[0.72rem] text-slate-500 tabular-nums">{o.aside}</span>}
                 </div>
               </li>
             );

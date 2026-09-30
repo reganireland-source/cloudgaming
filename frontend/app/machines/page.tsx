@@ -175,7 +175,7 @@ const TIER_STYLE: Record<TierId, { label: string; cls: string; bars: number; not
 function TierBadge({ shape }: { shape: ShapeInfo }) {
   const t = TIER_STYLE[tierOf(shape)];
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[0.62rem] uppercase tracking-label border rounded px-1.5 py-0.5 ${t.cls}`}
+    <span className={`inline-flex items-center gap-1.5 text-[0.66rem] uppercase tracking-label border rounded px-1.5 py-0.5 ${t.cls}`}
       title={`${t.label} tier: ${shape.gpuModel} GPU · ${shape.vcpus} vCPU · ${shape.memoryGb} GB RAM — ${t.note}`}>
       <span aria-hidden className="inline-flex items-end gap-px h-2.5">
         {[1, 2, 3].map((b) => <span key={b} className={`w-[3px] rounded-sm ${b <= t.bars ? 'bg-current' : 'bg-current opacity-25'}`} style={{ height: `${b * 33}%` }} />)}
@@ -229,18 +229,18 @@ function MachineCard({
       <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-6">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-[0.66rem] uppercase tracking-label border rounded px-2 py-0.5 ${st.cls}`}>
+            <span className={`text-[0.7rem] uppercase tracking-label border rounded px-2 py-0.5 ${st.cls}`}>
               {BUSY.includes(machine.status) && <span className="inline-block w-1.5 h-1.5 rounded-full bg-neon-amber animate-pulse mr-1.5 align-middle" />}
               {st.text}
             </span>
             <span className="text-sm font-semibold text-slate-100">{machine.instance_type}</span>
             {shape && <TierBadge shape={shape} />}
             {machine.display_driver === 'grid' && (
-              <span className="text-[0.62rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"
+              <span className="text-[0.66rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"
                 title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">▣ big screen · experimental</span>
             )}
             <span className="text-xs text-slate-400">{PROVIDER_LABEL[machine.provider] || machine.provider} · {machine.region}{zone && zone !== machine.region ? ` · ${zone}` : ''}</span>
-            {machine.spot && <span className="text-[0.62rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>}
+            {machine.spot && <span className="text-[0.66rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>}
           </div>
           <p className="text-xs text-slate-500 mt-1">
             {st.hint}
@@ -269,7 +269,7 @@ function MachineCard({
             : 'Standard NVIDIA datacenter driver — screens up to 2560×1600. Launch with “Big screen” for more.'}>
             <p className="label">Screen</p>
             {machine.display_driver === 'grid'
-              ? <p className="text-neon-magenta tabular-nums">≤4096×2160 <span className="hidden sm:inline text-[0.6rem] uppercase tracking-label">big · exp</span></p>
+              ? <p className="text-neon-magenta tabular-nums">≤4096×2160 <span className="hidden sm:inline text-[0.64rem] uppercase tracking-label">big · exp</span></p>
               : <p className="text-slate-400 tabular-nums">≤2560×1600</p>}
           </div>
         </div>
@@ -415,7 +415,7 @@ function MachineCard({
             key={t}
             type="button"
             onClick={() => setTab(tab === t ? null : t)}
-            className={`px-3 py-1.5 text-[0.68rem] uppercase tracking-label border-b-2 -mb-px ${tab === t ? 'border-neon-cyan text-neon-cyan' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            className={`px-3 py-1.5 text-[0.72rem] uppercase tracking-label border-b-2 -mb-px ${tab === t ? 'border-neon-cyan text-neon-cyan' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
             {{ connect: 'Connect', architecture: 'Architecture', activity: 'Activity' }[t]}
           </button>

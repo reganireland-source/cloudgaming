@@ -33,6 +33,16 @@ module.exports = {
         'cyber-darker': '#080b11',
         'cyber-panel': '#111723',
         'cyber-line': '#1f2937',
+        // Secondary greys, lifted and cooled for the dark background: stock
+        // slate-500 was ~4:1 against it and faded out in small print. Same
+        // order as before (300 > 400 > 500 > 600), just readable:
+        // 400 ≈ 9:1, 500 ≈ 6:1 on the page (5.3:1 on cards), 600 ≈ 3.9:1
+        // (disabled / decoration only).
+        slate: {
+          400: '#a9b5c4',
+          500: '#8492a6',
+          600: '#63718a',
+        },
       },
       fontFamily: {
         'mono': ['"IBM Plex Mono"', 'ui-monospace', 'Menlo', 'monospace'],
