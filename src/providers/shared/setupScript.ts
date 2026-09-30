@@ -111,7 +111,7 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
   const pass = bashSafe(opts.sunshinePassword, 'Sunshine password');
   const passB64 = bashSafe(Buffer.from(pass).toString('base64'), 'Sunshine password', /^[A-Za-z0-9+/=]+$/);
   const minutes = Math.max(0, Math.min(24 * 60, Math.round(Number(opts.autoStopMinutes ?? 15)) || 0));
-  return SCRIPT_TEMPLATE
+  return compactScript(SCRIPT_TEMPLATE
     .split('__SUN_USER__').join(user)
     .split('__SUN_PASS_B64__').join(passB64)
     .split('__AUTOSTOP_MINUTES__').join(String(minutes))
@@ -122,8 +122,23 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__GRID_AZURE__').join(GRID_DRIVER.azure)
     .split('__GRID_GCP_PINNED__').join(GRID_DRIVER.gcpPinned)
     .split('__GRID_GCP__').join(GRID_DRIVER.gcp)
-    .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE);
+    .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE));
 }
+
+/**
+ * Drop whole-line comments ("# ...", any indent) to keep the script under the
+ * clouds' user-data limits (AWS: 16 KB even gzipped; Oracle: 32 KB of
+ * metadata). The comments stay here in the source. Kept: the first line and
+ * every "#!" shebang (the heredoc'd helper scripts need theirs). Safe because
+ * no heredoc or multi-line string in the script has a meaningful "#" line;
+ * trailing comments after code are left alone.
+ */
+export function compactScript(script: string): string {
+  return script.split('\n').filter((line, i) => i === 0 || !/^\s*#(?!!)/.test(line)).join('\n');
+}
+
+/** EC2's user-data limit, in bytes before base64. */
+export const AWS_USER_DATA_LIMIT = 16384;
 
 // NOTE for editors: this is a String.raw template, so "${" must never appear
 // in the bash below (JavaScript would treat it as an insertion). Use $VAR

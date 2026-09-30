@@ -78,7 +78,7 @@ import {
   findShape,
 } from './aws/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
-import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import { AWS_USER_DATA_LIMIT, buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
 import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
 
 /** The parsed, checked credentials. */
@@ -474,16 +474,20 @@ export class AWSProvider extends CloudProvider {
     }
 
     // 4. The setup script, handed over as "user data". EC2 wants it base64-encoded.
-    // EC2 limits user data to 16 KB (before base64) and our script is ~14 KB,
-    // so it's gzip-compressed (~5 KB). cloud-init on Ubuntu detects gzip and
-    // unpacks it automatically.
-    const userData = zlib.gzipSync(buildSetupScript({
+    // EC2 limits user data to 16 KB (before base64) and our script is ~36 KB,
+    // so it's gzip-compressed (~12.5 KB). cloud-init on Ubuntu detects gzip
+    // and unpacks it automatically.
+    const gzipped = zlib.gzipSync(buildSetupScript({
       sunshineUsername: options.sunshineUsername,
       sunshinePassword: options.sunshinePassword,
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
       gridSource: 'aws',
-    })).toString('base64');
+    }), { level: 9 });
+    if (gzipped.length > AWS_USER_DATA_LIMIT) {
+      throw new Error(`The machine setup script is too big for AWS (${gzipped.length} of ${AWS_USER_DATA_LIMIT} bytes compressed). This is a bug in the app, not your account.`);
+    }
+    const userData = gzipped.toString('base64');
 
     // A short unique name, shown in the AWS console's Name column.
     const name = `cg-${crypto.randomBytes(4).toString('hex')}`;

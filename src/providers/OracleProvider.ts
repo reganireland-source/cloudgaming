@@ -77,6 +77,7 @@ import {
   findShape,
 } from './oracle/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
+import zlib from 'zlib';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
 import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
 
@@ -780,9 +781,10 @@ export class OracleProvider extends CloudProvider {
           sourceDetails: bootVolumeId
             ? { sourceType: 'bootVolume', bootVolumeId }
             : { sourceType: 'image', imageId: image!.id, bootVolumeSizeInGBs: options.diskSizeGb },
-          // cloud-init runs "user_data" on first boot. It must be base64.
-          // Only the setup script goes here — no other secrets in metadata.
-          metadata: options.script ? { user_data: Buffer.from(options.script, 'utf8').toString('base64') } : undefined,
+          // cloud-init runs "user_data" on first boot. It must be base64, and
+          // all metadata together is capped at 32 KB, so it's gzipped (cloud-init
+          // unpacks gzip itself). Only the setup script goes here — no other secrets.
+          metadata: options.script ? { user_data: zlib.gzipSync(Buffer.from(options.script, 'utf8'), { level: 9 }).toString('base64') } : undefined,
           preemptibleInstanceConfig: options.spot
             ? { preemptionAction: { type: 'TERMINATE', preserveBootVolume: false } }
             : undefined,
