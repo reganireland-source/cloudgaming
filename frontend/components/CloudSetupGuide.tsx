@@ -58,6 +58,13 @@ interface Guide {
     /** The same request from the command line, for the cloud's browser shell. */
     cli?: { shell: string; href: string; code: string; note?: string };
   };
+  /** EXPERIMENTAL "Big screen" (GRID driver, screens up to 4096×2160): extra quota / steps, if any. */
+  bigScreen: {
+    available: boolean;
+    summary: string;
+    steps: string[];
+    cli?: { shell: string; href: string; code: string; note?: string };
+  };
   warnings: string[];
 }
 
@@ -119,6 +126,41 @@ gcloud beta quotas info list --service=compute.googleapis.com --project=$P \\
 gcloud beta quotas preferences create --project=$P --service=compute.googleapis.com \\
   --quota-id=<ID from step 2> --preferred-value=1 --dimensions=region=$R \\
   --email=<your email> --justification="Personal cloud gaming VM, 1 GPU"`,
+      },
+    },
+    bigScreen: {
+      available: true,
+      summary: 'Big screen runs on Google\'s "vWS" (RTX Virtual Workstation) GPUs: the same T4 / L4 chips with NVIDIA\'s licensed GRID driver, billed about USD 0.20 per GPU-hour extra (estimate — see Google\'s GPU pricing). vWS GPUs have their OWN quota, separate from the normal GPU quota above: request it before launching with Big screen, or the launch fails with a quota error.',
+      steps: [
+        'IAM & Admin → Quotas & System Limits → filter "Virtual Workstation".',
+        'GOOD tier (T4): request "NVIDIA T4 Virtual Workstation GPUs" = 1 in your region. BETTER / BEST (L4): "NVIDIA L4 Virtual Workstation GPUs" = 1.',
+        'Spot big-screen machines also need the "Preemptible" version of the same vWS quota.',
+        '"GPUs (all regions)" must still be at least 1 (same as for normal machines).',
+        'Not every zone sells vWS GPUs: step 2 below shows where they are. Approval: minutes to 2 business days.',
+      ],
+      cli: {
+        shell: 'Cloud Shell', href: 'https://shell.cloud.google.com/',
+        note: 'Step 3 lists the exact vWS quota IDs (T4 / L4, on-demand / preemptible); run step 4 once per ID you need.',
+        code: `P=<your-project-id>
+R=asia-southeast1   # your region
+
+# 1. Current vWS GPU limits in the region (0 = request an increase)
+gcloud compute regions describe $R --project $P --flatten=quotas \\
+  --filter="quotas.metric~VWS" --format="table(quotas.metric,quotas.limit,quotas.usage)"
+
+# 2. Which zones of the region sell vWS GPUs
+gcloud compute accelerator-types list --project $P \\
+  --filter="name~vws AND zone~$R" --format="table(name,zone)"
+
+# 3. The vWS quota IDs to request
+gcloud services enable cloudquotas.googleapis.com --project $P
+gcloud beta quotas info list --service=compute.googleapis.com --project=$P \\
+  --filter="quotaId~VWS" --format="value(quotaId)"
+
+# 4. Request 1 vWS GPU in the region
+gcloud beta quotas preferences create --project=$P --service=compute.googleapis.com \\
+  --quota-id=<ID from step 3> --preferred-value=1 --dimensions=region=$R \\
+  --email=<your email> --justification="Personal cloud gaming VM, 1 virtual workstation GPU"`,
       },
     },
     warnings: [
@@ -208,6 +250,19 @@ aws ec2 describe-regions --all-regions --query "Regions[?OptInStatus=='not-opted
 aws account enable-region --region-name ap-east-1`,
       },
     },
+    bigScreen: {
+      available: true,
+      summary: 'No extra quota or cost: big screen runs on the same g4dn (T4) / g5 (A10G) machines and uses the same "Running On-Demand G and VT instances" (and spot) quota as above. AWS provides the GRID driver and its licence.',
+      steps: [
+        'Nothing extra to request — tick "Big screen" when launching.',
+        'Optional: check the machines can reach AWS\'s GRID driver (it\'s downloaded during setup).',
+      ],
+      cli: {
+        shell: 'CloudShell', href: 'https://console.aws.amazon.com/cloudshell/home',
+        code: `# AWS's current GRID driver for Linux (public, no credentials needed)
+aws s3 ls --no-sign-request s3://ec2-linux-nvidia-drivers/latest/`,
+      },
+    },
     warnings: [
       'The app creates a security group "cloudgaming-sunshine" in the default VPC with only the streaming ports open. SSH is not opened.',
       'Stopped machines still pay for their EBS disk (~USD 0.08–0.10/GB-month).',
@@ -263,6 +318,20 @@ az quota update --resource-name lowPriorityCores --resource-type lowPriority \\
   --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8`,
       },
     },
+    bigScreen: {
+      available: true,
+      summary: 'No extra quota or cost: big screen runs on the same NCasT4_v3 machines and uses the same "Standard NCASv3_T4 Family vCPUs" quota (and "Total Regional Low-priority vCPUs" for spot) as above. Microsoft provides the GRID driver and Azure includes its licence.',
+      steps: [
+        'Nothing extra to request — tick "Big screen" when launching.',
+        'Pick a region where the T4 quota entry exists (the check below, or the Regions page): e.g. Kuala Lumpur (malaysiawest) rather than Singapore on newer subscriptions.',
+      ],
+      cli: {
+        shell: 'Cloud Shell (Bash)', href: 'https://portal.azure.com/#cloudshell/',
+        code: `LOC=malaysiawest   # your region
+# T4 family (on-demand) and Low-priority (spot) limits here: both need 4+ free vCPUs
+az vm list-usage --location $LOC -o table | grep -Ei "NCASv3_T4|Low-priority|Total Regional"`,
+      },
+    },
     warnings: [
       'Stopping deallocates the VM (compute billing stops). A VM that is merely "stopped" inside Windows/Linux keeps billing — always stop from here.',
       'The app creates a resource group "cloudgaming-hub-<region>" with a VNet and NSG; each machine gets its own public IP, network card and disk, all deleted with it.',
@@ -312,6 +381,11 @@ oci iam region-subscription list --output table
 oci limits value list --service-name compute --compartment-id <tenancy-ocid> --all \\
   --query "data[?contains(name,'a10')]" --output table`,
       },
+    },
+    bigScreen: {
+      available: false,
+      summary: 'Not available on Oracle: its GPUs need your own NVIDIA virtual-workstation licence (bring your own licence), which the app can\'t provide. Oracle machines stream at up to 2560×1600.',
+      steps: [],
     },
     warnings: [
       'Preemptible (spot) Oracle machines can\'t be stopped — only deleted. Use on-demand if you want to stop and resume.',
@@ -506,6 +580,21 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
         <p className="mt-3 text-xs text-slate-300 leading-relaxed">
           <span className="text-neon-amber">Shortcut:</span> once your keys are saved, the <a href="/regions" className="text-neon-cyan hover:underline">Regions</a> page runs these checks for you across every region and cloud, and shows Ready / No quota / Not enabled with the exact fix for each.
         </p>
+      </section>
+
+      {/* ---- Big screen (experimental): extra quota, if any ---- */}
+      <section className="mb-6 rounded border border-neon-magenta/30 bg-neon-magenta/[0.04] p-4">
+        <h4 className="text-[0.8rem] font-semibold mb-1 text-neon-magenta">
+          <span className="mr-1.5 inline-block rounded border border-neon-magenta/50 px-1 text-[0.6rem] uppercase tracking-label align-middle">Experimental</span>
+          Big screen (up to 4096×2160){guide.bigScreen.available ? '' : ' — not available'}
+        </h4>
+        <p className="text-xs text-slate-300 mb-2 leading-relaxed">{guide.bigScreen.summary}</p>
+        {guide.bigScreen.steps.length > 0 && (
+          <ol className="space-y-1 text-xs text-slate-300 list-decimal pl-5">
+            {guide.bigScreen.steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        )}
+        {guide.bigScreen.cli && <CliBlock {...guide.bigScreen.cli} />}
       </section>
 
       {/* ---- First launch: tips that apply to every cloud ---- */}
