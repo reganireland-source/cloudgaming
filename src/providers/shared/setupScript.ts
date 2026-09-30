@@ -1021,11 +1021,18 @@ HEALTH=unknown
 for i in $(seq 1 120); do
   HEALTH=$(docker inspect -f '{{.State.Health.Status}}' cloudy 2>/dev/null || echo missing)
   [ "$HEALTH" = "healthy" ] && break
+  # Every minute, show what the container is doing (its newest log line) in
+  # the app's progress panel, so a slow or stuck start isn't a black box.
+  if [ $((i % 6)) -eq 0 ]; then
+    LAST=$(docker logs --tail 40 cloudy 2>&1 | tr -d '\r' | grep -v -i -E 'pass|secret|token|credential' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-160)
+    say "CLOUDGAMING_DETAIL $((i / 6)) min, container $HEALTH: $LAST"
+  fi
   sleep 10
 done
 if [ "$HEALTH" != "healthy" ]; then
   docker logs --tail 40 cloudy 2>&1 | while read -r line; do say "  container: $line"; done
-  fail 85 "Sunshine container is '$HEALTH' after 20 minutes - check: docker logs cloudy"
+  LASTERR=$(docker logs --tail 200 cloudy 2>&1 | tr -d '\r' | grep -i -E 'error|fail|fatal|cannot|unable' | grep -v -i -E 'pass|secret|token|credential' | tail -1 | cut -c1-160)
+  fail 85 "Sunshine container is '$HEALTH' after 20 minutes. Last error: $LASTERR (full log: docker logs cloudy)"
 fi
 
 # Browser play: pair Moonlight Web with Sunshine (no-op once paired).
@@ -1097,10 +1104,17 @@ export type { SetupStage };
  */
 export function parseSetupStages(serialOutput: string): SetupStage[] {
   const stages: SetupStage[] = [];
-  const re = /CLOUDGAMING_STAGE (\d+) ([a-z_]+) ([^\r\n]*)/g;
+  // "CLOUDGAMING_DETAIL <text>" is a live sub-status for the stage before it
+  // (e.g. the container's newest log line while waiting); the latest wins.
+  const re = /CLOUDGAMING_(?:STAGE (\d+) ([a-z_]+)|DETAIL) ([^\r\n]*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(serialOutput)) !== null) {
-    const stage = { percent: Number(m[1]), key: m[2], message: m[3].trim() };
+    if (m[1] === undefined) {
+      const last = stages[stages.length - 1];
+      if (last) last.detail = m[3].trim();
+      continue;
+    }
+    const stage: SetupStage = { percent: Number(m[1]), key: m[2], message: m[3].trim() };
     // Skip a line identical to the one just before it: older setup scripts
     // printed every line twice on Google Cloud. (A real repeat, such as
     // "Machine booted" after the driver reboot, has other lines in between.)

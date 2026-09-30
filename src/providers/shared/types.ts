@@ -135,6 +135,8 @@ export interface SetupStage {
   percent: number;
   key: string;       // e.g. 'drivers', 'ready', 'failed'
   message: string;
+  /** Live sub-status while this stage runs (e.g. the container's newest log line). */
+  detail?: string;
 }
 
 // ---------------------------------------------------------------------------

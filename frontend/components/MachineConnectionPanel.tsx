@@ -32,8 +32,8 @@ export interface ConnectionInfo {
   username?: string;
   password?: string;
   setup: {
-    stages: Array<{ percent: number; key: string; message: string }>;
-    current: { percent: number; key: string; message: string } | null;
+    stages: Array<{ percent: number; key: string; message: string; detail?: string }>;
+    current: { percent: number; key: string; message: string; detail?: string } | null;
     ready: boolean;
     failed: boolean;
     error?: string;
@@ -200,6 +200,9 @@ export default function MachineConnectionPanel({
               ? `Can't read progress yet: ${info.setup.error}`
               : 'Waiting for the machine to report progress (usually starts within 1–2 minutes of launch)…'}
           </p>
+          {s.current?.detail && !s.ready && (
+            <p className="mt-1 font-mono text-[0.7rem] text-slate-500 break-all">&gt; {s.current.detail}</p>
+          )}
           {s.stale && s.error && !s.interrupted && (
             <p className="text-xs text-neon-amber mt-1">! Lost contact with the machine’s console ({s.error}). Showing the last progress seen; retrying every 15 seconds.</p>
           )}

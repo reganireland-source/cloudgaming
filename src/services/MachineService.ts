@@ -117,14 +117,21 @@ function neverCreated(machine: any): boolean {
  * Saved + live setup stages as one history: saved first (minus a "failed"
  * that a retry has moved past), then the live ones not already listed.
  */
-function mergeStages<T extends { percent: number; key: string; message: string }>(saved: T[], live: T[]): T[] {
+function mergeStages<T extends { percent: number; key: string; message: string; detail?: string }>(saved: T[], live: T[]): T[] {
   if (!saved.length) return live;
   const base = saved.filter((x, i) => !(x.key === 'failed' && i === saved.length - 1));
   const seen = new Set(base.map((x) => `${x.percent}|${x.key}|${x.message}`));
   // A fresh console repeats early stages ("booted"): only append what's new.
   const fresh = live.filter((x) => !seen.has(`${x.percent}|${x.key}|${x.message}`));
-  // Same console read again (nothing new): keep it as it was, incl. a failure.
-  if (!fresh.length) return saved.length >= live.length ? saved : live;
+  // Same console read again (nothing new): keep it as it was, incl. a failure,
+  // but with the live sub-status of the current stage.
+  if (!fresh.length) {
+    const kept = saved.length >= live.length ? [...saved] : [...live];
+    const lastLive = live[live.length - 1];
+    const i = kept.length - 1;
+    if (lastLive && kept[i] && kept[i].key === lastLive.key && kept[i].message === lastLive.message) kept[i] = { ...kept[i], detail: lastLive.detail };
+    return kept;
+  }
   return [...base, ...fresh];
 }
 
@@ -668,7 +675,7 @@ export class MachineService {
     // a fallback: a failed or empty read (machine stopped, spot machine
     // reclaimed, API hiccup, console restarted) shows "last seen N%" rather
     // than dropping to 0%, and says why when the cloud knows.
-    type Stage = { percent: number; key: string; message: string };
+    type Stage = { percent: number; key: string; message: string; detail?: string };
     const saved: Stage[] = Array.isArray(machine.setup_progress) ? machine.setup_progress : [];
     const savedAt: Date | null = machine.setup_progress_at ? new Date(machine.setup_progress_at) : null;
     let stages: Stage[] = [];
@@ -707,7 +714,7 @@ export class MachineService {
       const merged = mergeStages(saved, stages);
       const prev = saved[saved.length - 1];
       const last = merged[merged.length - 1];
-      if (!prev || last.key !== prev.key || last.percent !== prev.percent || merged.length !== saved.length) {
+      if (!prev || last.key !== prev.key || last.percent !== prev.percent || last.detail !== prev.detail || merged.length !== saved.length) {
         await query('UPDATE machines SET setup_progress = $2, setup_progress_at = NOW() WHERE id = $1', [machine.id, JSON.stringify(merged)]).catch(() => {});
       }
       stages = merged;
