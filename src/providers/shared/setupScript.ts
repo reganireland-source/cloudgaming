@@ -86,8 +86,11 @@ export const GRID_DRIVER = {
   aws: 'https://ec2-linux-nvidia-drivers.s3.amazonaws.com',
   // Microsoft's build for NCasT4_v3 on Ubuntu 22.04 (vGPU 20.2), from its N-series driver docs.
   azure: 'https://download.microsoft.com/download/51239696-ec04-4c02-a6b3-1d9c608fb57c/NVIDIA-Linux-x86_64-595.58.03-grid-azure.run',
-  // Google's public bucket; the newest GRID/vGPU*/ folder's -grid .run is used.
+  // Google's public bucket. Files download anonymously but the folder list
+  // doesn't (401), so the newest is found with the VM's own token when it can
+  // be, else this pinned build (vGPU 20.2, Google's install-grid-drivers docs).
   gcp: 'https://storage.googleapis.com/nvidia-drivers-us-public',
+  gcpPinned: 'GRID/vGPU20.2/NVIDIA-Linux-x86_64-595.91.07-grid.run',
 } as const;
 
 /** Largest virtual screen per driver (NVIDIA's headless cap vs. GRID's 4K head). */
@@ -117,6 +120,7 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__GRID_SOURCE__').join(opts.displayDriver === 'grid' ? (opts.gridSource || 'aws') : 'none')
     .split('__GRID_AWS__').join(GRID_DRIVER.aws)
     .split('__GRID_AZURE__').join(GRID_DRIVER.azure)
+    .split('__GRID_GCP_PINNED__').join(GRID_DRIVER.gcpPinned)
     .split('__GRID_GCP__').join(GRID_DRIVER.gcp)
     .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE);
 }
@@ -247,10 +251,22 @@ if [ "$DISPLAY_DRIVER" = "grid" ] && ! is_done driver-grid; then
       azure)
         GRID_URL='__GRID_AZURE__' ;;
       gcp)
-        NAME=$(curl -fsS --retry 3 "https://storage.googleapis.com/storage/v1/b/nvidia-drivers-us-public/o?prefix=GRID/vGPU&maxResults=1000&fields=items(name)" \
-          | grep -o '"GRID/vGPU[0-9.]*/NVIDIA-Linux-x86_64-[0-9.]*-grid[a-z-]*[.]run"' | tr -d '"' | sort -V | tail -1)
-        GRID_URL="__GRID_GCP__/$NAME"
-        [ -n "$NAME" ] || fail 20 "could not find the GRID driver in Google's driver bucket" ;;
+        # Listing the bucket needs a Google token (anonymous gets 401); the VM's
+        # service account usually has storage read. No token: the pinned build.
+        TOKEN=$(curl -fsS -H 'Metadata-Flavor: Google' \
+          'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' 2>/dev/null \
+          | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')
+        NAME=""
+        if [ -n "$TOKEN" ]; then
+          NAME=$(curl -fsS --retry 3 -H "Authorization: Bearer $TOKEN" \
+            "https://storage.googleapis.com/storage/v1/b/nvidia-drivers-us-public/o?prefix=GRID/vGPU&maxResults=1000&fields=items(name)" 2>/dev/null \
+            | grep -o '"GRID/vGPU[0-9.]*/NVIDIA-Linux-x86_64-[0-9.]*-grid[.]run"' | tr -d '"' | sort -t/ -k2,2V | tail -1)
+        fi
+        if [ -z "$NAME" ]; then
+          NAME='__GRID_GCP_PINNED__'
+          say "Google's driver list needs permissions this machine doesn't have; using the known build $NAME"
+        fi
+        GRID_URL="__GRID_GCP__/$NAME" ;;
       *) fail 20 "big screen isn't available on this cloud" ;;
     esac
     say "GRID driver: $GRID_URL"
