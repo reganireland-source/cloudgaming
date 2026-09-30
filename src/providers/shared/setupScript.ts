@@ -401,7 +401,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=6
+APPS_VERSION=7
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -553,6 +553,12 @@ RUN apt-get update \
       && cat /tmp/kasmvnc.supervisor.conf >> /cloudy/conf/supervisor/supervisord.conf \
       && echo "KasmVNC installed" || echo "WARNING: KasmVNC skipped (no browser desktop)" ) \
  ; rm -f /tmp/kasmvnc.deb /tmp/kasmvnc.supervisor.conf; apt-get clean; rm -rf /var/lib/apt/lists/*
+# "All apps" launcher (Launchpad-style grid). Best-effort.
+RUN apt-get update \
+ && ( apt-get install -y --no-install-recommends xfdashboard xfdashboard-plugins || apt-get install -y --no-install-recommends xfdashboard \
+      || echo "WARNING: xfdashboard skipped (All apps uses the XFCE app finder)" ) \
+ ; apt-get clean; rm -rf /var/lib/apt/lists/*
+COPY all-apps.sh /cloudy/bin/all-apps.sh
 # Battle.net icon for the dock/menu (best-effort; falls back to Lutris's).
 RUN curl -fsL -o /usr/share/pixmaps/battlenet.png https://lutris.net/games/icon/battlenet.png || echo "WARNING: Battle.net icon skipped"
 COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
@@ -561,7 +567,7 @@ COPY lutris-runtime.supervisor.conf /tmp/lutris-runtime.supervisor.conf
 RUN chmod 755 /cloudy/bin/lutris-runtime-update.py \
  && cat /tmp/lutris-runtime.supervisor.conf >> /cloudy/conf/supervisor/supervisord.conf && rm /tmp/lutris-runtime.supervisor.conf
 COPY add-apps.py /tmp/add-apps.py
-RUN chmod 755 /cloudy/bin/battlenet-start.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
+RUN chmod 755 /cloudy/bin/battlenet-start.sh /cloudy/bin/all-apps.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
  && chown -R cloudy:cloudy /cloudy/bin /cloudy/conf/sunshine /cloudy/conf/xfce4-default
 DOCKERFILE
 
@@ -765,8 +771,31 @@ cat > "$SUN_DIR/project/battlenet-start.sh" <<'BNET'
 wait-x-availability.sh
 source export-dbus-address.sh
 LUTRIS=/usr/games/lutris
-if "$LUTRIS" --list-games --installed --json 2>/dev/null | grep -Eq '"slug": ?"battlenet"'; then
-  exec "$LUTRIS" lutris:rungame/battlenet
+# Is Battle.net installed? Read Lutris's own game database (pga.db, kept on
+# the disk) rather than asking Lutris: when a Lutris window is already open,
+# "lutris --list-games" hands the question to that copy and prints nothing
+# here, which made every click start the installer again.
+SLUG=$(python3 - <<'PY'
+import os, sqlite3
+home = os.path.expanduser("~")
+dbs = [os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local/share"), "lutris", "pga.db"),
+       os.path.join(home, ".local/share/lutris/pga.db"), "/cloudy/data/lutris/pga.db"]
+for db in dbs:
+    if not os.path.exists(db):
+        continue
+    try:
+        row = sqlite3.connect(db).execute(
+            "SELECT slug FROM games WHERE installed = 1 AND (slug LIKE 'battlenet%' OR slug LIKE 'battle-net%' OR name LIKE 'Battle.net%') "
+            "ORDER BY lastplayed DESC").fetchone()
+    except Exception:
+        row = None
+    if row:
+        print(row[0])
+        break
+PY
+)
+if [ -n "$SLUG" ]; then
+  exec "$LUTRIS" "lutris:rungame/$SLUG"
 else
   # Lutris only downloads its components (DXVK, VKD3D...) when its main
   # window opens; going straight to the installer skips that and the
@@ -777,6 +806,17 @@ else
   exec "$LUTRIS" lutris:battlenet
 fi
 BNET
+
+# "All apps": a full-screen grid of every installed app with type-to-search,
+# like the macOS Launchpad (xfdashboard); XFCE's app finder if it's missing.
+cat > "$SUN_DIR/project/all-apps.sh" <<'ALLAPPS'
+#!/bin/bash
+if command -v xfdashboard >/dev/null 2>&1; then
+  xfdashboard --view=builtin.applications 2>/dev/null || exec xfdashboard
+else
+  exec xfce4-appfinder
+fi
+ALLAPPS
 
 # Lutris's components (DXVK, VKD3D, ...) live in the home folder, which is
 # kept on the disk, so they're fetched at run time rather than baked into
@@ -822,7 +862,9 @@ installed = {
     "Google Chrome": os.path.exists("/usr/bin/google-chrome"),
     "Discord": os.path.exists("/opt/Discord/Discord"),
     "Battle.net": True,
+    "All apps": True,
 }
+ALL_APPS_ICON = "org.xfce.xfdashboard" if os.path.exists("/usr/share/icons/hicolor/scalable/apps/org.xfce.xfdashboard.svg") else "system-search"
 
 # ---- 1. Moonlight's app list (Sunshine apps.json)
 path = "/cloudy/conf/sunshine/apps.json"
@@ -853,6 +895,7 @@ with open(path, "w") as f:
 # ---- 2. Desktop entries (app menu) and dock launchers
 entries = {
     # plugin id: (name, desktop file name, Exec, Icon, categories)
+    19: ("All apps", "all-apps.desktop", "all-apps.sh", ALL_APPS_ICON, "Utility;"),
     20: ("Battle.net", "battlenet.desktop", "battlenet-start.sh", BNET_ICON, "Game;"),
     21: ("Discord", "discord.desktop", "discord", "/opt/Discord/discord.png", "Network;InstantMessaging;"),
     22: ("Google Chrome", "google-chrome.desktop", "google-chrome", "google-chrome", "Network;WebBrowser;"),
@@ -870,12 +913,24 @@ for pid, (name, fname, exe, icon, cats) in entries.items():
     with open(d + "/" + fname, "w") as f:
         f.write(body)
 
+# xfdashboard: open on the grid of ALL apps (not the window overview or
+# menu folders) every time, with the search box cleared.
+os.makedirs(DEFAULT + "/xfconf/xfce-perchannel-xml", exist_ok=True)
+with open(DEFAULT + "/xfconf/xfce-perchannel-xml/xfdashboard.xml", "w") as f:
+    f.write('<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfdashboard" version="1.0">\n'
+            '  <property name="switch-to-view-on-resume" type="string" value="builtin.applications"/>\n'
+            '  <property name="reset-search-on-resume" type="bool" value="true"/>\n'
+            '  <property name="components" type="empty">\n'
+            '    <property name="applications-view" type="empty">\n'
+            '      <property name="show-all-apps" type="bool" value="true"/>\n'
+            '    </property>\n  </property>\n</channel>\n')
+
 panel = DEFAULT + "/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
 with open(panel) as f:
     xml = f.read()
 anchor_ids = '<value type="int" value="12"/>'                    # Lutris, in the dock order
 anchor_plugins = '<property name="plugin-98" type="string" value="separator"/>'
-if entries and anchor_ids in xml and anchor_plugins in xml and 'name="plugin-20"' not in xml:
+if entries and anchor_ids in xml and anchor_plugins in xml and 'name="plugin-19"' not in xml and 'name="plugin-20"' not in xml:
     ids = "".join('\n        <value type="int" value="%d"/>' % pid for pid in entries)
     xml = xml.replace(anchor_ids, anchor_ids + ids, 1)
     plugins = "".join(
@@ -888,7 +943,7 @@ if entries and anchor_ids in xml and anchor_plugins in xml and 'name="plugin-20"
     with open(panel, "w") as f:
         f.write(xml)
     print("Dock: added " + ", ".join(e[0] for e in entries.values()))
-elif 'name="plugin-20"' in xml:
+elif 'name="plugin-19"' in xml or 'name="plugin-20"' in xml:
     print("Dock: launchers already present")
 else:
     print("WARNING: dock layout not recognised - apps are still in Moonlight and the app menu")
