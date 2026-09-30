@@ -252,6 +252,11 @@ aws account enable-region --region-name ap-east-1`,
         code: `SUB=$(az account show --query id -o tsv); LOC=malaysiawest   # your region
 az vm list-usage --location $LOC -o table | grep -Ei "NCASv3_T4|Spot|Low-priority|Total Regional"
 az extension add --name quota
+# No T4 line here = Azure has no T4 quota entry in this region yet (e.g. Southeast Asia
+# on newer subscriptions): the update below fails with "InvalidResourceName" and
+# you need a support request instead (see the steps above), or another region.
+az quota list --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" \\
+  --query "[?contains(name,'T4')].{name:name, limit:properties.limit.value}" -o table
 az quota update --resource-name standardNCASv3_T4Family --resource-type dedicated \\
   --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8
 az quota update --resource-name lowPriorityCores --resource-type lowPriority \\
