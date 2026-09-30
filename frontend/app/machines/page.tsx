@@ -235,8 +235,8 @@ function MachineCard({
             <span className="text-sm font-semibold text-slate-100">{machine.instance_type}</span>
             {shape && <TierBadge shape={shape} />}
             {machine.display_driver === 'grid' && (
-              <span className="text-[0.62rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/50 rounded px-1.5 py-0.5"
-                title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">big screen · exp</span>
+              <span className="text-[0.62rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"
+                title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">▣ big screen · experimental</span>
             )}
             <span className="text-xs text-slate-400">{PROVIDER_LABEL[machine.provider] || machine.provider} · {machine.region}{zone && zone !== machine.region ? ` · ${zone}` : ''}</span>
             {machine.spot && <span className="text-[0.62rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>}
@@ -262,6 +262,15 @@ function MachineCard({
             </div>
           )}
           <div><p className="label">IP</p><p className="font-mono text-slate-200">{machine.ip_address || '—'}</p></div>
+          {/* Which NVIDIA driver it runs: the standard one caps the screen at 2560×1600; "Big screen" (GRID) at 4096×2160. */}
+          <div title={machine.display_driver === 'grid'
+            ? 'Big screen (experimental): NVIDIA GRID driver — screens up to 4096×2160, e.g. a 3440×1440 ultrawide at full size.'
+            : 'Standard NVIDIA datacenter driver — screens up to 2560×1600. Launch with “Big screen” for more.'}>
+            <p className="label">Screen</p>
+            {machine.display_driver === 'grid'
+              ? <p className="text-neon-magenta tabular-nums">≤4096×2160 <span className="hidden sm:inline text-[0.6rem] uppercase tracking-label">big · exp</span></p>
+              : <p className="text-slate-400 tabular-nums">≤2560×1600</p>}
+          </div>
         </div>
         {/* ---- Actions that make sense for this state ---- */}
         <div className="flex flex-wrap gap-2">
