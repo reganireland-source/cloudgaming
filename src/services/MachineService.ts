@@ -676,6 +676,7 @@ export class MachineService {
     let live = false;
     let status: string = machine.status;
     let stopReason: string | null = null;
+    let stoppedUnexpectedly = false; // we thought it was running; the cloud says otherwise
     if (!neverCreated(machine) && ['running', 'starting'].includes(machine.status)) {
       let provider: Awaited<ReturnType<typeof providerFor>> | null = null;
       try {
@@ -691,6 +692,7 @@ export class MachineService {
             const now = await provider.getInstanceStatus(machine.instance_id);
             if (now.status !== 'running' && now.status !== 'starting') {
               status = now.status === 'terminated' ? 'missing' : now.status;
+              stoppedUnexpectedly = status === 'stopped';
               await setStatus(machine.id, status, { last_synced_at: new Date(), ...(status === 'stopped' ? { stopped_at: new Date() } : {}) });
               stopReason = await provider.getStopReason(machine.instance_id).catch(() => null);
             }
@@ -753,7 +755,8 @@ export class MachineService {
         stale: !live && stages.length > 0,
         lastSeenAt: live ? new Date().toISOString() : savedAt?.toISOString() || null,
         // Setup unfinished and the machine isn't running (or went quiet): offer "Resume setup".
-        interrupted: inProgress && (status === 'stopped' || stuck || (!live && !!progressError)),
+        // (Also when there's no saved progress yet but a "running" machine turned out to be stopped.)
+        interrupted: (inProgress && (status === 'stopped' || stuck || (!live && !!progressError))) || (!current && stoppedUnexpectedly),
         stuck,
         stopReason,
       },
