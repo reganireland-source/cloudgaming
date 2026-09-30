@@ -86,6 +86,7 @@ const MODE_LABEL: Record<RunMode, string> = { normal: 'Normal', spot: 'Spot', bi
 export interface RunCell {
   ok: boolean | null;   // null = can't tell
   na?: boolean;         // not a thing here (tier/big screen not offered)
+  inUse?: boolean;      // the quota exists but your own machines are using it all
   why: string;
   uses?: string[];      // quota keys this depends on
 }
@@ -290,9 +291,12 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         const l = line(k);
         const free = l.limit - l.used;
         const uses = [k, 'GPUS_ALL_REGIONS'];
-        if (globalFree < 1) return { ok: false, why: '“GPUs (all regions)” has no room for the project', uses };
+        if (free < 1 && l.limit === 0) return { ok: false, why: `No ${gcpLabel(k)} quota here`, uses };
+        if (globalFree < 1) return globalLimit > 0
+          ? { ok: false, inUse: true, why: `“GPUs (all regions)”: all ${globalLimit} in use by your running machine${globalUsage === 1 ? '' : 's'}`, uses }
+          : { ok: false, why: '“GPUs (all regions)” is 0 for the project', uses };
         if (free >= 1) return { ok: true, why: `${gcpLabel(k)}: ${free} free`, uses };
-        return { ok: false, why: l.limit > 0 ? `${gcpLabel(k)}: all ${l.limit} in use` : `No ${gcpLabel(k)} quota here`, uses };
+        return { ok: false, inUse: true, why: `${gcpLabel(k)}: all ${l.limit} in use by your running machine${l.used === 1 ? '' : 's'}`, uses };
       };
       const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.map((m) => metricFor(s, m)))]);
       const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), true, gcpCell,
@@ -308,8 +312,14 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
       const cli = `gcloud beta quotas preferences create --project=${pid} --service=compute.googleapis.com \\\n  --quota-id=<ID from: gcloud beta quotas info list --service=compute.googleapis.com --project=${pid} --filter="quotaId~GPU" --format="value(quotaId)"> \\\n  --preferred-value=1 --dimensions=region=${region} --email=<you> --justification="Personal cloud gaming VM"`;
       if (globalLimit - globalUsage < 1) {
-        return { region, status: 'no-quota', summary: 'Project allows 0 GPUs in total ("GPUs (all regions)")', quotas, ...extra, spot: bestSpot, spotReady: false,
-          fix: { steps: ['Request "GPUs (all regions)" = 1 (once for the whole project).', `Also request "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs" = 1 in ${region}.`, 'Free-trial accounts must "Activate full account" first.'],
+        const globalFull = globalLimit > 0;
+        return { region, status: 'no-quota', summary: globalFull
+            ? `All ${globalLimit} GPU${globalLimit === 1 ? '' : 's'} of the project’s “GPUs (all regions)” quota ${globalLimit === 1 ? 'is' : 'are'} in use by your running machine${globalUsage === 1 ? '' : 's'} — stop one to launch another here, or request more`
+            : 'Project allows 0 GPUs in total ("GPUs (all regions)")', quotas, ...extra, spot: bestSpot, spotReady: false,
+          fix: { steps: globalFull
+              ? [`Your running machine${globalUsage === 1 ? ' is' : 's are'} using the project’s ${globalLimit === 1 ? 'only GPU' : `${globalLimit} GPUs`}. Stop (or shelve) one to launch another — here or in any region.`,
+                 `To run ${globalLimit + 1} at once, request "GPUs (all regions)" = ${globalLimit + 1} (project-wide, usually approved within minutes to a day).`]
+              : ['Request "GPUs (all regions)" = 1 (once for the whole project).', `Also request "NVIDIA T4 GPUs" or "NVIDIA L4 GPUs" = 1 in ${region}.`, 'Free-trial accounts must "Activate full account" first.'],
             consoleUrl: `${quotasUrl}&metric=compute.googleapis.com%2Fgpus_all_regions`, consoleLabel: 'Request GPU quota', cli } };
       }
       if (!regional.length && spotOk) {
@@ -472,12 +482,17 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
         if (isSpotMode(m)) {
           if (!spot) return { ok: null, why: 'Couldn’t read the spot quota', uses: ['lowPriorityCores'] };
           return spotFree >= s.vcpus ? { ok: true, why: `Spot vCPUs: ${spotFree} free (a machine uses ${s.vcpus})`, uses: ['lowPriorityCores'] }
-            : { ok: false, why: `Spot vCPUs: ${spotFree} free — needs ${s.vcpus}`, uses: ['lowPriorityCores'] };
+            : spot.limit >= s.vcpus ? { ok: false, inUse: true, why: `Spot vCPUs: ${spot.used} of ${spot.limit} in use by your machines`, uses: ['lowPriorityCores'] }
+            : { ok: false, why: `Spot vCPUs: limit ${spot.limit} — needs ${s.vcpus}`, uses: ['lowPriorityCores'] };
         }
         const uses = [famKey, 'cores'];
         if (!fam) return { ok: false, why: 'No T4 quota entry for your subscription here', uses };
-        if (famFree < s.vcpus) return { ok: false, why: `T4 family vCPUs: ${famFree} free — needs ${s.vcpus}`, uses };
-        if (totFree < s.vcpus) return { ok: false, why: `Total regional vCPUs: ${totFree} free — needs ${s.vcpus}`, uses };
+        if (famFree < s.vcpus) return fam.limit >= s.vcpus
+          ? { ok: false, inUse: true, why: `T4 family vCPUs: ${fam.current} of ${fam.limit} in use by your machines`, uses }
+          : { ok: false, why: `T4 family vCPUs: limit ${fam.limit} — needs ${s.vcpus}`, uses };
+        if (totFree < s.vcpus) return total && total.limit >= s.vcpus
+          ? { ok: false, inUse: true, why: `Total regional vCPUs: ${total.current} of ${total.limit} in use by your machines`, uses }
+          : { ok: false, why: `Total regional vCPUs: limit ${total?.limit ?? 0} — needs ${s.vcpus}`, uses };
         return { ok: true, why: `T4 family: ${famFree} free · regional: ${totFree === Infinity ? '?' : totFree} free`, uses };
       };
       const azPend = (key: string) => (azPending || []).filter((x) => String(x.quota).toLowerCase() === key.toLowerCase()).map((x) => ({ requested: x.requested, status: x.status, created: x.created }));
@@ -535,13 +550,14 @@ async function oracleAccess(provider: any, regionIds: string[], log: Log = noLog
       // count against the same limit. No big screen on Oracle.
       const ociFree = lim.limit - lim.used;
       const ociCell = (): RunCell => ociFree >= 1 ? { ok: true, why: `${ociFree} A10 GPU${ociFree === 1 ? '' : 's'} free`, uses: ['A10'] }
-        : { ok: false, why: lim.limit > 0 ? `All ${lim.limit} A10 GPUs in use` : 'A10 GPU limit is 0', uses: ['A10'] };
+        : lim.limit > 0 ? { ok: false, inUse: true, why: `All ${lim.limit} A10 GPU${lim.limit === 1 ? '' : 's'} in use by your machines`, uses: ['A10'] }
+        : { ok: false, why: 'A10 GPU limit is 0', uses: ['A10'] };
       const extra = {
         ...buildRun(ORACLE_SHAPES, () => true, false, ociCell, [{ key: 'A10', label: 'GPU.A10 GPUs (normal and preemptible)', used: lim.used, limit: lim.limit, unit: 'GPUs', unlocks: [] }]),
         pendingNote: 'Oracle limit increases are support requests, which the app can’t see — check Help → Support requests in the Oracle console.',
       };
       if (lim.limit - lim.used < 1) {
-        return { region, status: 'no-quota' as const, summary: `A10 GPU limit is ${lim.limit}`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }], ...extra, spot: null, spotReady: null,
+        return { region, status: 'no-quota' as const, summary: lim.limit > 0 ? `All ${lim.limit} A10 GPU${lim.limit === 1 ? '' : 's'} in use by your machines — stop one, or request more` : `A10 GPU limit is ${lim.limit}`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }], ...extra, spot: null, spotReady: null,
           fix: { steps: ['Governance → Limits, Quotas and Usage → Service "Compute" → search "GPU.A10".', 'Click "Request a service limit increase" → 1 (per availability domain).', 'Approval: hours to a couple of days.'],
             consoleUrl: limitsUrl, consoleLabel: 'Open Limits',
             cli: `oci limits value list --service-name compute --compartment-id <tenancy-ocid> --region ${region} --all --query "data[?contains(name,'a10')]" --output table` } };

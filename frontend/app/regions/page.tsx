@@ -22,7 +22,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import CloudLogo from '@/components/CloudLogo';
 import { useAuth } from '@/components/AuthProvider';
-import { ACCESS_STYLE, RUN_MODES, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type RunCell, type CheckLine } from '@/lib/regionAccess';
+import { ACCESS_STYLE, RUN_MODES, quotaInUse, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type RunCell, type CheckLine } from '@/lib/regionAccess';
 
 const CLOUDS = [
   { id: 'gcp', short: 'GCP', color: '#3987e5' },
@@ -219,6 +219,7 @@ export default function RegionsPage() {
             {(Object.keys(ACCESS_STYLE) as AccessStatus[]).map((s) => (
               <li key={s} className="inline-flex items-center gap-1"><Chip status={s} mode="icon" /> {ACCESS_STYLE[s].label}</li>
             ))}
+            <li className="inline-flex items-center gap-1"><Chip status="no-quota" mode="icon" inUse /> {IN_USE_STYLE.label}</li>
             <li className="inline-flex items-center gap-1"><span className="inline-block w-6 text-center text-slate-600">·</span> Cloud has no region here</li>
             <li className="col-span-2 sm:hidden text-slate-500">Tap a symbol in the table for the details and the fix.</li>
           </ul>
@@ -273,14 +274,15 @@ export default function RegionsPage() {
                         {CLOUDS.map((c) => {
                           const cell = p.cells[c.id];
                           const st = best(cell);
+                          const full = st === 'no-quota' && !!cell && cell.regions.filter((r) => r.status === 'no-quota').every(quotaInUse);
                           const sel = open?.place === p.key && open.provider === c.id;
                           return (
                             <td key={c.id} className="py-1.5 px-0.5 text-center">
                               {st ? (
                                 <button type="button" onClick={() => setOpen(sel ? null : { place: p.key, provider: c.id })}
-                                  aria-expanded={sel} aria-label={`${c.short} ${p.label}: ${ACCESS_STYLE[st].label}`}
+                                  aria-expanded={sel} aria-label={`${c.short} ${p.label}: ${full ? IN_USE_STYLE.label : ACCESS_STYLE[st].label}`}
                                   className={`rounded ${sel ? 'ring-1 ring-neon-cyan' : ''}`}>
-                                  <Chip status={st} />
+                                  <Chip status={st} inUse={full} />
                                 </button>
                               ) : <span className="text-slate-600" title={`${c.short} has no region here`}>·</span>}
                             </td>
@@ -317,8 +319,11 @@ export default function RegionsPage() {
  * phones, where four columns of words don't fit, and symbol + word from
  * 640px; "full" = always both (detail panel).
  */
-function Chip({ status, mode = 'auto' }: { status: AccessStatus; mode?: 'icon' | 'auto' | 'full' }) {
-  const s = ACCESS_STYLE[status];
+/** Quota exists but your own running machines are using all of it. */
+const IN_USE_STYLE = { icon: '◐', label: 'Quota in use by your machines', short: 'In use', className: ACCESS_STYLE['no-quota'].className };
+
+function Chip({ status, mode = 'auto', inUse = false }: { status: AccessStatus; mode?: 'icon' | 'auto' | 'full'; inUse?: boolean }) {
+  const s = inUse && status === 'no-quota' ? IN_USE_STYLE : ACCESS_STYLE[status];
   const size = mode === 'icon' ? 'w-6' : mode === 'auto' ? 'w-7 h-6 sm:w-auto sm:h-auto sm:min-w-[1.5rem]' : 'min-w-[1.5rem]';
   return (
     <span className={`inline-flex items-center justify-center gap-1 rounded border px-1 py-0.5 text-[0.66rem] uppercase tracking-label whitespace-nowrap ${s.className} ${size}`}>
@@ -338,7 +343,7 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
               <p className="text-sm text-slate-100">{cloudLabel} · {r.name}</p>
               <p className="text-[0.7rem] text-slate-500 font-mono break-all">{r.region}</p>
             </div>
-            <Chip status={r.status} mode="full" />
+            <Chip status={r.status} mode="full" inUse={quotaInUse(r)} />
           </div>
           <p className="text-xs text-slate-300">{r.summary}</p>
           {!!r.notSold?.length && r.status !== 'not-offered' && (
@@ -371,16 +376,21 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
   );
 }
 
+const offeredCells = (rows: NonNullable<RegionAccess['run']>) => rows.reduce((n, row) => n + RUN_MODES.filter((m) => !row.cells[m.id].na).length, 0);
+
 /** "What can I run here": tiers × Normal / Spot / Big screen, then why the ✗s are ✗. */
 function RunGrid({ r }: { r: RegionAccess }) {
   const rows = r.run!;
   // Group the reasons for every "no" so each blocker is listed once.
   const blockers = new Map<string, string[]>();
+  const inUseWhy = new Set<string>();
   for (const row of rows) for (const m of RUN_MODES) {
     const c = row.cells[m.id];
     if (c.ok === false) blockers.set(c.why, [...(blockers.get(c.why) || []), `${row.label} ${m.label.toLowerCase()}`]);
+    if (c.ok === false && c.inUse) inUseWhy.add(c.why);
   }
-  const mark = (c: RunCell) => c.na ? { t: '—', cls: 'text-slate-600' } : c.ok === true ? { t: '✓', cls: 'text-neon-lime' } : c.ok === false ? { t: '✗', cls: 'text-neon-pink' } : { t: '?', cls: 'text-slate-400' };
+  const mark = (c: RunCell) => c.na ? { t: '—', cls: 'text-slate-600' } : c.ok === true ? { t: '✓', cls: 'text-neon-lime' }
+    : c.ok === false ? (c.inUse ? { t: '◐', cls: 'text-neon-amber' } : { t: '✗', cls: 'text-neon-pink' }) : { t: '?', cls: 'text-slate-400' };
   return (
     <div className="rounded border border-white/10 p-2 space-y-2">
       <p className="label">What you can run here</p>
@@ -409,11 +419,11 @@ function RunGrid({ r }: { r: RegionAccess }) {
       {blockers.size > 0 && (
         <ul className="text-[0.7rem] text-slate-400 space-y-0.5">
           {[...blockers.entries()].map(([why, what]) => (
-            <li key={why}><span className="text-neon-pink">✗</span> <span className="text-slate-300">{what.join(', ')}</span> — {why}</li>
+            <li key={why}>{inUseWhy.has(why) ? <span className="text-neon-amber">◐</span> : <span className="text-neon-pink">✗</span>} <span className="text-slate-300">{what.length >= offeredCells(rows) ? 'Everything' : what.join(', ')}</span> — {why}</li>
           ))}
         </ul>
       )}
-      <p className="text-[0.66rem] text-slate-500">✓ can launch now · ✗ needs quota (why, above) · — not offered. Big screen = the experimental 4096×2160 option.</p>
+      <p className="text-[0.66rem] text-slate-500">✓ can launch now · ◐ quota full — your machines are using it (stop one to launch another) · ✗ needs quota (why, above) · — not offered. Big screen = the experimental 4096×2160 option.</p>
     </div>
   );
 }

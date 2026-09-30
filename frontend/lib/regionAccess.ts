@@ -45,7 +45,13 @@ export const RUN_MODES: Array<{ id: RunMode; label: string; short: string }> = [
   { id: 'big', label: 'Big screen', short: 'Big' },
   { id: 'bigSpot', label: 'Big screen + spot', short: 'Big+spot' },
 ];
-export interface RunCell { ok: boolean | null; na?: boolean; why: string; uses?: string[] }
+export interface RunCell { ok: boolean | null; na?: boolean; inUse?: boolean; why: string; uses?: string[] }
+
+/** Nothing can launch right now, but you do have quota here: your own machines are using it (stop one to launch another). */
+export function quotaInUse(a: RegionAccess): boolean {
+  if (a.status !== 'no-quota' || !a.run) return false;
+  return a.run.some((r) => Object.values(r.cells).some((c) => c.ok === false && c.inUse));
+}
 export interface RunRow { tier: 'good' | 'better' | 'best'; label: string; shape: string; cells: Record<RunMode, RunCell> }
 export interface PendingRequest { requested: number; status: string; created?: string }
 export interface QuotaDetail { key: string; label: string; used: number | null; limit: number; unit: 'GPUs' | 'vCPUs'; unlocks: string[]; pending?: PendingRequest[] }
