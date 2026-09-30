@@ -623,6 +623,25 @@ export class AWSProvider extends CloudProvider {
     await this.report('success', `${id} is stopped.`);
   }
 
+  async rebootInstance(instanceId: string): Promise<void> {
+    const { region, id } = this.splitId(instanceId);
+    await this.report('info', `Asking AWS to reboot ${id} (same machine, disk and IP)…`);
+    await this.ec2For(region).rebootInstances({ InstanceIds: [id] }).promise();
+    await this.report('success', `${id} is rebooting.`);
+  }
+
+  /** AWS keeps the reason for the last state change on the instance. */
+  async getStopReason(instanceId: string): Promise<string | null> {
+    const { region, id } = this.splitId(instanceId);
+    const instance = await this.describeInstance(region, id);
+    const code = instance?.StateReason?.Code || '';
+    if (!code || !/stopped|terminated|stopping/.test(String(instance?.State?.Name))) return null;
+    if (/Spot/i.test(code)) return 'AWS reclaimed this spot machine (spot machines can be taken back at any time). Your disk and progress are kept.';
+    if (/InstanceInitiatedShutdown/.test(code)) return 'The machine shut itself down (auto-stop, or a shutdown from inside it).';
+    if (/UserInitiatedShutdown/.test(code)) return 'It was stopped from the AWS console or API.';
+    return instance?.StateReason?.Message || null;
+  }
+
   async startInstance(instanceId: string): Promise<void> {
     const { region, id } = this.splitId(instanceId);
     const ec2 = this.ec2For(region);

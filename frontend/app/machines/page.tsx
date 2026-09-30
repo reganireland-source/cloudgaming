@@ -83,7 +83,7 @@ interface Standing {
   restoreAnyRegion: boolean;
 }
 type Region = { id: string; name: string; gpus: string[]; lat?: number; lng?: number };
-type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete';
+type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup';
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
 const money = (n: number) => usd(n);
 const daysSince = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null);
@@ -426,7 +426,8 @@ function MachineCard({
           {machine.status === 'shelved'
             ? <p className="text-xs text-slate-500">Shelved — restore it to connect. Moonlight&apos;s pairing is kept; only the IP address changes.</p>
             : ['running', 'stopped', 'starting'].includes(machine.status)
-            ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} bigScreen={machine.display_driver === 'grid'} />
+            ? <MachineConnectionPanel machineId={machine.id} status={machine.status} quality={machine.streaming_quality} onStage={setStage} bigScreen={machine.display_driver === 'grid'}
+                onResume={activeOp ? undefined : () => onAction(machine, 'resume-setup')} onStatusChange={onOpFinished} />
             : <p className="text-xs text-slate-500">Connection details appear once the machine exists and is running.</p>}
         </div>
       )}

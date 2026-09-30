@@ -113,6 +113,28 @@ function neverCreated(machine: any): boolean {
   return String(machine.instance_id).startsWith('pending:');
 }
 
+/**
+ * Saved + live setup stages as one history: saved first (minus a "failed"
+ * that a retry has moved past), then the live ones not already listed.
+ */
+function mergeStages<T extends { percent: number; key: string; message: string }>(saved: T[], live: T[]): T[] {
+  if (!saved.length) return live;
+  const base = saved.filter((x, i) => !(x.key === 'failed' && i === saved.length - 1));
+  const seen = new Set(base.map((x) => `${x.percent}|${x.key}|${x.message}`));
+  // A fresh console repeats early stages ("booted"): only append what's new.
+  const fresh = live.filter((x) => !seen.has(`${x.percent}|${x.key}|${x.message}`));
+  // Same console read again (nothing new): keep it as it was, incl. a failure.
+  if (!fresh.length) return saved.length >= live.length ? saved : live;
+  return [...base, ...fresh];
+}
+
+/** A cloud error's own message, trimmed for display (they name the problem, never secrets). */
+function cloudMessage(error: unknown): string {
+  const e = error as any;
+  const msg = String(e?.details || e?.message || e || '').replace(/\s+/g, ' ').trim();
+  return msg ? (msg.length > 200 ? msg.slice(0, 197) + '…' : msg) : 'Couldn\'t read the machine\'s console.';
+}
+
 async function setStatus(machineId: string, status: string, extra: Record<string, unknown> = {}): Promise<void> {
   const sets = ['status = $2'];
   const values: unknown[] = [machineId, status];
@@ -283,6 +305,57 @@ export class MachineService {
         throw error;
       }
     }, 'Machine started.');
+    return { operationId: op.id };
+  }
+
+  /**
+   * RESCUE: get an unfinished setup going again. The setup is a boot service
+   * that skips steps already done, so: a stopped machine (e.g. a reclaimed
+   * spot machine) is started; a running one whose setup went quiet is
+   * restarted. Either way it carries on from where it got to.
+   */
+  static async resumeSetup(userId: string, machineId: string): Promise<{ operationId: string }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    if (neverCreated(machine)) throw new MachineRequestError(409, 'This machine was never created at the cloud.', 'Delete it and launch a new one.');
+
+    // A retry moves past a failure: drop the trailing "failed" so the bar
+    // shows the last good step while the machine comes back.
+    const saved: Array<{ key: string }> = Array.isArray(machine.setup_progress) ? machine.setup_progress : [];
+    if (saved.length && saved[saved.length - 1].key === 'failed') {
+      await query('UPDATE machines SET setup_progress = $2 WHERE id = $1', [machineId, JSON.stringify(saved.slice(0, -1))]);
+    }
+
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'resume-setup', machineId, title: `Resume setup on ${machine.instance_type} in ${machine.region}` });
+    await setStatus(machineId, 'starting');
+    op.runInBackground(async () => {
+      try {
+        const provider = await providerFor(userId, machine.provider, op.reporter);
+        if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+        const before = await provider.getInstanceStatus(machine.instance_id);
+        if (before.status === 'terminated') throw new Error('The machine no longer exists at the cloud. Delete it here and launch a new one.');
+        if (before.status === 'running') {
+          await op.info('The machine is running but its setup went quiet — restarting it. Finished steps are skipped.');
+          await provider.rebootInstance(machine.instance_id);
+        } else {
+          if (before.status === 'stopping') await op.info('Waiting for the machine to finish stopping…');
+          await op.info('Starting the machine. Its setup carries on from where it stopped — finished steps are skipped.');
+          await provider.startInstance(machine.instance_id);
+        }
+        const status = await provider.getInstanceStatus(machine.instance_id);
+        await setStatus(machineId, status.status === 'terminated' ? 'failed' : status.status, {
+          ip_address: status.ipAddress || null, last_started: new Date(), last_error: null, last_synced_at: new Date(), stopped_at: null,
+        });
+        if (status.ipAddress && status.ipAddress !== machine.ip_address) {
+          await op.warn(`The machine's public IP changed to ${status.ipAddress}.`);
+        }
+        await op.info('Progress should reappear within 1–2 minutes of boot.');
+        return { ipAddress: status.ipAddress };
+      } catch (error) {
+        await MachineService.resyncQuietly(userId, machine);
+        throw error;
+      }
+    }, 'Setup resumed.');
     return { operationId: op.id };
   }
 
@@ -591,17 +664,62 @@ export class MachineService {
       } catch { /* shown as unavailable */ }
     }
 
-    let stages: Array<{ percent: number; key: string; message: string }> = [];
+    // Live progress from the serial console, with the last stages we saw as
+    // a fallback: a failed or empty read (machine stopped, spot machine
+    // reclaimed, API hiccup, console restarted) shows "last seen N%" rather
+    // than dropping to 0%, and says why when the cloud knows.
+    type Stage = { percent: number; key: string; message: string };
+    const saved: Stage[] = Array.isArray(machine.setup_progress) ? machine.setup_progress : [];
+    const savedAt: Date | null = machine.setup_progress_at ? new Date(machine.setup_progress_at) : null;
+    let stages: Stage[] = [];
     let progressError: string | undefined;
+    let live = false;
+    let status: string = machine.status;
+    let stopReason: string | null = null;
     if (!neverCreated(machine) && ['running', 'starting'].includes(machine.status)) {
+      let provider: Awaited<ReturnType<typeof providerFor>> | null = null;
       try {
-        const provider = await providerFor(userId, machine.provider);
+        provider = await providerFor(userId, machine.provider);
         stages = await provider.getSetupProgress(machine.instance_id);
+        live = stages.length > 0;
       } catch (error) {
-        progressError = error instanceof FriendlyCloudError ? error.friendly.title : 'Couldn\'t read the machine\'s console yet.';
+        progressError = error instanceof FriendlyCloudError ? error.friendly.title : cloudMessage(error);
+        console.warn(`[Setup progress] ${machine.provider} ${machine.instance_id}: ${cloudMessage(error)}`);
+        // Is it even running? If the cloud stopped it, record that and ask why.
+        if (provider) {
+          try {
+            const now = await provider.getInstanceStatus(machine.instance_id);
+            if (now.status !== 'running' && now.status !== 'starting') {
+              status = now.status === 'terminated' ? 'missing' : now.status;
+              await setStatus(machine.id, status, { last_synced_at: new Date(), ...(status === 'stopped' ? { stopped_at: new Date() } : {}) });
+              stopReason = await provider.getStopReason(machine.instance_id).catch(() => null);
+            }
+          } catch { /* keep what we have */ }
+        }
       }
     }
-    const current = stages[stages.length - 1];
+    if (live) {
+      // After a restart (resume, spot reclaim) the console starts empty and
+      // the setup prints "booted" again before skipping finished steps: merge
+      // into the saved history instead of replacing it, so nothing regresses.
+      const merged = mergeStages(saved, stages);
+      const prev = saved[saved.length - 1];
+      const last = merged[merged.length - 1];
+      if (!prev || last.key !== prev.key || last.percent !== prev.percent || merged.length !== saved.length) {
+        await query('UPDATE machines SET setup_progress = $2, setup_progress_at = NOW() WHERE id = $1', [machine.id, JSON.stringify(merged)]).catch(() => {});
+      }
+      stages = merged;
+    } else if (saved.length) {
+      stages = saved; // last known
+    }
+    const latest = stages[stages.length - 1];
+    // The bar never goes backwards while the setup is still under way.
+    const furthest = Math.max(0, ...stages.filter((x) => x.key !== 'failed').map((x) => x.percent));
+    const current = latest && latest.key !== 'failed' && latest.key !== 'ready' ? { ...latest, percent: Math.max(latest.percent, furthest) } : latest;
+    const inProgress = !!current && current.key !== 'ready' && current.key !== 'failed';
+    // Same stage for 30+ minutes while "running": the setup has most likely stalled.
+    const stuck = live && inProgress && status === 'running' && !!savedAt
+      && saved[saved.length - 1]?.key === current.key && Date.now() - savedAt.getTime() > 30 * 60_000;
 
     // Browser access (machines set up since it was added): is each port answering?
     const ip = machine.ip_address as string | null;
@@ -613,7 +731,7 @@ export class MachineService {
     return {
       machineId,
       provider: machine.provider,
-      status: machine.status,
+      status,
       ipAddress: machine.ip_address,
       sunshineUrl: machine.ip_address ? `https://${machine.ip_address}:47990` : null,
       browser: {
@@ -631,6 +749,13 @@ export class MachineService {
         ready: current?.key === 'ready',
         failed: current?.key === 'failed',
         error: progressError,
+        // Not read live just now: these are the last stages we saw, at this time.
+        stale: !live && stages.length > 0,
+        lastSeenAt: live ? new Date().toISOString() : savedAt?.toISOString() || null,
+        // Setup unfinished and the machine isn't running (or went quiet): offer "Resume setup".
+        interrupted: inProgress && (status === 'stopped' || stuck || (!live && !!progressError)),
+        stuck,
+        stopReason,
       },
     };
   }

@@ -188,6 +188,16 @@ router.post('/:id/start', async (req: Request, res: Response) => {
   }
 });
 
+// Rescue an unfinished setup: start the machine if it stopped (e.g. a
+// reclaimed spot machine), restart it if its setup went quiet.
+router.post('/:id/resume-setup', async (req: Request, res: Response) => {
+  try {
+    res.status(202).json(await MachineService.resumeSetup(req.userId!, req.params.id));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to resume the setup');
+  }
+});
+
 router.post('/:id/stop', async (req: Request, res: Response) => {
   try {
     res.status(202).json(await MachineService.stop(req.userId!, req.params.id, req.body?.snapshot === true));

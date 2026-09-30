@@ -37,6 +37,14 @@ export interface ConnectionInfo {
     ready: boolean;
     failed: boolean;
     error?: string;
+    /** Not read live just now: the last stages seen, at lastSeenAt. */
+    stale?: boolean;
+    lastSeenAt?: string | null;
+    /** Setup unfinished and the machine stopped or went quiet: offer "Resume setup". */
+    interrupted?: boolean;
+    stuck?: boolean;
+    /** Why it stopped, when the cloud says (e.g. spot machine reclaimed). */
+    stopReason?: string | null;
   };
   /** Browser access (machines set up since it was added); `checked` = the ports were probed. */
   browser?: {
@@ -116,8 +124,12 @@ function CopyButton({ value }: { value: string }) {
 }
 
 export default function MachineConnectionPanel({
-  machineId, status, quality = 'high', onStage, bigScreen = false,
+  machineId, status, quality = 'high', onStage, bigScreen = false, onResume, onStatusChange,
 }: {
+  /** Start / restart the machine so its setup carries on (POST …/resume-setup via the card). */
+  onResume?: () => void;
+  /** The backend found the machine in another state than the card shows (e.g. stopped). */
+  onStatusChange?: (status: string) => void;
   /** EXPERIMENTAL GRID-driver machine (screens up to 4096x2160). */
   bigScreen?: boolean;
   machineId: string;
@@ -141,6 +153,7 @@ export default function MachineConnectionPanel({
         setInfo(data);
         setError(null);
         onStage?.(data.setup.current);
+        if (data.status !== status) onStatusChange?.(data.status);
         // Keep polling while it's running but not finished setting up.
         if (data.status === 'running' && !data.setup.ready && !data.setup.failed) timer = setTimeout(load, 15000);
       } catch (e) {
@@ -156,14 +169,20 @@ export default function MachineConnectionPanel({
   if (!info) return <p className="text-xs text-slate-500 animate-pulse">&gt; reading connection details…</p>;
 
   const pct = info.setup.current?.percent ?? 0;
+  const s = info.setup;
+  const ago = (iso?: string | null) => {
+    if (!iso) return '';
+    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+  };
 
   return (
     <div className="space-y-4 text-sm">
       {/* ---- Setup progress ---- */}
-      {info.status === 'running' && (
+      {(info.status === 'running' || s.interrupted) && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="label">On-machine setup</span>
+            <span className="label">On-machine setup{s.stale && !s.ready && !s.failed && <span className="ml-2 normal-case tracking-normal text-slate-500">· last seen {ago(s.lastSeenAt)}</span>}</span>
             <span className={`text-xs tabular-nums ${info.setup.failed ? 'text-neon-pink' : info.setup.ready ? 'text-neon-lime' : 'text-neon-amber'}`}>
               {info.setup.failed ? 'failed' : info.setup.ready ? 'ready ✓' : `${pct}%`}
             </span>
@@ -181,12 +200,36 @@ export default function MachineConnectionPanel({
               ? `Can't read progress yet: ${info.setup.error}`
               : 'Waiting for the machine to report progress (usually starts within 1–2 minutes of launch)…'}
           </p>
+          {s.stale && s.error && !s.interrupted && (
+            <p className="text-xs text-neon-amber mt-1">! Lost contact with the machine’s console ({s.error}). Showing the last progress seen; retrying every 15 seconds.</p>
+          )}
+          {s.interrupted && (
+            <div className="mt-2 rounded border border-neon-amber/40 bg-neon-amber/[0.05] p-3 text-xs space-y-2">
+              <p className="text-neon-amber font-semibold">
+                {info.status === 'stopped' ? `! Setup paused at ${pct}% — the machine stopped.`
+                  : s.stuck ? `! Setup looks stuck at ${pct}% (no progress for 30+ minutes).`
+                  : `! Setup at ${pct}% has gone quiet — can’t reach the machine’s console.`}
+              </p>
+              {s.stopReason && <p className="text-slate-300">{s.stopReason}</p>}
+              {!s.stopReason && s.error && <p className="text-slate-400">The cloud said: {s.error}</p>}
+              <p className="text-slate-400">
+                Nothing is lost: the setup keeps its finished steps on the disk and carries on from where it got to.{' '}
+                {info.status === 'stopped' ? 'Resume starts the machine again (billing resumes).' : 'Resume restarts the machine (a couple of minutes).'}
+              </p>
+              {onResume && (
+                <button type="button" onClick={onResume} className="btn-neon-lime text-xs">↻ Resume setup</button>
+              )}
+            </div>
+          )}
           {info.setup.failed && (
-            <p className="text-xs text-slate-400 mt-1">
-              The setup stopped at the step above. The full log is on the machine at /var/log/cloudgaming-setup.log (open the machine
-              in your cloud console and use its SSH / serial console button; for the streaming container, run: docker logs cloudy).
-              Deleting and relaunching retries from scratch.
-            </p>
+            <div className="text-xs text-slate-400 mt-1 space-y-2">
+              <p>
+                The setup stopped at the step above. The full log is on the machine at /var/log/cloudgaming-setup.log (open the machine
+                in your cloud console and use its SSH / serial console button; for the streaming container, run: docker logs cloudy).
+                Resume retries from the failed step (after a fix, e.g. a new app version); deleting and relaunching starts from scratch.
+              </p>
+              {onResume && <button type="button" onClick={onResume} className="btn-neon text-xs">↻ Retry setup (restart machine)</button>}
+            </div>
           )}
           {info.setup.stages.length > 1 && (
             <details className="mt-2">

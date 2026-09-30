@@ -118,6 +118,24 @@ export abstract class CloudProvider {
   }
 
   /**
+   * Restart a running machine (the on-machine setup is a boot service that
+   * skips finished steps, so this resumes a setup that went quiet). Default:
+   * stop, then start; clouds with a real reboot override it (keeps the IP).
+   */
+  async rebootInstance(instanceId: string): Promise<void> {
+    await this.stopInstance(instanceId);
+    await this.startInstance(instanceId);
+  }
+
+  /**
+   * Why a machine stopped when nobody pressed Stop, if the cloud says:
+   * e.g. a spot machine reclaimed, or it shut itself down. null = unknown.
+   */
+  async getStopReason(_instanceId: string): Promise<string | null> {
+    return null;
+  }
+
+  /**
    * Everything the app has created in the user's account on this cloud —
    * machines AND supporting resources (disks, networks, firewalls, public
    * IPs, snapshots...) — for the infrastructure map. Found by our tag/label

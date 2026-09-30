@@ -507,6 +507,34 @@ export class GCPProvider extends CloudProvider {
     await this.report('success', `${name} is stopped.`);
   }
 
+  async rebootInstance(instanceId: string): Promise<void> {
+    const { zone, name } = this.splitId(instanceId);
+    await this.report('info', `Asking Google to restart ${name} (a hard reset: same machine, same disk and IP)…`);
+    const [lro] = await this.instances.reset({ project: this.projectId, zone, instance: name });
+    await this.waitZoneOp(lro, zone);
+    await this.report('success', `${name} restarted.`);
+  }
+
+  /** Google logs a zone operation when it reclaims a spot machine or the machine powers itself off. */
+  async getStopReason(instanceId: string): Promise<string | null> {
+    const { zone, name } = this.splitId(instanceId);
+    const since = Date.now() - 48 * 3600_000;
+    const [ops] = await this.zoneOps.list({
+      project: this.projectId, zone, maxResults: 50,
+      filter: '(operationType = "compute.instances.preempted") OR (operationType = "compute.instances.guestTerminate") OR (operationType = "compute.instances.hostError")',
+    }) as any;
+    const mine = (ops || [])
+      .filter((o: any) => String(o.targetLink || '').endsWith(`/instances/${name}`) && Date.parse(o.insertTime || '') > since)
+      .sort((a: any, b: any) => Date.parse(b.insertTime) - Date.parse(a.insertTime))[0];
+    if (!mine) return null;
+    const at = new Date(mine.insertTime).toISOString().slice(11, 16) + ' UTC';
+    switch (mine.operationType) {
+      case 'compute.instances.preempted': return `Google reclaimed this spot machine at ${at} (spot machines can be taken back at any time). Your disk and progress are kept.`;
+      case 'compute.instances.guestTerminate': return `The machine shut itself down at ${at} (auto-stop, or a shutdown from inside it).`;
+      default: return `Google stopped the machine at ${at} because of a problem with the physical host.`;
+    }
+  }
+
   async startInstance(instanceId: string): Promise<void> {
     const { zone, name } = this.splitId(instanceId);
     await this.report('info', `Asking Google to start ${name}…`);
