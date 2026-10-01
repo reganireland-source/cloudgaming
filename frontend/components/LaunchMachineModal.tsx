@@ -61,6 +61,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [provider, setProvider] = useState('');
   const [region, setRegion] = useState('');
   const place = useMyPlace(); // regions listed nearest-first
+  const regionPicked = useRef(false); // you chose a region yourself: don't move it
   const [shapeId, setShapeId] = useState('');
   const [diskGb, setDiskGb] = useState(150);
   const [spot, setSpot] = useState(false);
@@ -106,9 +107,20 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
       setSpot(!!preset.spot && current.supportsSpot);
       return;
     }
-    setRegion(current.regions.some((r) => r.id === current.defaultRegion) ? current.defaultRegion : current.regions[0]?.id || '');
+    // Nothing preset: the region nearest to you (else the cloud's default).
+    const nearest = place ? byDistance(current.regions, place)[0]?.id : undefined;
+    regionPicked.current = false;
+    setRegion(nearest || (current.regions.some((r) => r.id === current.defaultRegion) ? current.defaultRegion : current.regions[0]?.id || ''));
     setSpot(false);
   }, [current?.provider]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Where you are can arrive after the form opened: move to the nearest
+  // region then, unless a region was preset or you already chose one.
+  useEffect(() => {
+    if (!current || !place || regionPicked.current || preset) return;
+    const nearest = byDistance(current.regions, place)[0]?.id;
+    if (nearest) setRegion(nearest);
+  }, [place]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const regionInfo = current?.regions.find((r) => r.id === region);
   const shapesHere = useMemo(
@@ -228,7 +240,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <label htmlFor="launch-region" className="label block mb-2">2 · Region</label>
-                      <ThemedSelect id="launch-region" value={region} onChange={setRegion} ariaLabel="Region"
+                      <ThemedSelect id="launch-region" value={region} onChange={(v) => { regionPicked.current = true; setRegion(v); }} ariaLabel="Region"
                         options={byDistance(current.regions, place).map((r) => {
                           const a = access[`${provider}:${r.id}`];
                           const st = a ? ACCESS_STYLE[a.status] : null;

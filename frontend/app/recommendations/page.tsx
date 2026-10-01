@@ -149,6 +149,11 @@ export default function RecommendationsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [launch, setLaunch] = useState<LaunchPreset | null>(null);
+  // Suggested top picks, or Manual config: choose every parameter yourself in the launch form.
+  const [mode, setModeState] = useState<'suggested' | 'manual'>('suggested');
+  const [manualOpen, setManualOpen] = useState(false);
+  useEffect(() => { try { if (localStorage.getItem('recon.mode') === 'manual') setModeState('manual'); } catch { /* ignore */ } }, []);
+  const setMode = (m: 'suggested' | 'manual') => { setModeState(m); try { localStorage.setItem('recon.mode', m); } catch { /* ignore */ } };
   const [locating, setLocating] = useState(false);
   const [locateNote, setLocateNote] = useState<string | null>(null);
   // Can your accounts launch in each region? (quota / region on / keys). Every
@@ -389,7 +394,32 @@ export default function RecommendationsPage() {
         </p>
       )}
 
-      {!place ? null : !result ? (
+      {/* ---- Suggested picks or Manual config ---- */}
+      <div role="radiogroup" aria-label="How to choose" className="inline-flex rounded border border-white/10 overflow-hidden text-xs">
+        {([['suggested', 'Suggested picks'], ['manual', 'Manual config']] as const).map(([m, label]) => (
+          <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => setMode(m)}
+            className={`px-3 py-1.5 border-r last:border-r-0 border-white/10 ${mode === m ? 'bg-neon-cyan/15 text-neon-cyan' : 'text-slate-400 hover:text-slate-200'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'manual' ? (
+        <section className="neon-card rounded-lg p-4 sm:p-5 border border-neon-cyan/30 space-y-3">
+          <p className="text-sm text-slate-200">Choose every parameter yourself, from scratch.</p>
+          <p className="text-xs text-slate-400 max-w-3xl">
+            Any cloud you’ve connected, any region it offers (nearest first, with ping and your quota status), any machine size, spot or on-demand,
+            big screen, disk size, name, game, streaming quality, auto-stop and auto-shelve — with the live price as you go. Nothing is pre-picked
+            except the region nearest to you.
+          </p>
+          {user ? (
+            <button type="button" onClick={() => setManualOpen(true)} className="btn-neon-magenta text-sm">[ OPEN THE LAUNCH FORM ]</button>
+          ) : (
+            <Link href="/login?next=/recommendations" className="btn-neon text-sm inline-block">Sign in to launch</Link>
+          )}
+          <p className="text-[0.7rem] text-slate-500">Want a starting point instead? Switch to <button type="button" onClick={() => setMode('suggested')} className="text-neon-cyan hover:underline">Suggested picks</button>.</p>
+        </section>
+      ) : !place ? null : !result ? (
         <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; SCANNING_REGIONS…</p>
       ) : (
         <>
@@ -475,6 +505,7 @@ export default function RecommendationsPage() {
       )}
 
       {launch && <LaunchMachineModal preset={launch} onClose={() => setLaunch(null)} onLaunched={() => {}} />}
+      {manualOpen && <LaunchMachineModal onClose={() => setManualOpen(false)} onLaunched={() => {}} />}
     </div>
   );
 }
