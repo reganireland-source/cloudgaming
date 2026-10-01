@@ -22,6 +22,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import CloudLogo from '@/components/CloudLogo';
 import { useAuth } from '@/components/AuthProvider';
+import { fillCommand, useCommandContext } from '@/lib/commandContext';
 import { ACCESS_STYLE, RUN_MODES, quotaInUse, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type RunCell, type CheckLine } from '@/lib/regionAccess';
 
 const CLOUDS = [
@@ -334,6 +335,8 @@ function Chip({ status, mode = 'auto', inUse = false }: { status: AccessStatus; 
 }
 
 function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[] }; cloudLabel: string; onClose: () => void }) {
+  const { user } = useAuth();
+  const { ctx } = useCommandContext(!!user); // fills the email etc. into commands
   return (
     <div className="space-y-3">
       {cell.regions.map((r) => (
@@ -366,7 +369,7 @@ function Detail({ cell, cloudLabel, onClose }: { cell: { regions: RegionAccess[]
               {r.fix.consoleUrl && (
                 <a href={r.fix.consoleUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-neon-cyan hover:underline">{r.fix.consoleLabel || 'Open the console'} ↗</a>
               )}
-              {r.fix.cli && <Cli text={r.fix.cli} />}
+              {r.fix.cli && <Cli text={fillCommand(r.fix.cli, ctx)} />}
             </div>
           )}
         </div>
@@ -430,9 +433,10 @@ function RunGrid({ r }: { r: RegionAccess }) {
 
 /** Each quota: how much, what it unlocks, and any open increase request. */
 function QuotaList({ r }: { r: RegionAccess }) {
-  // Google's request command needs a contact email: use the signed-in one.
+  // Google's request command needs a contact email: Config's quota email, else the sign-in one.
   const { user } = useAuth();
-  const fill = (cli: string) => (user?.email ? cli.replace(/YOUR_EMAIL/g, user.email) : cli);
+  const { ctx } = useCommandContext(!!user);
+  const fill = (cli: string) => fillCommand(cli, ctx);
   const offered = (r.run || []).reduce((n, row) => n + RUN_MODES.filter((m) => !row.cells[m.id].na).length, 0);
   const ago = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
   const pending = (r.quotaDetail || []).filter((q) => q.pending?.length);

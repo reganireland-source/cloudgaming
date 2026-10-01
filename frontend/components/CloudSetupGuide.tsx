@@ -29,6 +29,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { fillCommand, type CommandContext } from '@/lib/commandContext';
 
 type ProviderKey = 'aws' | 'azure' | 'gcp' | 'oracle';
 
@@ -107,7 +108,7 @@ const GUIDES: Record<ProviderKey, Guide> = {
       ],
       cli: {
         shell: 'Cloud Shell', href: 'https://shell.cloud.google.com/',
-        note: 'Step 2 lists the exact quota IDs; run step 3 once per ID you need. The all-regions quota takes no --dimensions. If "beta" isn\'t recognised, try "gcloud quotas".',
+        note: 'Your project, region and email are filled in from Config. Run the step-3 lines you need (already asked once? use the Quotas page instead). If "beta" isn\'t recognised, try "gcloud quotas".',
         code: `P=<your-project-id>
 R=asia-southeast1   # your region
 
@@ -122,10 +123,15 @@ gcloud services enable cloudquotas.googleapis.com --project $P
 gcloud beta quotas info list --service=compute.googleapis.com --project=$P --billing-project=$P \\
   --filter="quotaId~GPU" --format="value(quotaId)"
 
-# 3. Request 1 GPU
-gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com \\
-  --quota-id=<ID from step 2> --preferred-value=1 --dimensions=region=$R \\
-  --email=<your email> --justification="Personal cloud gaming VM, 1 GPU"`,
+# 3. Request what you need: each line below is one complete command (run only the ones you need)
+# Project-wide cap (how many GPU machines can run at once, anywhere):
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=GPUS-ALL-REGIONS-per-project --preferred-value=1 --email=<your email> --justification="Personal cloud gaming VM"
+# GOOD tier (T4), on-demand / spot:
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-T4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-T4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+# BETTER / BEST tiers (L4), on-demand / spot:
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"`,
       },
     },
     bigScreen: {
@@ -140,7 +146,7 @@ gcloud beta quotas preferences create --project=$P --billing-project=$P --servic
       ],
       cli: {
         shell: 'Cloud Shell', href: 'https://shell.cloud.google.com/',
-        note: 'Step 3 lists the exact vWS quota IDs (T4 / L4, on-demand / preemptible); run step 4 once per ID you need.',
+        note: 'Your project, region and email are filled in from Config. Run the step-4 lines you need; "GPUs (all regions)" must also be at least 1.',
         code: `P=<your-project-id>
 R=asia-southeast1   # your region
 
@@ -157,10 +163,13 @@ gcloud services enable cloudquotas.googleapis.com --project $P
 gcloud beta quotas info list --service=compute.googleapis.com --project=$P --billing-project=$P \\
   --filter="quotaId~VWS" --format="value(quotaId)"
 
-# 4. Request 1 vWS GPU in the region
-gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com \\
-  --quota-id=<ID from step 3> --preferred-value=1 --dimensions=region=$R \\
-  --email=<your email> --justification="Personal cloud gaming VM, 1 virtual workstation GPU"`,
+# 4. Request what you need: each line below is one complete command (run only the ones you need)
+# GOOD tier big screen (T4 vWS), on-demand / spot:
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-T4-VWS-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-T4-VWS-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+# BETTER / BEST big screen (L4 vWS), on-demand / spot:
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-L4-VWS-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-L4-VWS-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"`,
       },
     },
     warnings: [
@@ -438,7 +447,7 @@ function CliBlock({ shell, href, code, note }: { shell: string; href: string; co
  * @param selected optional: which cloud to show. The Config page passes the
  *                 provider you clicked, so the guide follows your choice.
  */
-export default function CloudSetupGuide({ selected }: { selected?: ProviderKey | null }) {
+export default function CloudSetupGuide({ selected, context }: { selected?: ProviderKey | null; context?: CommandContext }) {
   // Which tab is showing. Starts on the page's selection, or AWS.
   const [active, setActive] = useState<ProviderKey>(selected || 'gcp');
 
@@ -529,7 +538,7 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
             </li>
           ))}
         </ol>
-        {guide.setupCli && <CliBlock {...guide.setupCli} />}
+        {guide.setupCli && <CliBlock {...guide.setupCli} code={context ? fillCommand(guide.setupCli.code, context, active) : guide.setupCli.code} />}
       </section>
 
       {/* ---- Which value goes in which form field ---- */}
@@ -576,7 +585,7 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
             ))}
           </div>
         )}
-        {guide.quota.cli && <CliBlock {...guide.quota.cli} />}
+        {guide.quota.cli && <CliBlock {...guide.quota.cli} code={context ? fillCommand(guide.quota.cli.code, context, active) : guide.quota.cli.code} />}
         <p className="mt-3 text-xs text-slate-300 leading-relaxed">
           <span className="text-neon-amber">Shortcut:</span> once your keys are saved, the <a href="/regions" className="text-neon-cyan hover:underline">Regions</a> page runs these checks for you across every region and cloud, and shows Ready / No quota / Not enabled with the exact fix for each.
         </p>
@@ -594,7 +603,7 @@ export default function CloudSetupGuide({ selected }: { selected?: ProviderKey |
             {guide.bigScreen.steps.map((s, i) => <li key={i}>{s}</li>)}
           </ol>
         )}
-        {guide.bigScreen.cli && <CliBlock {...guide.bigScreen.cli} />}
+        {guide.bigScreen.cli && <CliBlock {...guide.bigScreen.cli} code={context ? fillCommand(guide.bigScreen.cli.code, context, active) : guide.bigScreen.cli.code} />}
       </section>
 
       {/* ---- First launch: tips that apply to every cloud ---- */}

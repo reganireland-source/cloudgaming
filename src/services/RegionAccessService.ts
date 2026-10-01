@@ -324,7 +324,13 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const spotLines = soldMetrics.map((m) => line('PREEMPTIBLE_' + m));
       const spotOk = spotLines.some((l) => l.limit - l.used >= 1);
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
-      const cli = `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com \\\n  --quota-id=<ID from: gcloud beta quotas info list --service=compute.googleapis.com --project=${pid} --billing-project=${pid} --filter="quotaId~GPU" --format="value(quotaId)"> \\\n  --preferred-value=1 --dimensions=region=${region} --email=<you> --justification="Personal cloud gaming VM"`;
+      // Ready-to-paste requests (one complete command per line): the
+      // project-wide cap and the cheapest GPU (T4) in this region.
+      const req1 = (quotaId: string, dims: string) => `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=1${dims} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`;
+      const cli = [
+        ...(globalLimit < 1 ? [req1('GPUS-ALL-REGIONS-per-project', '')] : []),
+        req1(`${(soldMetrics.includes('NVIDIA_T4_GPUS') ? 'NVIDIA_T4_GPUS' : soldMetrics[0] || 'NVIDIA_T4_GPUS').replace(/_/g, '-')}-per-project-region`, ` --dimensions=region=${region}`),
+      ].join('\n');
       if (globalLimit - globalUsage < 1) {
         const globalFull = globalLimit > 0;
         return { region, status: 'no-quota', summary: globalFull
@@ -454,7 +460,6 @@ const AZ_MIN = Math.min(...AZURE_SHAPES.map((s) => s.vcpus));
 async function azureAccess(provider: any, regionIds: string[], log: Log = noLog): Promise<RegionAccess[]> {
 
   return mapLimit(regionIds, 4, verdict('azure', log, async (region): Promise<RegionAccess> => {
-    const cliBase = `SUB=$(az account show --query id -o tsv)\n`;
     // Does Azure sell our T4 sizes here, and to this subscription? (Asked live.)
     try {
       const sizes: Record<string, { restricted?: string }> = await provider.getSizeAvailability(region);
@@ -497,7 +502,7 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
             cli: `az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table` }
         : { steps: [`Quotas → Compute → filter region ${region} → "Standard NCASv3_T4 Family vCPUs" → request 8 (and "Total Regional vCPUs" ≥ 8).`, 'Auto-approved in minutes where Azure has capacity; otherwise follow up with a support request.'],
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas',
-            cli: `${cliBase}az extension add --name quota\naz quota update --resource-name ${T4_QUOTA_FAMILY} --resource-type dedicated \\\n  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/${region}" --limit-object value=8` };
+            cli: `az extension add --name quota --only-show-errors\naz quota update --resource-name ${T4_QUOTA_FAMILY} --resource-type dedicated --scope "/subscriptions/${String(provider.subscriptionId || '<subscription-id>')}/providers/Microsoft.Compute/locations/${region}" --limit-object value=8` };
       // What can I run: on-demand needs the vCPUs free in BOTH the T4 family
       // and the regional total; spot only in the spot (low-priority) quota.
       // Big screen uses the same quotas. Azure only has T4 machines (Good).
@@ -600,7 +605,7 @@ async function oracleAccess(provider: any, regionIds: string[], log: Log = noLog
         return { region, status: 'no-quota' as const, summary: lim.limit > 0 ? `All ${lim.limit} A10 GPU${lim.limit === 1 ? '' : 's'} in use by your machines — stop one, or request more` : `A10 GPU limit is ${lim.limit}`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' as const }], ...extra, spot: null, spotReady: null,
           fix: { steps: ['Governance → Limits, Quotas and Usage → Service "Compute" → search "GPU.A10".', 'Click "Request a service limit increase" → 1 (per availability domain).', 'Approval: hours to a couple of days.'],
             consoleUrl: limitsUrl, consoleLabel: 'Open Limits',
-            cli: `oci limits value list --service-name compute --compartment-id <tenancy-ocid> --region ${region} --all --query "data[?contains(name,'a10')]" --output table` } };
+            cli: `oci limits value list --service-name compute --compartment-id ${String(provider.tenancyOcid || '<tenancy-ocid>')} --region ${region} --all --query "data[?contains(name,'a10')]" --output table` } };
       }
       return { region, status: 'ready' as const, summary: `${lim.limit - lim.used} A10 GPU${lim.limit - lim.used === 1 ? '' : 's'} available`, quotas: [{ label: 'A10 GPUs', limit: lim.limit, used: lim.used, unit: 'GPUs' }], ...extra, spot: null, spotReady: null };
     } catch (error) {

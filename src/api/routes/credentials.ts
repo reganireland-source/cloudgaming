@@ -117,6 +117,34 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 /** GET /api/credentials/forms — the fields and intro text for each cloud's form. */
+/**
+ * GET/PUT /api/credentials/quota-contact — optional contact email for quota
+ * requests (Google's command needs one). Filled into the ready-to-paste
+ * commands so they run as-is. Empty = use the sign-in email.
+ */
+router.get('/quota-contact', async (req: Request, res: Response) => {
+  try {
+    const r = await query('SELECT email, quota_email FROM users WHERE id = $1', [req.userId]);
+    res.json({ email: r.rows[0]?.quota_email || null, accountEmail: r.rows[0]?.email || null });
+  } catch (error) {
+    console.error('Quota contact error:', (error as Error).message);
+    res.status(500).json({ error: 'Could not load the quota contact email' });
+  }
+});
+router.put('/quota-contact', async (req: Request, res: Response) => {
+  const raw = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+  if (raw && (raw.length > 254 || !/^[^\s@"'`$;]+@[^\s@"'`$;]+\.[^\s@"'`$;]+$/.test(raw))) {
+    return res.status(400).json({ error: 'That doesn’t look like an email address.', tip: 'Use the form name@example.com, or leave it empty to use your sign-in email.' });
+  }
+  try {
+    await query('UPDATE users SET quota_email = $2 WHERE id = $1', [req.userId, raw || null]);
+    res.json({ email: raw || null });
+  } catch (error) {
+    console.error('Quota contact save error:', (error as Error).message);
+    res.status(500).json({ error: 'Could not save the quota contact email' });
+  }
+});
+
 router.get('/forms', (_req: Request, res: Response) => {
   res.json(Object.fromEntries((Object.keys(SETUP_MODULES) as ProviderName[]).map((p) => [
     p, { label: PROVIDER_LABELS[p], intro: SETUP_MODULES[p].intro, fields: SETUP_MODULES[p].fields },

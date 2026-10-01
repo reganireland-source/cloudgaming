@@ -18,7 +18,9 @@
  * ============================================================================
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { apiFetch, type ApiError } from '@/lib/auth';
+import { contactEmail, useCommandContext, type CommandContext } from '@/lib/commandContext';
 import CloudSetupGuide from '@/components/CloudSetupGuide';
 import CredentialManager from '@/components/CredentialManager';
 import Link from 'next/link';
@@ -156,6 +158,10 @@ export default function SettingsPage() {
   // Who's signed in (components/AuthProvider.tsx). The guide below is public;
   // only managing keys needs an account.
   const { user, loading } = useAuth();
+  // Values that make the shell commands below (and on Regions) run as pasted.
+  const { ctx, reload } = useCommandContext(!!user);
+  // Keys saved or replaced (the form closed): pick up the new project / subscription.
+  useEffect(() => { if (guideFor === null) reload(); }, [guideFor, reload]);
 
   return (
     <div>
@@ -179,6 +185,7 @@ export default function SettingsPage() {
           <>
             <CredentialManager onEditingChange={setGuideFor} />
             <p className="mt-4 text-xs text-slate-400">Keys saved? <Link href="/regions" className="text-neon-cyan hover:underline">Regions</Link> shows where each cloud will let you launch (quota, region switched on) and how to fix the rest.</p>
+            <QuotaRequestsCard ctx={ctx} onSaved={reload} />
           </>
         ) : (
           <div className="text-sm text-slate-300 space-y-3">
@@ -193,7 +200,7 @@ export default function SettingsPage() {
 
       {/* Detailed per-cloud setup instructions. `selected` makes the guide
           jump to whichever cloud's form you opened above. */}
-      <CloudSetupGuide selected={guideFor} />
+      <CloudSetupGuide selected={guideFor} context={user ? ctx : undefined} />
 
       {/* Troubleshooting: native <details> elements open and close on click
           with no JavaScript. `group` + `group-open:` (Tailwind) flips the
@@ -225,3 +232,63 @@ export default function SettingsPage() {
     </div>
   );
 }
+
+/**
+ * QUOTA REQUESTS — the optional details that make the quota commands (Regions
+ * page, guides below) run exactly as pasted, instead of editing placeholders.
+ * Everything except the email comes from the saved keys.
+ */
+function QuotaRequestsCard({ ctx, onSaved }: { ctx: CommandContext; onSaved: () => void }) {
+  const [email, setEmail] = useState(ctx.quotaEmail || '');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setEmail(ctx.quotaEmail || ''); }, [ctx.quotaEmail]);
+  const save = async () => {
+    setState('saving'); setError(null);
+    try {
+      await apiFetch('/credentials/quota-contact', { method: 'PUT', body: { email: email.trim() } });
+      setState('saved'); onSaved();
+      setTimeout(() => setState('idle'), 2000);
+    } catch (e) {
+      setError((e as ApiError).message || 'Couldn’t save.'); setState('idle');
+    }
+  };
+  const known: Array<[string, string | undefined, string]> = [
+    ['Google project', ctx.gcp?.projectId, 'from your Google key'],
+    ['Google region', ctx.gcp?.region, 'saved with your Google key'],
+    ['Azure subscription', ctx.azure?.subscriptionId, 'from your Azure key'],
+    ['Oracle tenancy', ctx.oracle?.tenancyOcid, 'from your Oracle key'],
+    ['AWS account', ctx.aws?.accountId, 'from your AWS key (AWS commands need nothing else)'],
+  ];
+  return (
+    <div className="mt-5 rounded border border-white/10 p-3 space-y-2">
+      <p className="label">Quota requests (optional)</p>
+      <p className="text-xs text-slate-400 max-w-3xl">
+        The ready-to-paste quota commands on <Link href="/regions" className="text-neon-cyan hover:underline">Regions</Link> and in the guides below
+        are filled in with these, so they run as pasted in Cloud Shell — no placeholders to edit. Most come from your saved keys; Google also asks
+        for a contact email with each request.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block">
+          <span className="block text-[0.7rem] text-slate-400 mb-1">Contact email for quota requests</span>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={ctx.accountEmail || 'you@example.com'}
+            className="input-neon px-2 py-1.5 text-sm w-72 max-w-full" />
+        </label>
+        <button type="button" onClick={save} disabled={state === 'saving' || email.trim() === (ctx.quotaEmail || '')} className="btn-neon text-xs disabled:opacity-40">
+          {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved ✓' : 'Save'}
+        </button>
+      </div>
+      <p className="text-[0.7rem] text-slate-500">Leave empty to use your sign-in email{ctx.accountEmail ? ` (${ctx.accountEmail})` : ''}. Currently used: <span className="text-slate-300">{contactEmail(ctx) || '—'}</span></p>
+      {error && <p className="text-xs text-neon-amber">⚠ {error}</p>}
+      <ul className="text-[0.7rem] text-slate-400 grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
+        {known.map(([label, value, from]) => (
+          <li key={label} className="min-w-0">
+            <span className="text-slate-300">{label}:</span>{' '}
+            {value ? <><span className="font-mono text-slate-200 break-all">{value}</span> <span className="text-slate-500">· {from}</span></> : <span className="text-slate-500">— add the keys to fill this in</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
