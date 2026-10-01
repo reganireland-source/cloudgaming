@@ -100,6 +100,10 @@ export interface QuotaDetail {
   unit: 'GPUs' | 'vCPUs';
   unlocks: string[];    // "Good · Normal", …
   pending?: PendingRequest[];
+  /** Not enough left for even the smallest machine that uses it. */
+  short?: boolean;
+  /** How to ask for more: a console page and a one-line command (works in bash and PowerShell). */
+  request?: { consoleUrl?: string; consoleLabel?: string; cli?: string; note?: string };
 }
 
 const na = (why: string): RunCell => ({ ok: null, na: true, why });
@@ -303,7 +307,17 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         usedKeys.map((k) => {
           const l = k === 'GPUS_ALL_REGIONS' ? { limit: globalLimit, used: globalUsage } : line(k);
           const pend = pendingFor(k);
-          return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], ...(pend.length ? { pending: pend } : {}) };
+          const short = l.limit - l.used < 1;
+          const global = k === 'GPUS_ALL_REGIONS';
+          const quotaId = global ? 'GPUS-ALL-REGIONS-per-project' : `${k.replace(/_/g, '-')}-per-project-region`;
+          const want = Math.max(1, l.used + 1);
+          const request = short ? {
+            consoleUrl: `https://console.cloud.google.com/iam-admin/quotas?project=${pid}&metric=compute.googleapis.com%2F${k.toLowerCase()}`,
+            consoleLabel: `Request in the console`,
+            cli: `gcloud beta quotas preferences create --project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${global ? '' : ` --dimensions=region=${region}`} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`,
+            note: `Asks for ${want}. Run in Cloud Shell; if it says the preference already exists, use the console link instead.`,
+          } : undefined;
+          return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], short, ...(request ? { request } : {}), ...(pend.length ? { pending: pend } : {}) };
         }));
       const extra = { ...detail, ...(gcpPending ? {} : { pendingNote: 'Couldn’t read open quota requests (needs the Cloud Quotas API and “Cloud Quotas Viewer” on the service account).' }) };
       const regional = soldMetrics.map(line).filter((l) => l.limit - l.used >= 1);
@@ -388,7 +402,17 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
           : { ok: false, why: `Limit ${lim} vCPUs — needs ${s.vcpus}`, uses: [code] };
       };
       const pend = (code: string) => (awsPending || []).filter((x: any) => x.quota === code).map((x: any) => ({ requested: x.requested, status: x.status, created: x.created }));
-      const awsQ = (code: string, label: string, limit: number | null): QuotaDetail => ({ key: code, label, used: null, limit: limit ?? 0, unit: 'vCPUs', unlocks: [], ...(pend(code).length ? { pending: pend(code) } : {}) });
+      const awsQ = (code: string, label: string, limit: number | null): QuotaDetail => {
+        const short = (limit ?? 0) < AWS_MIN;
+        const want = Math.max(8, (limit ?? 0) + AWS_MIN);
+        return { key: code, label, used: null, limit: limit ?? 0, unit: 'vCPUs', unlocks: [], short,
+          ...(short ? { request: {
+            consoleUrl: `https://${region}.console.aws.amazon.com/servicequotas/home/services/ec2/quotas/${code}`, consoleLabel: 'Request in Service Quotas',
+            cli: `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${code} --desired-value ${want}`,
+            note: `Asks for ${want} vCPUs (two small machines, or one 8-vCPU). Run in AWS CloudShell.`,
+          } } : {}),
+          ...(pend(code).length ? { pending: pend(code) } : {}) };
+      };
       const extra = {
         ...buildRun(AWS_SHAPES, (g) => !notSold.includes(g), true, awsCell,
           [awsQ(AWS_ON_DEMAND, 'Running On-Demand G and VT instances (vCPUs)', od), awsQ(AWS_SPOT, 'All G and VT Spot Instance Requests (vCPUs)', sp)]),
@@ -496,13 +520,27 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
         return { ok: true, why: `T4 family: ${famFree} free · regional: ${totFree === Infinity ? '?' : totFree} free`, uses };
       };
       const azPend = (key: string) => (azPending || []).filter((x) => String(x.quota).toLowerCase() === key.toLowerCase()).map((x) => ({ requested: x.requested, status: x.status, created: x.created }));
-      const azQ = (key: string, label: string, u?: { limit: number; current: number }): QuotaDetail =>
-        ({ key, label, used: u ? u.current : 0, limit: u ? u.limit : 0, unit: 'vCPUs', unlocks: [], ...(azPend(key).length ? { pending: azPend(key) } : {}) });
+      const sub = String(provider.subscriptionId || '<subscription-id>');
+      const azQ = (key: string, label: string, u?: { limit: number; current: number }, lowPriority = false): QuotaDetail => {
+        const short = !u || u.limit - u.current < AZ_MIN;
+        const want = Math.max(8, (u?.current || 0) + 8);
+        const missingEntry = !u && !lowPriority && key !== 'cores';
+        const request = !short ? undefined : missingEntry ? {
+          consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Support/NewSupportRequestV3Blade', consoleLabel: 'New support request',
+          cli: `az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table`,
+          note: `No quota entry exists for this family here, so it can't be raised with a command: open a support request (Service and subscription limits → Compute-VM → ${region}, NCASv3_T4, new limit 8). The command checks whether the size is offered to you.`,
+        } : {
+          consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Capacity/QuotaMenuBlade/~/myQuotas', consoleLabel: 'Open Quotas',
+          cli: `az quota update --resource-name ${key} --resource-type ${lowPriority ? 'lowPriority' : 'dedicated'} --scope "/subscriptions/${sub}/providers/Microsoft.Compute/locations/${region}" --limit-object value=${want}`,
+          note: `Asks for ${want} vCPUs. Run in Azure Cloud Shell (first time: az extension add --name quota).`,
+        };
+        return { key, label, used: u ? u.current : 0, limit: u ? u.limit : 0, unit: 'vCPUs', unlocks: [], short, ...(request ? { request } : {}), ...(azPend(key).length ? { pending: azPend(key) } : {}) };
+      };
       const extra = {
         ...buildRun(AZURE_SHAPES, () => true, true, azCell, [
           azQ(famKey, 'Standard NCASv3_T4 Family vCPUs (on-demand)', fam),
           azQ('cores', 'Total Regional vCPUs (on-demand)', total),
-          azQ('lowPriorityCores', 'Total Regional Low-priority vCPUs (spot)', spotU),
+          azQ('lowPriorityCores', 'Total Regional Low-priority vCPUs (spot)', spotU, true),
         ]),
         pendingNote: azPending ? 'Requests made through a support ticket don’t show here — check Help + support → All support requests.' : 'Couldn’t read open quota requests.',
       };
@@ -553,7 +591,9 @@ async function oracleAccess(provider: any, regionIds: string[], log: Log = noLog
         : lim.limit > 0 ? { ok: false, inUse: true, why: `All ${lim.limit} A10 GPU${lim.limit === 1 ? '' : 's'} in use by your machines`, uses: ['A10'] }
         : { ok: false, why: 'A10 GPU limit is 0', uses: ['A10'] };
       const extra = {
-        ...buildRun(ORACLE_SHAPES, () => true, false, ociCell, [{ key: 'A10', label: 'GPU.A10 GPUs (normal and preemptible)', used: lim.used, limit: lim.limit, unit: 'GPUs', unlocks: [] }]),
+        ...buildRun(ORACLE_SHAPES, () => true, false, ociCell, [{ key: 'A10', label: 'GPU.A10 GPUs (normal and preemptible)', used: lim.used, limit: lim.limit, unit: 'GPUs', unlocks: [],
+          short: ociFree < 1,
+          ...(ociFree < 1 ? { request: { consoleUrl: limitsUrl, consoleLabel: 'Open Limits', note: 'Search "GPU.A10" → "Request a service limit increase" → 1 per availability domain. Oracle has no command for this (it opens a support request).' } } : {}) }]),
         pendingNote: 'Oracle limit increases are support requests, which the app can’t see — check Help → Support requests in the Oracle console.',
       };
       if (lim.limit - lim.used < 1) {

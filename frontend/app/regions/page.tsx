@@ -446,14 +446,24 @@ function QuotaList({ r }: { r: RegionAccess }) {
       <ul className="text-[0.7rem] text-slate-400 tabular-nums space-y-1">
         {(r.quotaDetail || []).map((q) => {
           const free = q.used == null ? q.limit : q.limit - q.used;
+          const enough = q.short === undefined ? free > 0 : !q.short;
           return (
             <li key={q.key}>
               <span className="text-slate-200">{q.label}</span>{' '}
-              <span className={free > 0 ? 'text-neon-lime' : 'text-slate-500'}>{q.used == null ? `limit ${q.limit}` : `${q.used} used of ${q.limit}`} {q.unit}</span>
+              <span className={enough ? 'text-neon-lime' : 'text-neon-amber'}>{q.used == null ? `limit ${q.limit}` : `${q.used} used of ${q.limit}`} {q.unit}</span>
               {q.pending?.length ? <span className="ml-1 text-neon-cyan">⏳ {q.pending[0].requested} requested</span> : null}
               <span className="block text-slate-500">
                 unlocks: {q.unlocks.length && q.unlocks.length >= offered ? 'every machine on this cloud (a project-wide cap)' : q.unlocks.join(', ') || 'nothing we launch here'}
               </span>
+              {q.request && !q.pending?.length && q.unlocks.length > 0 && (
+                <div className="mt-1 ml-3 pl-2 border-l border-neon-amber/30 space-y-1">
+                  {q.request.consoleUrl && (
+                    <a href={q.request.consoleUrl} target="_blank" rel="noreferrer" className="inline-block text-neon-cyan hover:underline">{q.request.consoleLabel || 'Request more'} ↗</a>
+                  )}
+                  {q.request.cli && <Cli text={q.request.cli} wrap />}
+                  {q.request.note && <p className="text-slate-500">{q.request.note}</p>}
+                </div>
+              )}
             </li>
           );
         })}
@@ -472,11 +482,11 @@ function QuotaRow({ q, suffix = '' }: { q: { label: string; limit: number; used:
   );
 }
 
-function Cli({ text }: { text: string }) {
+function Cli({ text, wrap = false }: { text: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="relative">
-      <pre className="overflow-x-auto rounded bg-black/40 border border-white/10 p-2 pr-14 text-[0.7rem] text-slate-300 whitespace-pre"><code className="!bg-transparent !border-0 !p-0">{text}</code></pre>
+      <pre className={`overflow-x-auto rounded bg-black/40 border border-white/10 p-2 pr-14 text-[0.7rem] text-slate-300 ${wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'}`}><code className="!bg-transparent !border-0 !p-0">{text}</code></pre>
       <button type="button" className="absolute top-1 right-1 text-[0.66rem] text-neon-cyan border border-neon-cyan/40 rounded px-1.5 py-0.5 bg-cyber-darker"
         onClick={() => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined)}>
         {copied ? 'Copied' : 'Copy'}

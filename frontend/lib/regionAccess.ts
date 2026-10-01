@@ -54,7 +54,13 @@ export function quotaInUse(a: RegionAccess): boolean {
 }
 export interface RunRow { tier: 'good' | 'better' | 'best'; label: string; shape: string; cells: Record<RunMode, RunCell> }
 export interface PendingRequest { requested: number; status: string; created?: string }
-export interface QuotaDetail { key: string; label: string; used: number | null; limit: number; unit: 'GPUs' | 'vCPUs'; unlocks: string[]; pending?: PendingRequest[] }
+export interface QuotaDetail {
+  key: string; label: string; used: number | null; limit: number; unit: 'GPUs' | 'vCPUs'; unlocks: string[]; pending?: PendingRequest[];
+  /** Not enough left for even the smallest machine that uses it. */
+  short?: boolean;
+  /** How to ask for more: console page + one-line command. */
+  request?: { consoleUrl?: string; consoleLabel?: string; cli?: string; note?: string };
+}
 
 export interface CloudAccess {
   provider: string; label: string; connected: boolean;
