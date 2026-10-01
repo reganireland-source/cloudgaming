@@ -443,7 +443,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=7
+APPS_VERSION=8
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -567,6 +567,26 @@ COMPOSE
 
 # ---- The Dockerfile that adds Chrome, Discord and Battle.net (image name
 # APPS_IMAGE is set with the other container settings above).
+# In-game FPS counter (MangoHud), on in every game by default: just the FPS
+# number, small and translucent, top-right. Right Shift + F12 hides/shows it.
+# Separate from Moonlight's own stats overlay (which shows what arrives at
+# your device): this one is what the game renders on the machine.
+cat > "$SUN_DIR/project/mangohud.conf" <<'MANGOHUD'
+fps_only
+cpu_stats=0
+gpu_stats=0
+frame_timing=0
+position=top-right
+offset_x=6
+offset_y=6
+font_size=16
+background_alpha=0.25
+alpha=0.85
+round_corners=4
+toggle_hud=Shift_R+F12
+blacklist=steam,steamwebhelper,lutris,heroic,google-chrome,chrome,Discord,discord,firefox,xfdashboard,kasmxproxy,Xkasmvnc,Battle.net.exe,Battle.net Launcher.exe,EpicGamesLauncher.exe
+MANGOHUD
+
 cat > "$SUN_DIR/project/Dockerfile" <<DOCKERFILE
 FROM $SUNSHINE_IMAGE
 # Each app is best-effort: if a download fails, the machine still streams,
@@ -617,6 +637,15 @@ RUN apt-get update \
       || echo "WARNING: xfdashboard skipped (All apps uses the XFCE app finder)" ) \
  ; apt-get clean; rm -rf /var/lib/apt/lists/*
 COPY all-apps.sh /cloudy/bin/all-apps.sh
+# MangoHud FPS counter in every Vulkan game (Proton/DXVK/VKD3D, i.e. nearly all
+# Steam, Lutris and Heroic games): MANGOHUD=1 turns its Vulkan layer on for the
+# whole desktop session; launchers/browsers are blacklisted in the config.
+COPY mangohud.conf /etc/mangohud.conf
+RUN apt-get update \
+ && ( apt-get install -y --no-install-recommends mangohud mangohud:i386 || apt-get install -y --no-install-recommends mangohud \
+      || echo "WARNING: MangoHud skipped (no in-game FPS counter)" ) \
+ ; chmod 644 /etc/mangohud.conf; apt-get clean; rm -rf /var/lib/apt/lists/*
+ENV MANGOHUD=1 MANGOHUD_CONFIGFILE=/etc/mangohud.conf
 # Battle.net icon for the dock/menu (best-effort; falls back to Lutris's).
 RUN curl -fsL -o /usr/share/pixmaps/battlenet.png https://lutris.net/games/icon/battlenet.png || echo "WARNING: Battle.net icon skipped"
 COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
