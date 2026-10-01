@@ -430,6 +430,9 @@ function RunGrid({ r }: { r: RegionAccess }) {
 
 /** Each quota: how much, what it unlocks, and any open increase request. */
 function QuotaList({ r }: { r: RegionAccess }) {
+  // Google's request command needs a contact email: use the signed-in one.
+  const { user } = useAuth();
+  const fill = (cli: string) => (user?.email ? cli.replace(/YOUR_EMAIL/g, user.email) : cli);
   const offered = (r.run || []).reduce((n, row) => n + RUN_MODES.filter((m) => !row.cells[m.id].na).length, 0);
   const ago = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
   const pending = (r.quotaDetail || []).filter((q) => q.pending?.length);
@@ -460,7 +463,7 @@ function QuotaList({ r }: { r: RegionAccess }) {
                   {q.request.consoleUrl && (
                     <a href={q.request.consoleUrl} target="_blank" rel="noreferrer" className="inline-block text-neon-cyan hover:underline">{q.request.consoleLabel || 'Request more'} ↗</a>
                   )}
-                  {q.request.cli && <Cli text={q.request.cli} wrap />}
+                  {q.request.cli && <Cli text={fill(q.request.cli)} wrap />}
                   {q.request.note && <p className="text-slate-500">{q.request.note}</p>}
                 </div>
               )}

@@ -314,8 +314,8 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
           const request = short ? {
             consoleUrl: `https://console.cloud.google.com/iam-admin/quotas?project=${pid}&metric=compute.googleapis.com%2F${k.toLowerCase()}`,
             consoleLabel: `Request in the console`,
-            cli: `gcloud beta quotas preferences create --project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${global ? '' : ` --dimensions=region=${region}`} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`,
-            note: `Asks for ${want}. Run in Cloud Shell; if it says the preference already exists, use the console link instead.`,
+            cli: `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${global ? '' : ` --dimensions=region=${region}`} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`,
+            note: `Asks for ${want}. Run in Cloud Shell (check the email is yours); if it says the preference already exists, use the console link instead.`,
           } : undefined;
           return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], short, ...(request ? { request } : {}), ...(pend.length ? { pending: pend } : {}) };
         }));
@@ -324,7 +324,7 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const spotLines = soldMetrics.map((m) => line('PREEMPTIBLE_' + m));
       const spotOk = spotLines.some((l) => l.limit - l.used >= 1);
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
-      const cli = `gcloud beta quotas preferences create --project=${pid} --service=compute.googleapis.com \\\n  --quota-id=<ID from: gcloud beta quotas info list --service=compute.googleapis.com --project=${pid} --filter="quotaId~GPU" --format="value(quotaId)"> \\\n  --preferred-value=1 --dimensions=region=${region} --email=<you> --justification="Personal cloud gaming VM"`;
+      const cli = `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com \\\n  --quota-id=<ID from: gcloud beta quotas info list --service=compute.googleapis.com --project=${pid} --billing-project=${pid} --filter="quotaId~GPU" --format="value(quotaId)"> \\\n  --preferred-value=1 --dimensions=region=${region} --email=<you> --justification="Personal cloud gaming VM"`;
       if (globalLimit - globalUsage < 1) {
         const globalFull = globalLimit > 0;
         return { region, status: 'no-quota', summary: globalFull

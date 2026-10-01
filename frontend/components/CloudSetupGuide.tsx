@@ -119,11 +119,11 @@ gcloud compute regions describe $R --project $P --flatten=quotas \\
 
 # 2. The quota IDs to request
 gcloud services enable cloudquotas.googleapis.com --project $P
-gcloud beta quotas info list --service=compute.googleapis.com --project=$P \\
+gcloud beta quotas info list --service=compute.googleapis.com --project=$P --billing-project=$P \\
   --filter="quotaId~GPU" --format="value(quotaId)"
 
 # 3. Request 1 GPU
-gcloud beta quotas preferences create --project=$P --service=compute.googleapis.com \\
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com \\
   --quota-id=<ID from step 2> --preferred-value=1 --dimensions=region=$R \\
   --email=<your email> --justification="Personal cloud gaming VM, 1 GPU"`,
       },
@@ -154,11 +154,11 @@ gcloud compute accelerator-types list --project $P \\
 
 # 3. The vWS quota IDs to request
 gcloud services enable cloudquotas.googleapis.com --project $P
-gcloud beta quotas info list --service=compute.googleapis.com --project=$P \\
+gcloud beta quotas info list --service=compute.googleapis.com --project=$P --billing-project=$P \\
   --filter="quotaId~VWS" --format="value(quotaId)"
 
 # 4. Request 1 vWS GPU in the region
-gcloud beta quotas preferences create --project=$P --service=compute.googleapis.com \\
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com \\
   --quota-id=<ID from step 3> --preferred-value=1 --dimensions=region=$R \\
   --email=<your email> --justification="Personal cloud gaming VM, 1 virtual workstation GPU"`,
       },
