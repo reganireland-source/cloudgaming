@@ -1378,10 +1378,18 @@ export class AWSProvider extends CloudProvider {
           explanation: 'Actual charges come from AWS Cost Explorer, which needs its own permission.',
           fixes: [
             'Below, under Bills & billing access → AWS → Billing access setup: one CloudShell command (filled in for your IAM user) gives the app read access to Cost Explorer and invoices.',
-            'If Cost Explorer was never opened on this account, open it once in the Billing console (AWS takes up to 24 hours to prepare the data).',
+            'If Cost Explorer was never opened on this account, open it once in the Billing console (AWS takes up to 24 hours to prepare the data). IAM users also need the root user to activate "IAM user and role access to Billing information" (Account page).',
           ],
           consoleUrl: 'https://console.aws.amazon.com/iam/home#/users',
           consoleLabel: 'Open IAM users',
+        });
+      }
+      if (/not enabled for cost explorer/i.test(String(error?.message))) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_SETUP', title: 'Cost Explorer isn\'t switched on for this AWS account yet',
+          explanation: 'AWS answered: "User not enabled for cost explorer access".',
+          fixes: ['Signed in as the root user: Account → "IAM user and role access to Billing information" → Edit → Activate.', 'Then open Billing and Cost Management → Cost Explorer once. AWS prepares the data for up to 24 hours.'],
+          consoleUrl: 'https://console.aws.amazon.com/cost-management/home#/cost-explorer', consoleLabel: 'Open Cost Explorer',
         });
       }
       if (/DataUnavailable/i.test(String(error?.code))) {

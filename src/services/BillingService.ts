@@ -354,8 +354,9 @@ export async function getBillingAccess(userId: string): Promise<BillingAccess[]>
       shell: { name: 'AWS CloudShell', url: 'https://console.aws.amazon.com/cloudshell/home' },
       summary: 'Actual daily costs (Cost Explorer) and your invoices with due dates (Invoicing).',
       steps: [
-        `Open AWS CloudShell signed in as an administrator (not as the app's key) and run the commands: they let the app's IAM user "${awsUser}" read costs and invoices, and switch on the "${RESOURCE_TAG.key}" cost tag so the app's own spend can be shown separately.`,
-        'Never opened Cost Explorer on this account? Open it once (Billing → Cost Explorer): AWS then prepares the data, which takes up to 24 hours.',
+        'First, once per account (console only): signed in as the ROOT user, Account → "IAM user and role access to Billing information" → Edit → Activate. Without it no IAM user (CloudShell or the app) can see billing.',
+        'Then open Billing and Cost Management → Cost Explorer once: that switches Cost Explorer on. AWS prepares the data for up to 24 hours ("User not enabled for cost explorer access" until then).',
+        `Run the first command in AWS CloudShell as an administrator (not as the app's key): it lets the app's IAM user "${awsUser}" read costs and invoices. The second switches on the "${RESOURCE_TAG.key}" cost tag (app-only costs); it only works once Cost Explorer is on, and the app also tries it by itself.`,
         'Payments are taken from the card on file on or after each invoice\'s due date (Billing → Payments shows what\'s paid).',
       ],
       cli: [
