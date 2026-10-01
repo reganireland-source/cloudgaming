@@ -166,15 +166,16 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
       <div
         role="dialog"
         aria-label="Launch a gaming machine"
-        className="bg-cyber-dark border border-neon-cyan/30 rounded-none sm:rounded-lg w-full max-w-2xl min-h-[100dvh] sm:min-h-0 sm:my-8"
+        className="bg-cyber-dark border border-neon-cyan/30 rounded-none sm:rounded-lg w-full max-w-2xl lg:max-w-6xl h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-3 sm:px-5 py-3 sm:py-4 sticky top-0 bg-cyber-dark z-10">
+        <div className="flex items-center justify-between border-b border-white/10 px-3 sm:px-5 py-3 sm:py-4 sticky top-0 bg-cyber-dark z-10 shrink-0">
           <h2 className="text-sm tracking-label font-bold font-mono neon-text">[ LAUNCH_MACHINE ]</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-100 text-sm font-mono">[ CLOSE ]</button>
         </div>
 
-        <div className="p-3 sm:p-5 space-y-4 sm:space-y-5">
+        {/* The body scrolls inside the dialog; the header (and the launch bar at the bottom) stay put. */}
+        <div className="px-3 sm:px-5 pt-3 sm:pt-5 space-y-4 sm:space-y-5 overflow-y-auto overscroll-contain flex-1 min-h-0">
           {loadError && <FriendlyErrorCard message={loadError.message} tip={loadError.tip} friendly={loadError.friendly} />}
           {!options && !loadError && <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; LOADING_OPTIONS…</p>}
 
@@ -220,6 +221,9 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
 
               {current && current.available && (
                 <>
+                  {/* Wide screens: machine choices on the left, how it runs on the right. */}
+                  <div className="space-y-4 sm:space-y-5 lg:space-y-0 lg:grid lg:grid-cols-2 lg:gap-x-8 lg:items-start">
+                  <div className="space-y-4 sm:space-y-5">
                   {/* Region */}
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
@@ -330,12 +334,14 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     </label>
                   )}
 
+                  </div>
+                  <div className="space-y-4 sm:space-y-5">
                   {/* Nickname */}
                   <div>
                     <label htmlFor="launch-nickname" className="label block mb-2">Name</label>
                     <input id="launch-nickname" value={nickname} maxLength={40} onChange={(e) => setNickname(e.target.value)}
                       placeholder={defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}
-                      className="input-neon w-full sm:w-2/3 px-3 py-2 font-mono text-sm" autoComplete="off" />
+                      className="input-neon w-full sm:w-2/3 lg:w-full px-3 py-2 font-mono text-sm" autoComplete="off" />
                     <p className={`text-xs mt-1 ${nickname.trim() && !NICKNAME_RE.test(nickname.trim()) ? 'text-neon-amber' : 'text-slate-500'}`}>
                       {nickname.trim() && !NICKNAME_RE.test(nickname.trim())
                         ? 'Use letters, digits, spaces, dots, dashes and underscores (up to 40, starting with a letter or digit).'
@@ -361,7 +367,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   {/* Auto-stop */}
                   <div>
                     <label htmlFor="launch-autostop" className="label block mb-2">7 · Auto-stop when idle</label>
-                    <div className="w-full sm:w-1/2"><ThemedSelect id="launch-autostop" value={String(autoStop)} onChange={(v) => setAutoStop(Number(v))}
+                    <div className="w-full sm:w-1/2 lg:w-full"><ThemedSelect id="launch-autostop" value={String(autoStop)} onChange={(v) => setAutoStop(Number(v))}
                       options={[{ value: '15', label: 'After 15 minutes without streaming (recommended)' }, { value: '30', label: 'After 30 minutes' }, { value: '60', label: 'After 1 hour' }, { value: '0', label: 'Never — I’ll stop it myself' }]} /></div>
                     <p className="text-xs text-slate-500 mt-1">
                       The machine watches for Moonlight traffic and big downloads, and shuts itself down when there&apos;s none — so a forgotten
@@ -372,7 +378,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   {/* Auto-shelve */}
                   <div>
                     <label htmlFor="launch-autoshelve" className="label block mb-2">8 · Auto-shelve when unused</label>
-                    <div className="w-full sm:w-1/2"><ThemedSelect id="launch-autoshelve" value={String(autoShelve)} onChange={(v) => setAutoShelve(Number(v))}
+                    <div className="w-full sm:w-1/2 lg:w-full"><ThemedSelect id="launch-autoshelve" value={String(autoShelve)} onChange={(v) => setAutoShelve(Number(v))}
                       options={[{ value: '1', label: 'After 1 day stopped' }, { value: '3', label: 'After 3 days stopped' }, { value: '7', label: 'After 7 days stopped (recommended)' }, { value: '14', label: 'After 14 days stopped' }, { value: '30', label: 'After 30 days stopped' }, { value: '0', label: 'Never — keep the disk' }]} /></div>
                     <p className="text-xs text-slate-500 mt-1">
                       A stopped machine still pays for its whole disk (≈USD {diskMonthly.toFixed(2)}/month here). Shelving snapshots the disk and deletes it,
@@ -381,7 +387,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     </p>
                   </div>
 
-                  {/* Summary + launch */}
+                  {/* Cost details */}
                   <div className="rounded border border-neon-cyan/20 bg-neon-cyan/[0.03] p-4 text-sm">
                     <p className="text-slate-200">
                       <span className="text-neon-lime font-semibold tabular-nums">≈ USD {hourly.toFixed(2)}/hour</span> while running
@@ -391,9 +397,17 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     <p className="text-xs text-slate-500 mt-1">{current.priceNote} Billed by {current.label} to your account — stop the machine when you're done playing.</p>
                   </div>
 
+                  </div>
+                  </div>
+
                   {submitError && <FriendlyErrorCard friendly={submitError.friendly} message={submitError.message} tip={submitError.tip} />}
 
-                  <div className="flex justify-end gap-2">
+                  {/* Launch bar: always visible at the bottom of the scrolling body. */}
+                  <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-5 px-3 sm:px-5 py-3 bg-cyber-dark/95 backdrop-blur border-t border-white/10 flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+                    <p className="mr-auto text-xs text-slate-300 tabular-nums">
+                      <span className="text-neon-lime font-semibold">≈ USD {hourly.toFixed(2)}/h</span> running · USD {diskMonthly.toFixed(2)}/month disk
+                      {nickname.trim() || shape ? <span className="text-slate-500"> · {nickname.trim() || defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}</span> : null}
+                    </p>
                     <button type="button" onClick={onClose} className="text-sm text-slate-400 hover:text-slate-200 px-3">Cancel</button>
                     <button
                       type="button"
