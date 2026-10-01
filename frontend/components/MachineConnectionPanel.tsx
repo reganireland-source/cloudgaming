@@ -316,7 +316,7 @@ export default function MachineConnectionPanel({
             machine; continue. Sign in with the username and password above.
           </li>
           <li>Go to <strong>PIN</strong>, type Moonlight's PIN, and submit. Moonlight is now paired (only needed once per device).</li>
-          <li>In Moonlight, open the machine and pick an app: <strong>Steam</strong> / <strong>Steam (Big Picture)</strong>, <strong>Battle.net</strong>, <strong>Discord</strong>, <strong>Google Chrome</strong>, <strong>Heroic</strong> (Epic &amp; GOG), <strong>Lutris</strong>, <strong>Firefox</strong> or the whole <strong>Desktop</strong>. The first time you open Battle.net it runs its installer (click through once, a few minutes).</li>
+          <li>In Moonlight, open the machine and pick an app: <strong>Steam</strong> / <strong>Steam (Big Picture)</strong>, <strong>Battle.net</strong>, <strong>Discord</strong>, <strong>Google Chrome</strong>, <strong>Heroic</strong> (Epic &amp; GOG), <strong>Lutris</strong>, <strong>Firefox</strong> or the whole <strong>Desktop</strong>. Battle.net is pre-installed in the background during the first setup and opens straight to the Blizzard login (if that didn’t work, the first launch runs its installer instead: click through once).</li>
           <li>Log in to each app once — logins stay on this machine through stops and restarts. Quickest: scan the <strong>QR code</strong> on the Steam, Discord or Battle.net login screen with their phone app.</li>
           <li>When you're done, <strong>stop</strong> the machine here so it stops billing. Your games stay on its disk. (If you set auto-stop at launch, it also shuts itself down after that long without streaming.)</li>
         </ol>

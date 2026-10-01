@@ -149,8 +149,13 @@ Machine card → **Play with Moonlight**:
 2. Moonlight → the machine → pick an app. Every machine has **Steam** (and
    Big Picture), **Battle.net**, **Discord**, **Google Chrome**, **Heroic**
    (Epic & GOG), **Lutris**, **Firefox** and the full **Desktop**. Sign in to
-   Steam and install a small game first. The first **Battle.net** launch runs
-   its installer (click through once, a few minutes).
+   Steam and install a small game first. **Battle.net** is pre-installed in
+   the background during the first setup (through Proton, no Lutris wizard):
+   opening it should go straight to the Blizzard login. If you open it before
+   that finishes it says so and opens when ready; if the pre-install failed
+   (log: `docker exec cloudy cat /var/log/cloudy/battlenet-preinstall.log`,
+   or the CloudyPad log dir), the first launch falls back to Lutris's
+   installer (click through once).
    Log in by scanning the **QR code** on the Steam / Discord / Battle.net
    login screen with their phone app. Logins stay on the machine through
    stop/start; check this by stopping and starting once and confirming

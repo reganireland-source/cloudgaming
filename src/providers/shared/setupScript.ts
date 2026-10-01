@@ -443,7 +443,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=8
+APPS_VERSION=9
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -649,6 +649,10 @@ ENV MANGOHUD=1 MANGOHUD_CONFIGFILE=/etc/mangohud.conf
 # Battle.net icon for the dock/menu (best-effort; falls back to Lutris's).
 RUN curl -fsL -o /usr/share/pixmaps/battlenet.png https://lutris.net/games/icon/battlenet.png || echo "WARNING: Battle.net icon skipped"
 COPY battlenet-start.sh /cloudy/bin/battlenet-start.sh
+COPY battlenet-preinstall.sh /cloudy/bin/battlenet-preinstall.sh
+COPY battlenet-preinstall.supervisor.conf /tmp/battlenet-preinstall.supervisor.conf
+RUN chmod 755 /cloudy/bin/battlenet-preinstall.sh \
+ && cat /tmp/battlenet-preinstall.supervisor.conf >> /cloudy/conf/supervisor/supervisord.conf && rm /tmp/battlenet-preinstall.supervisor.conf
 COPY lutris-runtime-update.py /cloudy/bin/lutris-runtime-update.py
 COPY lutris-runtime.supervisor.conf /tmp/lutris-runtime.supervisor.conf
 RUN chmod 755 /cloudy/bin/lutris-runtime-update.py \
@@ -851,12 +855,96 @@ sys.exit(1)
 MLPAIR
 chmod 700 /usr/local/sbin/cloudgaming-mlweb-pair.py
 
+# Battle.net pre-install (first container start, in the background): Blizzard's
+# installer run silently through Proton (umu-run - what Lutris uses under the
+# hood), into its own Wine prefix on the disk, so the Battle.net icon opens the
+# Blizzard login straight away instead of an install wizard. Best effort: if it
+# fails, the icon falls back to Lutris's installer (as before).
+cat > "$SUN_DIR/project/battlenet-preinstall.sh" <<'BNPRE'
+#!/bin/bash
+PREFIX="$HOME/Games/battlenet"
+EXE="$PREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe"
+STATE="$HOME/.local/share/cloudgaming"
+mkdir -p "$STATE"
+[ -f "$EXE" ] && { echo "Battle.net is installed"; exit 0; }
+[ -f "$STATE/battlenet-preinstall.failed" ] && { echo "An earlier pre-install failed: the icon uses Lutris's installer"; exit 0; }
+command -v umu-run >/dev/null || { echo "umu-run missing: skipping the pre-install"; exit 0; }
+if python3 - <<'PY'
+import os, sqlite3, sys
+home = os.path.expanduser("~")
+for db in [os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local/share"), "lutris", "pga.db"),
+           os.path.join(home, ".local/share/lutris/pga.db"), "/cloudy/data/lutris/pga.db"]:
+    try:
+        if os.path.exists(db) and sqlite3.connect(db).execute(
+                "SELECT 1 FROM games WHERE installed = 1 AND (slug LIKE 'battlenet%' OR slug LIKE 'battle-net%' OR name LIKE 'Battle.net%')").fetchone():
+            sys.exit(0)
+    except Exception:
+        pass
+sys.exit(1)
+PY
+then echo "Battle.net was installed through Lutris: nothing to do"; exit 0; fi
+wait-x-availability.sh
+source export-dbus-address.sh
+echo "Pre-installing Battle.net (downloads Proton the first time; 5-20 minutes)"
+SETUP=/tmp/Battle.net-Setup.exe
+# Same download Lutris's Battle.net installer uses (www), then Blizzard's CDN host.
+if ! curl -fL --retry 3 -o "$SETUP" "https://www.battle.net/download/getInstallerForGame?os=win&version=LIVE&gameProgram=BATTLENET_APP" \
+   && ! curl -fL --retry 3 -o "$SETUP" "https://downloader.battle.net/download/getInstallerForGame?os=win&version=LIVE&gameProgram=BATTLENET_APP"; then
+  echo "Couldn't download the Battle.net installer"; touch "$STATE/battlenet-preinstall.failed"; exit 0
+fi
+mkdir -p "$PREFIX"
+export WINEPREFIX="$PREFIX" GAMEID=umu-battlenet STORE=battlenet
+umu-run "$SETUP" --lang=enUS --installpath="C:\Program Files (x86)\Battle.net" >> /tmp/battlenet-preinstall.wine.log 2>&1 &
+PID=$!
+for i in $(seq 1 180); do
+  [ -f "$EXE" ] && break
+  kill -0 "$PID" 2>/dev/null || break
+  sleep 10
+done
+if [ -f "$EXE" ]; then
+  # Let it finish writing, then close the login window it opens at the end.
+  sleep 60
+  pkill -f 'Battle.net' ; pkill -f 'Agent.exe' ; pkill -f wineserver
+  echo "Battle.net pre-installed"
+else
+  pkill -f 'Battle.net-Setup' ; pkill -f wineserver
+  touch "$STATE/battlenet-preinstall.failed"
+  echo "The Battle.net pre-install didn't finish (see /tmp/battlenet-preinstall.wine.log): the icon uses Lutris's installer"
+fi
+rm -f "$SETUP"
+BNPRE
+
+cat > "$SUN_DIR/project/battlenet-preinstall.supervisor.conf" <<'SUPV'
+
+[program:battlenet-preinstall]
+priority=80
+autostart=true
+autorestart=false
+startsecs=0
+user=%(ENV_CLOUDYPAD_USER)s
+command=flock -n /tmp/battlenet-preinstall.lock /cloudy/bin/battlenet-preinstall.sh
+environment=HOME="%(ENV_CLOUDYPAD_USER_HOME)s",XDG_DATA_HOME="%(ENV_XDG_DATA_HOME)s",XDG_CONFIG_HOME="%(ENV_XDG_CONFIG_HOME)s",XDG_CACHE_HOME="%(ENV_XDG_CACHE_HOME)s"
+stdout_logfile=%(ENV_CLOUDYPAD_LOG_DIR)s/battlenet-preinstall.log
+stderr_logfile=%(ENV_CLOUDYPAD_LOG_DIR)s/battlenet-preinstall.err.log
+SUPV
+
 cat > "$SUN_DIR/project/battlenet-start.sh" <<'BNET'
 #!/bin/bash
 # Same preparation as CloudyPad's lutris-start.sh: wait for the desktop's
 # X server and join its D-Bus session, or Lutris can't open a window.
 wait-x-availability.sh
 source export-dbus-address.sh
+# Pre-installed (battlenet-preinstall.sh): open it directly through Proton.
+PREFIX="$HOME/Games/battlenet"
+EXE="$PREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe"
+if [ ! -f "$EXE" ] && pgrep -f battlenet-preinstall.sh >/dev/null; then
+  command -v notify-send >/dev/null && notify-send "Battle.net" "Still installing in the background (started during setup) - it opens by itself when ready." 2>/dev/null
+  while pgrep -f battlenet-preinstall.sh >/dev/null; do sleep 10; done
+fi
+if [ -f "$EXE" ]; then
+  export WINEPREFIX="$PREFIX" GAMEID=umu-battlenet STORE=battlenet
+  exec umu-run "$EXE"
+fi
 LUTRIS=/usr/games/lutris
 # Is Battle.net installed? Read Lutris's own game database (pga.db, kept on
 # the disk) rather than asking Lutris: when a Lutris window is already open,
