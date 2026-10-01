@@ -443,7 +443,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=9
+APPS_VERSION=10
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -633,6 +633,7 @@ RUN apt-get update \
  ; rm -f /tmp/kasmvnc.deb /tmp/kasmvnc.supervisor.conf; apt-get clean; rm -rf /var/lib/apt/lists/*
 # "All apps" launcher (Launchpad-style grid). Best-effort.
 RUN apt-get update \
+ && ( apt-get install -y --no-install-recommends xdotool || echo "WARNING: xdotool skipped (Battle.net pre-install can't click prompts)" ) \
  && ( apt-get install -y --no-install-recommends xfdashboard xfdashboard-plugins || apt-get install -y --no-install-recommends xfdashboard \
       || echo "WARNING: xfdashboard skipped (All apps uses the XFCE app finder)" ) \
  ; apt-get clean; rm -rf /var/lib/apt/lists/*
@@ -896,11 +897,25 @@ mkdir -p "$PREFIX"
 export WINEPREFIX="$PREFIX" GAMEID=umu-battlenet STORE=battlenet
 umu-run "$SETUP" --lang=enUS --installpath="C:\Program Files (x86)\Battle.net" >> /tmp/battlenet-preinstall.wine.log 2>&1 &
 PID=$!
-for i in $(seq 1 180); do
+# Wine has no UAC/admin prompts, but the installer (or Wine's own Mono/Gecko
+# offer) can still wait for a click: accept the default button (Enter) on
+# those windows only, until Battle.net is installed. Never touches the
+# login window that appears at the end, or anything else on the desktop.
+CLICKED=0
+for i in $(seq 1 360); do
   [ -f "$EXE" ] && break
   kill -0 "$PID" 2>/dev/null || break
-  sleep 10
+  if command -v xdotool >/dev/null; then
+    # By title, and by program (Wine names the window class after the .exe,
+    # so the installer matches even if its title is just "Battle.net").
+    for W in $( { xdotool search --name 'Battle\.net (Setup|Installer|Update)|Battle\.net-Setup|Wine Mono|Wine Gecko|Wine configuration'; \
+                  xdotool search --class 'battle\.net-setup'; } 2>/dev/null | sort -u); do
+      xdotool windowactivate --sync "$W" key --clearmodifiers Return 2>/dev/null && CLICKED=$((CLICKED + 1))
+    done
+  fi
+  sleep 5
 done
+[ "$CLICKED" -gt 0 ] && echo "Accepted $CLICKED installer prompt(s) with their default button"
 if [ -f "$EXE" ]; then
   # Let it finish writing, then close the login window it opens at the end.
   sleep 60
