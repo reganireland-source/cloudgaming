@@ -33,6 +33,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 import { MachineRequestError, MachineService } from '../../services/MachineService';
+import { defaultNickname, uniqueNickname } from '../../services/Nickname';
 import { FriendlyCloudError } from '../../providers/errors';
 import { CATALOGS } from '../../providers/registry';
 import { listCredentialSummaries } from '../../services/CredentialService';
@@ -56,7 +57,7 @@ export function sendRouteError(res: Response, error: unknown, fallback: string) 
 // The columns the frontend needs. connection_secret is deliberately NOT listed.
 const MACHINE_COLUMNS = `id, provider, region, instance_type, instance_id, status, cost_per_hour, streaming_quality,
   game_title, spot, disk_size_gb, ip_address, last_error, created_at, last_started, last_synced_at, snapshot_id,
-  shelved_at, stopped_at, auto_shelve_days, auto_stop_minutes, display_driver`;
+  shelved_at, stopped_at, auto_shelve_days, auto_stop_minutes, display_driver, nickname`;
 
 /**
  * What a machine costs per month while you AREN'T playing, and what it would
@@ -91,6 +92,11 @@ router.get('/', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT ${cols}, s.stored_gb AS snap_stored_gb FROM machines m LEFT JOIN snapshots s ON s.id = m.snapshot_id
        WHERE m.user_id = $1 ORDER BY m.created_at DESC`, [req.userId]);
+    // Machines from before nicknames: give them their default name once.
+    for (const m of result.rows.filter((r: any) => !r.nickname)) {
+      m.nickname = await uniqueNickname(req.userId!, defaultNickname({ provider: m.provider, region: m.region, instanceType: m.instance_type, spot: !!m.spot, bigScreen: m.display_driver === 'grid' }), m.id);
+      await query('UPDATE machines SET nickname = $2 WHERE id = $1 AND nickname IS NULL', [m.id, m.nickname]).catch(() => undefined);
+    }
     // DECIMAL columns come back as text from `pg`; convert for the frontend.
     res.json(result.rows.map(({ snap_stored_gb, ...m }: any) => ({ ...m, cost_per_hour: Number(m.cost_per_hour) || 0, standing: standingFor({ ...m, snap_stored_gb }) })));
   } catch (error) {
@@ -173,6 +179,7 @@ router.post('/', async (req: Request, res: Response) => {
     const started = await MachineService.launch(req.userId!, {
       provider, region, shapeId, gameTitle, quality, spot, diskSizeGb, autoStopMinutes, autoShelveDays,
       bigScreen: bigScreen === true, // experimental GRID driver (screens up to 4096×2160)
+      nickname: typeof req.body?.nickname === 'string' ? req.body.nickname : undefined,
     });
     res.status(202).json(started);
   } catch (error) {
@@ -185,6 +192,15 @@ router.post('/:id/start', async (req: Request, res: Response) => {
     res.status(202).json(await MachineService.start(req.userId!, req.params.id));
   } catch (error) {
     sendRouteError(res, error, 'Failed to start the machine');
+  }
+});
+
+// Rename: { nickname } (empty = back to the default CLOUD-CITY-GPU-TIER name).
+router.post('/:id/nickname', async (req: Request, res: Response) => {
+  try {
+    res.json(await MachineService.rename(req.userId!, req.params.id, req.body?.nickname));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to rename the machine');
   }
 });
 

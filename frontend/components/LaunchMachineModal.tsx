@@ -23,6 +23,7 @@ import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
 import ThemedSelect from './ThemedSelect';
+import { defaultNickname, NICKNAME_RE } from '@/lib/nickname';
 import { byDistance, useMyPlace } from '@/lib/myPlace';
 import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
 
@@ -64,6 +65,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [diskGb, setDiskGb] = useState(150);
   const [spot, setSpot] = useState(false);
   const [bigScreen, setBigScreen] = useState(false); // EXPERIMENTAL GRID driver
+  const [nickname, setNickname] = useState(''); // empty = the default name shown as the placeholder
   const [game, setGame] = useState(preset?.game || '');
   const [quality, setQuality] = useState(preset?.quality || 'high');
   // The preset's region/size/spot must survive the "cloud changed → reset
@@ -146,7 +148,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
     try {
       const res = await apiFetch<{ machineId: string; operationId: string }>('/machines', {
         method: 'POST',
-        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null, bigScreen: bigScreen && bigOk },
+        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null, bigScreen: bigScreen && bigOk, nickname: nickname.trim() || undefined },
       });
       setOperationId(res.operationId);
       onLaunched(); // show the new "creating" machine in the list straight away
@@ -327,6 +329,19 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       </span>
                     </label>
                   )}
+
+                  {/* Nickname */}
+                  <div>
+                    <label htmlFor="launch-nickname" className="label block mb-2">Name</label>
+                    <input id="launch-nickname" value={nickname} maxLength={40} onChange={(e) => setNickname(e.target.value)}
+                      placeholder={defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}
+                      className="input-neon w-full sm:w-2/3 px-3 py-2 font-mono text-sm" autoComplete="off" />
+                    <p className={`text-xs mt-1 ${nickname.trim() && !NICKNAME_RE.test(nickname.trim()) ? 'text-neon-amber' : 'text-slate-500'}`}>
+                      {nickname.trim() && !NICKNAME_RE.test(nickname.trim())
+                        ? 'Use letters, digits, spaces, dots, dashes and underscores (up to 40, starting with a letter or digit).'
+                        : 'What the app and Moonlight call this machine. Leave empty for the suggested name; you can rename it any time.'}
+                    </p>
+                  </div>
 
                   {/* Game + quality */}
                   <div className="grid sm:grid-cols-2 gap-4">

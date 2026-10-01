@@ -50,6 +50,8 @@ import { byDistance, useMyPlace } from '@/lib/myPlace';
 
 interface Machine {
   id: string;
+  /** Editable name, e.g. GOOGLE-SINGAPORE-L4-BEST-S-BS; also what Moonlight lists. */
+  nickname: string | null;
   provider: string;
   region: string;
   instance_type: string;
@@ -188,6 +190,50 @@ function TierBadge({ shape }: { shape: ShapeInfo }) {
   );
 }
 
+/**
+ * The machine's nickname, editable in place. Moonlight lists the machine by
+ * it (Sunshine reads it from the cloud tag at each start). Empty + Save =
+ * back to the default CLOUD-CITY-GPU-TIER[-S][-BS] name.
+ */
+function Nickname({ machine, onRenamed }: { machine: Machine; onRenamed: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(machine.nickname || '');
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { if (!editing) setValue(machine.nickname || ''); }, [machine.nickname, editing]);
+  const save = async (name: string) => {
+    setSaving(true); setError(null);
+    try {
+      const r = await apiFetch<{ nickname: string; note: string }>(`/machines/${machine.id}/nickname`, { method: 'POST', body: { nickname: name } });
+      setValue(r.nickname); setNote(r.note); setEditing(false); onRenamed();
+      setTimeout(() => setNote(null), 12000);
+    } catch (e) {
+      setError((e as ApiError).message || 'Couldn’t rename it.');
+    } finally { setSaving(false); }
+  };
+  if (editing) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <input autoFocus value={value} maxLength={40} onChange={(e) => setValue(e.target.value)} aria-label="Machine nickname"
+          onKeyDown={(e) => { if (e.key === 'Enter') save(value); if (e.key === 'Escape') setEditing(false); }}
+          className="input-neon px-2 py-0.5 text-sm font-semibold w-72 max-w-full" />
+        <button type="button" disabled={saving} onClick={() => save(value)} className="btn-neon text-xs disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
+        <button type="button" disabled={saving} onClick={() => save('')} className="text-[0.7rem] text-slate-400 hover:text-slate-200" title="Back to CLOUD-CITY-GPU-TIER[-S][-BS]">Default</button>
+        <button type="button" onClick={() => { setEditing(false); setError(null); }} className="text-[0.7rem] text-slate-500 hover:text-slate-300">Cancel</button>
+        {error && <span className="basis-full text-[0.7rem] text-neon-amber">⚠ {error}</span>}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      <span className="text-sm font-semibold text-slate-100 break-all">{machine.nickname || machine.instance_type}</span>
+      <button type="button" onClick={() => setEditing(true)} className="text-[0.7rem] text-neon-cyan/80 hover:text-neon-cyan" aria-label="Rename" title="Rename (Moonlight shows this name)">✎</button>
+      {note && <span className="text-[0.66rem] text-slate-400">{note}</span>}
+    </span>
+  );
+}
+
 function MachineCard({
   machine, activeOp, onAction, onOpFinished, regions, shape, bigExtra = 0,
 }: {
@@ -245,7 +291,8 @@ function MachineCard({
               {BUSY.includes(machine.status) && <span className="inline-block w-1.5 h-1.5 rounded-full bg-neon-amber animate-pulse mr-1.5 align-middle" />}
               {st.text}
             </span>
-            <span className="text-sm font-semibold text-slate-100">{machine.instance_type}</span>
+            <Nickname machine={machine} onRenamed={onOpFinished} />
+            <span className="text-xs text-slate-400 font-mono">{machine.instance_type}</span>
             {shape && <TierBadge shape={shape} />}
             {machine.display_driver === 'grid' && (
               <span className="text-[0.66rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"

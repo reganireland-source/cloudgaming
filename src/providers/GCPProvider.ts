@@ -337,7 +337,7 @@ export class GCPProvider extends CloudProvider {
     config: ProviderConfig,
     options: { spot: boolean; diskSizeGb: number; sourceSnapshot?: string;
                sunshineUsername: string; sunshinePassword: string; autoStopMinutes?: number;
-               displayDriver?: 'standard' | 'grid' }
+               displayDriver?: 'standard' | 'grid'; nickname?: string }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
     const shape = findShape(config.instanceType);
     if (!shape) {
@@ -435,7 +435,9 @@ export class GCPProvider extends CloudProvider {
           : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD' },
         metadata: {
           items: [
-            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp' }) },
+            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp', serverName: options.nickname }) },
+            // Read by the machine at every boot (rename in the app = update this).
+            ...(options.nickname ? [{ key: 'cg-nickname', value: options.nickname }] : []),
             { key: 'sunshine-username', value: options.sunshineUsername },
             { key: 'sunshine-password', value: options.sunshinePassword },
           ],
@@ -497,6 +499,7 @@ export class GCPProvider extends CloudProvider {
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
+      nickname: options.nickname,
     });
   }
 
@@ -509,6 +512,17 @@ export class GCPProvider extends CloudProvider {
   }
 
   readonly canSwitchSpotInPlace = true;
+
+  /** Instance metadata "cg-nickname" (setMetadata needs the current fingerprint). */
+  async setNickname(instanceId: string, nickname: string): Promise<boolean> {
+    const { zone, name } = this.splitId(instanceId);
+    const [inst] = await this.instances.get({ project: this.projectId, zone, instance: name });
+    const items = (inst.metadata?.items || []).filter((i: any) => i.key !== 'cg-nickname');
+    items.push({ key: 'cg-nickname', value: nickname });
+    const [lro] = await this.instances.setMetadata({ project: this.projectId, zone, instance: name, metadataResource: { fingerprint: inst.metadata?.fingerprint, items } } as any);
+    await this.waitZoneOp(lro, zone);
+    return true;
+  }
 
   /**
    * Spot <-> on-demand on a stopped VM (Google allows changing the
@@ -756,6 +770,7 @@ export class GCPProvider extends CloudProvider {
       sunshinePassword: opts.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: opts.autoStopMinutes,
       displayDriver: opts.displayDriver,
+      nickname: opts.nickname,
     });
     return { instanceId, ipAddress };
   }

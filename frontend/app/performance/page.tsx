@@ -23,7 +23,7 @@ import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Machine {
-  id: string; provider: string; region: string; instance_type: string; status: string;
+  id: string; nickname?: string | null; provider: string; region: string; instance_type: string; status: string;
   cost_per_hour: number; streaming_quality: string; game_title: string | null; spot: boolean;
   ip_address: string | null; created_at: string; last_started: string | null; last_synced_at: string | null;
 }
@@ -136,7 +136,7 @@ export default function PerformancePage() {
                 <li key={m.id} className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-sm text-slate-100 truncate">{m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</p>
+                      <p className="text-sm text-slate-100 truncate">{m.nickname || m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</p>
                       <p className="text-[0.7rem] text-slate-500">{r?.cloud || m.provider.toUpperCase()} · {r?.name || m.region}{m.spot ? ' · spot' : ''}</p>
                     </div>
                     <span className={`shrink-0 rounded border px-1.5 text-[0.7rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'border-white/20 text-slate-400'}`}>{m.status}</span>

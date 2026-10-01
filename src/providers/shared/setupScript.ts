@@ -78,7 +78,17 @@ export interface SetupScriptOptions {
    */
   displayDriver?: 'standard' | 'grid';
   gridSource?: 'aws' | 'azure' | 'gcp';
+  /**
+   * The machine's nickname, which Sunshine announces (what Moonlight lists).
+   * At every boot the machine prefers the CURRENT nickname from the cloud's
+   * own metadata (tag / label "cg-nickname", updated when you rename it in
+   * the app) and falls back to this one.
+   */
+  serverName?: string;
 }
+
+/** Characters allowed in a nickname (also safe inside quotes in bash and YAML). */
+export const NICKNAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
 
 /** Where each cloud publishes its licensed GRID driver (Linux). */
 export const GRID_DRIVER = {
@@ -112,6 +122,7 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
   const passB64 = bashSafe(Buffer.from(pass).toString('base64'), 'Sunshine password', /^[A-Za-z0-9+/=]+$/);
   const minutes = Math.max(0, Math.min(24 * 60, Math.round(Number(opts.autoStopMinutes ?? 15)) || 0));
   return compactScript(SCRIPT_TEMPLATE
+    .split('__SUN_NAME__').join(opts.serverName && NICKNAME_RE.test(opts.serverName) ? opts.serverName : 'Cloud Gaming PC')
     .split('__SUN_USER__').join(user)
     .split('__SUN_PASS_B64__').join(passB64)
     .split('__AUTOSTOP_MINUTES__').join(String(minutes))
@@ -464,6 +475,22 @@ chmod 600 "$SUN_DIR/tls/key.pem" "$SUN_DIR/mlweb/tls/key.pem" 2>/dev/null
 # the public IP (it can change after a stop/start) makes it reliable.
 PUBLIC_IP=$(curl -fs --max-time 5 https://checkip.amazonaws.com | tr -d '[:space:]' || true)
 
+# The name Sunshine announces (Moonlight lists the machine by it): the current
+# nickname from the cloud's metadata service if set (renamed in the app),
+# else the one given at launch. Each cloud answers only its own endpoint.
+SUN_NAME='__SUN_NAME__'
+LIVE_NAME=$(curl -fs --max-time 2 -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/cg-nickname 2>/dev/null) \
+  || LIVE_NAME=$(IMDS_TOKEN=$(curl -fs --max-time 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token) \
+       && curl -fs --max-time 2 -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/tags/instance/cg-nickname) \
+  || LIVE_NAME=$(curl -fs --max-time 2 -H 'Metadata: true' 'http://169.254.169.254/metadata/instance/compute/tagsList?api-version=2021-02-01' \
+       | python3 -c 'import sys,json; print(next((t["value"] for t in json.load(sys.stdin) if t["name"]=="cg-nickname"),""))' 2>/dev/null) \
+  || LIVE_NAME=$(curl -fs --max-time 2 -H 'Authorization: Bearer Oracle' http://169.254.169.254/opc/v2/instance/freeformTags \
+       | python3 -c 'import sys,json; print(json.load(sys.stdin).get("cg-nickname",""))' 2>/dev/null) \
+  || LIVE_NAME=""
+LIVE_NAME=$(printf '%s' "$LIVE_NAME" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-40)
+[ -n "$LIVE_NAME" ] && SUN_NAME="$LIVE_NAME"
+say "Machine name (Moonlight shows this): $SUN_NAME"
+
 cat > "$SUN_DIR/project/docker-compose.yml" <<COMPOSE
 services:
   cloudy:
@@ -511,7 +538,7 @@ services:
       CLOUDYPAD_KEYBOARD_VARIANT: ""
       CLOUDYPAD_KEYBOARD_OPTIONS: ""
       CLOUDYPAD_LOCALE: "en_US.UTF-8"
-      SUNSHINE_SERVER_NAME: "Gints Global Gaming Hubjob"
+      SUNSHINE_SERVER_NAME: "$SUN_NAME"
       SUNSHINE_WEB_USERNAME: "$SUN_USER"
       SUNSHINE_WEB_PASSWORD_BASE64: "$SUN_PASS_B64"
       CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG: ""

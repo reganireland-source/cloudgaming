@@ -24,7 +24,7 @@ import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Machine {
-  id: string; provider: string; region: string; instance_type: string; status: string;
+  id: string; nickname?: string | null; provider: string; region: string; instance_type: string; status: string;
   cost_per_hour: number; game_title: string | null; spot: boolean; created_at: string;
 }
 interface Inventory {
@@ -134,7 +134,7 @@ export default function Dashboard() {
                     <Link href="/machines" className="flex items-center gap-2.5 rounded border border-white/10 bg-white/[0.02] px-2.5 py-2 hover:border-white/25">
                       <CloudLogo provider={m.provider} size={20} />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm text-slate-100 truncate">{m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</span>
+                        <span className="block text-sm text-slate-100 truncate">{m.nickname || m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</span>
                         <span className="block text-[0.7rem] text-slate-500 truncate">{c.label} · {m.region}{m.spot ? ' · spot' : ''}</span>
                       </span>
                       <span className="shrink-0 text-right">

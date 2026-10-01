@@ -56,6 +56,8 @@ export interface RestoreOptions {
   spot?: boolean;
   /** EXPERIMENTAL big screen: NVIDIA's GRID driver (4096x2160) instead of the datacenter one (2560x1600). */
   displayDriver?: 'standard' | 'grid';
+  /** The machine's nickname: tagged on the machine ("cg-nickname") and announced by Sunshine. */
+  nickname?: string;
 }
 
 export interface LaunchOptions {
@@ -71,6 +73,8 @@ export interface LaunchOptions {
   autoStopMinutes?: number;
   /** EXPERIMENTAL big screen: NVIDIA's GRID driver (4096x2160) instead of the datacenter one (2560x1600). */
   displayDriver?: 'standard' | 'grid';
+  /** The machine's nickname: tagged on the machine ("cg-nickname") and announced by Sunshine. */
+  nickname?: string;
 }
 
 /** Basic facts about an existing snapshot. */
@@ -142,6 +146,15 @@ export abstract class CloudProvider {
    * snapshot (Shelve, then Restore).
    */
   readonly canSwitchSpotInPlace: boolean = false;
+
+  /**
+   * Store the machine's nickname on the cloud machine itself (tag / label
+   * "cg-nickname"), where the machine reads it at boot for Sunshine's name.
+   * Takes effect the next time it starts. false = not supported here.
+   */
+  async setNickname(_instanceId: string, _nickname: string): Promise<boolean> {
+    return false;
+  }
 
   /** Switch a stopped machine between spot (true) and on-demand (false). */
   async setSpot(_instanceId: string, _spot: boolean): Promise<void> {

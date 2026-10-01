@@ -269,8 +269,8 @@ fi
 # --- end Azure extra ---
 `;
 
-function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, displayDriver?: 'standard' | 'grid'): string {
-  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure' });
+function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, displayDriver?: 'standard' | 'grid', nickname?: string): string {
+  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure', serverName: nickname });
   // Keep the "#!/bin/bash" line first (cloud-init needs it to run the file as a script).
   const firstNewline = script.indexOf('\n');
   return script.slice(0, firstNewline + 1) + AZURE_SCRIPT_PRELUDE + script.slice(firstNewline + 1);
@@ -548,6 +548,7 @@ export class AzureProvider extends CloudProvider {
       sunshinePassword: string;
       autoStopMinutes?: number;
       displayDriver?: 'standard' | 'grid';
+      nickname?: string;
       fromSnapshot?: Snapshot;
     }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
@@ -591,7 +592,8 @@ export class AzureProvider extends CloudProvider {
     // This machine's own pieces. A unique name: letters, digits, hyphens.
     const vmName = `cg-${crypto.randomBytes(4).toString('hex')}`;
     const names = partNames(vmName);
-    const tags = { ...TAGS, 'cloudgaming-machine': vmName, 'sunshine-user': options.sunshineUsername };
+    // "cg-nickname" is read by the machine at every boot (Sunshine's name).
+    const tags = { ...TAGS, 'cloudgaming-machine': vmName, 'sunshine-user': options.sunshineUsername, ...(options.nickname ? { 'cg-nickname': options.nickname } : {}) };
 
     try {
       // 1. Public IP. "Standard" SKU (Azure's only option for new IPs) must be
@@ -668,7 +670,7 @@ export class AzureProvider extends CloudProvider {
               computerName: vmName,
               adminUsername: ADMIN_USER,
               // The setup script, base64-encoded. cloud-init runs it on first boot.
-              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver)).toString('base64'),
+              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver, options.nickname)).toString('base64'),
               linuxConfiguration: {
                 disablePasswordAuthentication: true,
                 ssh: { publicKeys: [{ path: `/home/${ADMIN_USER}/.ssh/authorized_keys`, keyData: throwawaySshPublicKey() }] },
@@ -733,6 +735,14 @@ export class AzureProvider extends CloudProvider {
   // The CloudProvider contract
   // ==========================================================================
 
+  /** VM tag "cg-nickname" (the machine reads its tags from Azure's metadata service at boot). */
+  async setNickname(instanceId: string, nickname: string): Promise<boolean> {
+    const { rg, name } = this.splitId(instanceId);
+    const vm = await this.compute.virtualMachines.get(rg, name);
+    await this.compute.virtualMachines.beginUpdateAndWait(rg, name, { tags: { ...(vm.tags || {}), 'cg-nickname': nickname } });
+    return true;
+  }
+
   async launchInstance(
     config: ProviderConfig,
     options: LaunchOptions
@@ -744,6 +754,7 @@ export class AzureProvider extends CloudProvider {
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
+      nickname: options.nickname,
     });
   }
 
@@ -1000,6 +1011,7 @@ export class AzureProvider extends CloudProvider {
       diskSizeGb: Number(snap.diskSizeGB) || 150,
       sunshineUsername: 'gamer',
       sunshinePassword: crypto.randomBytes(12).toString('base64url'), // unused: the restored disk keeps its own login
+      nickname: opts.nickname,
       fromSnapshot: snap,
     });
     return { instanceId, ipAddress };

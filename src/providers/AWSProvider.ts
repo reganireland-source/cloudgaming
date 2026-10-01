@@ -433,6 +433,7 @@ export class AWSProvider extends CloudProvider {
       sunshinePassword: string;
       autoStopMinutes?: number;
       displayDriver?: 'standard' | 'grid';
+      nickname?: string;
       /** Boot from this image instead of the newest Ubuntu (used by restore). */
       image?: { imageId: string; rootDeviceName: string; label: string };
     }
@@ -483,6 +484,7 @@ export class AWSProvider extends CloudProvider {
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
       gridSource: 'aws',
+      serverName: options.nickname,
     }), { level: 9 });
     if (gzipped.length > AWS_USER_DATA_LIMIT) {
       throw new Error(`The machine setup script is too big for AWS (${gzipped.length} of ${AWS_USER_DATA_LIMIT} bytes compressed). This is a bug in the app, not your account.`);
@@ -525,9 +527,10 @@ export class AWSProvider extends CloudProvider {
         // "shutdown" from inside the machine just stops it (keeps the disk).
         InstanceInitiatedShutdownBehavior: 'stop',
         // Require the safer "IMDSv2" for the machine's metadata service.
-        MetadataOptions: { HttpTokens: 'required', HttpEndpoint: 'enabled' },
+        // InstanceMetadataTags: the machine reads its own "cg-nickname" tag at boot.
+        MetadataOptions: { HttpTokens: 'required', HttpEndpoint: 'enabled', InstanceMetadataTags: 'enabled' },
         TagSpecifications: [
-          { ResourceType: 'instance', Tags: tags(name) },
+          { ResourceType: 'instance', Tags: tags(name, options.nickname ? { 'cg-nickname': options.nickname } : {}) },
           { ResourceType: 'volume', Tags: tags(name) },
         ],
         // Spot: 'persistent' + 'stop' means that if AWS takes the capacity
@@ -610,6 +613,7 @@ export class AWSProvider extends CloudProvider {
       sunshinePassword: options.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
+      nickname: options.nickname,
     });
   }
 
@@ -621,6 +625,16 @@ export class AWSProvider extends CloudProvider {
     await this.report('info', 'Waiting for it to finish shutting down (usually under a minute)…');
     await ec2.waitFor('instanceStopped', { InstanceIds: [id] }).promise();
     await this.report('success', `${id} is stopped.`);
+  }
+
+  /** Tag "cg-nickname", readable from inside the machine (instance metadata tags). */
+  async setNickname(instanceId: string, nickname: string): Promise<boolean> {
+    const { region, id } = this.splitId(instanceId);
+    const ec2 = this.ec2For(region);
+    await ec2.createTags({ Resources: [id], Tags: [{ Key: 'cg-nickname', Value: nickname }] }).promise();
+    // Machines launched before nicknames existed: let them read their tags.
+    await ec2.modifyInstanceMetadataOptions({ InstanceId: id, InstanceMetadataTags: 'enabled' }).promise().catch(() => undefined);
+    return true;
   }
 
   async rebootInstance(instanceId: string): Promise<void> {
@@ -823,6 +837,7 @@ export class AWSProvider extends CloudProvider {
         sunshinePassword: opts.sunshinePassword || crypto.randomBytes(12).toString('base64url'),
         autoStopMinutes: opts.autoStopMinutes,
         displayDriver: opts.displayDriver,
+        nickname: opts.nickname,
         image: { imageId, rootDeviceName, label: `restore of ${snapId}` },
       });
       return { instanceId, ipAddress };

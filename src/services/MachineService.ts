@@ -51,6 +51,7 @@ import { FriendlyCloudError } from '../providers/errors';
 import { decryptCredentials, encryptCredentials, providerFor } from './CredentialService';
 import { Operation, hasRunningOperation } from './OperationLog';
 import { SnapshotService } from './SnapshotService';
+import { cleanNickname, defaultNickname, uniqueNickname } from './Nickname';
 
 const VALID_QUALITIES = ['budget', 'good', 'high', 'ultra'];
 
@@ -71,6 +72,8 @@ export interface LaunchRequest {
   autoShelveDays?: number | null;
   /** EXPERIMENTAL: GRID driver for screens up to 4096x2160 (AWS, Azure, Google vWS). */
   bigScreen?: boolean;
+  /** Editable name; default CLOUD-CITY-GPU-TIER[-S][-BS]. Announced by Sunshine. */
+  nickname?: string;
 }
 
 /** Auto-shelve choices the UI offers (days stopped). */
@@ -133,6 +136,18 @@ function mergeStages<T extends { percent: number; key: string; message: string; 
     return kept;
   }
   return [...base, ...fresh];
+}
+
+/**
+ * The nickname after a change of region / pricing: a default name follows
+ * the change (GOOGLE-SINGAPORE-…-S loses its -S when switched to on-demand);
+ * a name the user chose is kept as is.
+ */
+async function nicknameAfter(userId: string, machine: any, next: { region?: string; spot?: boolean }): Promise<string> {
+  const now = { provider: machine.provider, region: machine.region, instanceType: machine.instance_type, spot: !!machine.spot, bigScreen: machine.display_driver === 'grid' };
+  const wasDefault = !machine.nickname || String(machine.nickname).replace(/-\d+$/, '') === defaultNickname(now);
+  if (!wasDefault) return machine.nickname;
+  return uniqueNickname(userId, defaultNickname({ ...now, region: next.region ?? now.region, spot: next.spot ?? now.spot }), machine.id);
 }
 
 /** A cloud error's own message, trimmed for display (they name the problem, never secrets). */
@@ -214,18 +229,27 @@ export class MachineService {
     // encrypted. base64url only uses letters, digits, '-' and '_'.
     const sunshine = { username: 'gamer', password: crypto.randomBytes(12).toString('base64url') };
     const machineId = crypto.randomUUID();
+    // The machine's name (in the app and in Moonlight): the user's, or CLOUD-CITY-GPU-TIER[-S][-BS].
+    let nickname: string;
+    if (req.nickname !== undefined && req.nickname !== null && String(req.nickname).trim() !== '') {
+      const clean = cleanNickname(req.nickname);
+      if (!clean) throw new MachineRequestError(400, 'That nickname has characters we can\'t use.', 'Letters, digits, spaces, dots, dashes and underscores; up to 40 characters, starting with a letter or digit.');
+      nickname = await uniqueNickname(userId, clean);
+    } else {
+      nickname = await uniqueNickname(userId, defaultNickname({ provider: req.provider, region: region.id, instanceType: shape.id, spot, bigScreen }));
+    }
     await query(
       `INSERT INTO machines (id, user_id, provider, region, instance_type, instance_id, status, cost_per_hour,
-                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, display_driver, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())`,
+                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, display_driver, nickname, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())`,
       [machineId, userId, req.provider, region.id, shape.id, `pending:${machineId}`, costPerHour, quality,
-       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays, bigScreen ? 'grid' : 'standard']
+       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays, bigScreen ? 'grid' : 'standard', nickname]
     );
 
     // ---- 3. Create it in the background, narrating every step --------------
     const op = await Operation.start({
       userId, provider: req.provider, action: 'launch', machineId,
-      title: `Launch ${shape.label} on ${catalog.label} in ${region.name}${spot ? ` (${catalog.spotLabel})` : ''}${bigScreen ? ' · big screen (experimental)' : ''}`,
+      title: `Launch ${nickname} (${shape.label} on ${catalog.label} in ${region.name}${spot ? `, ${catalog.spotLabel}` : ''}${bigScreen ? ', big screen' : ''})`,
     });
     op.runInBackground(async () => {
       try {
@@ -255,6 +279,7 @@ export class MachineService {
             sunshinePassword: sunshine.password,
             autoStopMinutes,
             displayDriver: bigScreen ? 'grid' : 'standard',
+            nickname,
           }
         );
 
@@ -384,7 +409,7 @@ export class MachineService {
     if (!!machine.spot === spot) return { operationId: null, spot };
 
     if (machine.status === 'shelved' || neverCreated(machine)) {
-      await query('UPDATE machines SET spot = $2, cost_per_hour = $3 WHERE id = $1', [machineId, spot, cost]);
+      await query('UPDATE machines SET spot = $2, cost_per_hour = $3, nickname = $4 WHERE id = $1', [machineId, spot, cost, await nicknameAfter(userId, machine, { spot })]);
       return { operationId: null, spot };
     }
     const provider0 = await providerFor(userId, machine.provider);
@@ -410,7 +435,9 @@ export class MachineService {
           await setStatus(machineId, 'stopped', { stopped_at: new Date() });
         }
         await provider.setSpot(machine.instance_id, spot);
-        await query('UPDATE machines SET spot = $2, cost_per_hour = $3 WHERE id = $1', [machineId, spot, cost]);
+        const renamed = await nicknameAfter(userId, machine, { spot });
+        await query('UPDATE machines SET spot = $2, cost_per_hour = $3, nickname = $4 WHERE id = $1', [machineId, spot, cost, renamed]);
+        if (renamed !== machine.nickname) await provider.setNickname(machine.instance_id, renamed).catch(() => false);
         await op.info(`Now about USD ${cost.toFixed(2)}/hour while running${spot ? ' (spot: can be reclaimed; the disk is kept)' : ' (on-demand: never reclaimed)'}.`);
         if (!spot) await op.info('On-demand uses your normal GPU quota (not the spot/preemptible one): if Start fails with a quota error, request it on the Regions page.');
         if (wasRunning || startAfter) {
@@ -429,6 +456,39 @@ export class MachineService {
       }
     }, `Switched to ${spot ? 'spot' : 'on-demand'}.`);
     return { operationId: op.id, spot };
+  }
+
+  /**
+   * RENAME. The app uses it at once; the machine (Sunshine, so Moonlight's
+   * list) picks it up at its next start, from the cloud tag / metadata
+   * "cg-nickname" it reads at boot. Empty = back to the default name.
+   */
+  static async rename(userId: string, machineId: string, raw: unknown): Promise<{ nickname: string; appliedOnMachine: boolean; note: string }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    const wantDefault = raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '');
+    let nickname: string;
+    if (wantDefault) {
+      nickname = defaultNickname({ provider: machine.provider, region: machine.region, instanceType: machine.instance_type, spot: !!machine.spot, bigScreen: machine.display_driver === 'grid' });
+    } else {
+      const clean = cleanNickname(raw);
+      if (!clean) throw new MachineRequestError(400, 'That nickname has characters we can\'t use.', 'Letters, digits, spaces, dots, dashes and underscores; up to 40 characters, starting with a letter or digit.');
+      nickname = clean;
+    }
+    nickname = await uniqueNickname(userId, nickname, machineId);
+    await query('UPDATE machines SET nickname = $2 WHERE id = $1', [machineId, nickname]);
+    let appliedOnMachine = false;
+    if (!neverCreated(machine) && machine.status !== 'shelved') {
+      try {
+        const provider = await providerFor(userId, machine.provider);
+        appliedOnMachine = await provider.setNickname(machine.instance_id, nickname);
+      } catch (error) {
+        console.warn(`[Rename] couldn't tag ${machine.instance_id}: ${cloudMessage(error)}`);
+      }
+    }
+    const note = machine.status === 'shelved' ? 'Moonlight will show it after Restore.'
+      : appliedOnMachine ? (machine.status === 'running' ? 'Moonlight will show the new name after the machine’s next start (stop and start it, or wait for auto-stop).' : 'Moonlight will show it from the next start.')
+      : 'Saved in the app. The machine keeps its old name in Moonlight until it is relaunched (it couldn’t be tagged).';
+    return { nickname, appliedOnMachine, note };
   }
 
   static async stop(userId: string, machineId: string, snapshotFirst = false): Promise<{ operationId: string }> {
@@ -643,10 +703,13 @@ export class MachineService {
         const provider = await providerFor(userId, machine.provider, op.reporter);
         if ((provider as any).projectId) op.projectId = (provider as any).projectId;
         if (regionId !== machine.region) await op.info(`Restoring in ${region.name} instead of ${machine.region} — your games come with it.`);
+        const restoredName = await nicknameAfter(userId, machine, { region: regionId });
+        await query('UPDATE machines SET nickname = $2 WHERE id = $1', [machineId, restoredName]);
         const result = await provider.restoreFromSnapshot(cloudSnapId, { region: regionId, instanceType: shape.id }, {
           sunshineUsername: login.username, sunshinePassword: login.password,
           autoStopMinutes: machine.auto_stop_minutes ?? 15, diskSizeGb: Number(machine.disk_size_gb) || undefined, spot: !!machine.spot,
           displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard',
+          nickname: restoredName,
         });
         const costPerHour = (catalog.estimateHourly(shape.id, regionId, !!machine.spot) + (machine.display_driver === 'grid' ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
         await setStatus(machineId, 'running', {

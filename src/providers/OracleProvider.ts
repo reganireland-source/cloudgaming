@@ -463,8 +463,8 @@ export class OracleProvider extends CloudProvider {
    * after the "#!/bin/bash" line (which must stay the very first line, or
    * cloud-init won't know how to run it).
    */
-  private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number): string {
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes });
+  private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, nickname?: string): string {
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname });
     const newline = script.indexOf('\n');
     return script.slice(0, newline + 1) + this.hostFirewallSnippet() + script.slice(newline + 1);
   }
@@ -696,7 +696,7 @@ export class OracleProvider extends CloudProvider {
    */
   private async createMachine(
     config: ProviderConfig,
-    options: { spot: boolean; diskSizeGb: number; script?: string; backupOcid?: string }
+    options: { spot: boolean; diskSizeGb: number; script?: string; backupOcid?: string; nickname?: string }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
     const shape = findShape(config.instanceType);
     if (!shape) {
@@ -776,7 +776,8 @@ export class OracleProvider extends CloudProvider {
           compartmentId: this.compartmentId,
           displayName: name,
           shape: shape.id,
-          freeformTags: freeformTags(),
+          // "cg-nickname" is read by the machine at every boot (Sunshine's name).
+          freeformTags: { ...freeformTags(), ...(options.nickname ? { 'cg-nickname': options.nickname } : {}) },
           createVnicDetails: { subnetId, assignPublicIp: true, displayName: `${name}-vnic` },
           sourceDetails: bootVolumeId
             ? { sourceType: 'bootVolume', bootVolumeId }
@@ -853,6 +854,15 @@ export class OracleProvider extends CloudProvider {
   // The CloudProvider contract
   // ==========================================================================
 
+  /** Free-form tag "cg-nickname" (readable from inside the machine via its metadata service). */
+  async setNickname(instanceId: string, nickname: string): Promise<boolean> {
+    const { region, ocid } = this.splitId(instanceId);
+    const { compute } = this.clients(region);
+    const { instance } = await compute.getInstance({ instanceId: ocid });
+    await compute.updateInstance({ instanceId: ocid, updateInstanceDetails: { freeformTags: { ...(instance.freeformTags || {}), 'cg-nickname': nickname } } });
+    return true;
+  }
+
   async launchInstance(
     config: ProviderConfig,
     options: LaunchOptions
@@ -865,7 +875,8 @@ export class OracleProvider extends CloudProvider {
       {
         spot: !!options.spotInstance,
         diskSizeGb: Math.max(50, options.diskSizeGb || 150), // Oracle's minimum boot volume is 50 GB
-        script: this.buildOracleScript(sunshineUsername, sunshinePassword, options.autoStopMinutes),
+        script: this.buildOracleScript(sunshineUsername, sunshinePassword, options.autoStopMinutes, options.nickname),
+        nickname: options.nickname,
       }
     );
   }
@@ -1127,7 +1138,7 @@ export class OracleProvider extends CloudProvider {
     // the setup service and the Sunshine login you set before.
     const { instanceId, ipAddress } = await this.createMachine(
       { region, instanceType: config.instanceType || DEFAULT_SHAPE },
-      { spot: !!opts.spot, diskSizeGb: opts.diskSizeGb || 150, backupOcid: ocid }
+      { spot: !!opts.spot, diskSizeGb: opts.diskSizeGb || 150, backupOcid: ocid, nickname: opts.nickname }
     );
     return { instanceId, ipAddress };
   }
