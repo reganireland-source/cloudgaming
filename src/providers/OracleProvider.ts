@@ -53,6 +53,7 @@ import * as core from 'oci-core';
 import * as identity from 'oci-identity';
 import * as limits from 'oci-limits';
 import * as usageapi from 'oci-usageapi';
+import * as ospgateway from 'oci-ospgateway';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
 // Shared errors FIRST: it registers the Oracle rules from oracle/errors.
@@ -79,7 +80,7 @@ import {
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import zlib from 'zlib';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
-import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 
 /** The parsed, checked credentials. */
 export interface OracleCredentials {
@@ -1010,6 +1011,40 @@ export class OracleProvider extends CloudProvider {
    * compartment the app uses when one is set, otherwise the whole tenancy.
    * Needs the policy: Allow group <group> to read usage-report in tenancy
    */
+  /**
+   * Invoices from Oracle's OSP Gateway (Pay-As-You-Go / Universal Credits):
+   * amount, amount still due, due date and status. Needs the policy
+   * "Allow group … to read invoices in tenancy".
+   */
+  async getInvoices(): Promise<CloudInvoices> {
+    const client = new ospgateway.InvoiceServiceClient({ authenticationDetailsProvider: this.auth }, CLIENT_CONFIG);
+    client.regionId = this.homeRegion;
+    const end = new Date();
+    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 6, 1));
+    let items: any[] = [];
+    try {
+      const res = await client.listInvoices({ ospHomeRegion: this.homeRegion, compartmentId: this.tenancyOcid, timeInvoiceStart: start, timeInvoiceEnd: end });
+      items = res.invoiceCollection?.items || [];
+    } catch (error: any) {
+      if (error?.statusCode === 404 || error?.statusCode === 401 || error?.statusCode === 403 || /NotAuthorized/i.test(String(error?.serviceCode))) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_PERMISSION', title: 'Your Oracle key can\'t read invoices',
+          explanation: 'Oracle\'s invoice service needs its own policy statement.',
+          fixes: ['Add to your CloudGaming policy (root compartment): Allow group CloudGaming to read invoices in tenancy'],
+          consoleUrl: 'https://cloud.oracle.com/identity/domains/policies', consoleLabel: 'Open Policies',
+        });
+      }
+      throw error;
+    }
+    const day = (t: any) => (t ? new Date(t).toISOString().slice(0, 10) : undefined);
+    const invoices: CloudInvoice[] = items.map((i: any) => ({
+      id: String(i.invoiceNumber || i.invoiceId), issued: day(i.timeInvoice), due: day(i.timeInvoiceDue), period: day(i.timeInvoice)?.slice(0, 7),
+      amount: i.invoiceAmount ?? null, balance: i.invoiceAmountDue ?? null, currency: String(i.currency?.currencyCode || 'USD'),
+      status: i.isPaid ? 'Paid' : i.invoiceStatus ? String(i.invoiceStatus).replace(/_/g, ' ').toLowerCase() : undefined,
+    })).sort((a: CloudInvoice, b: CloudInvoice) => String(b.issued).localeCompare(String(a.issued)));
+    return { invoices, consoleUrl: 'https://cloud.oracle.com/invoices', consoleLabel: 'Open Invoices' };
+  }
+
   async getBillingActuals(from: string, to: string): Promise<BillingActuals> {
     const client = new usageapi.UsageapiClient({ authenticationDetailsProvider: this.auth }, CLIENT_CONFIG);
     client.regionId = this.homeRegion;

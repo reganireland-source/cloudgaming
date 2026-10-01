@@ -25,6 +25,8 @@ import { CATALOGS, isProviderName } from '../providers/registry';
 import { FriendlyCloudError, toFriendlyError, FriendlyError } from '../providers/errors';
 import { listCredentialSummaries, providerFor } from './CredentialService';
 import { getFxRates, toUsd, FxRates } from './FxService';
+import type { CloudInvoices } from '../providers/shared/types';
+import { RESOURCE_TAG } from '../providers/shared/streaming';
 
 /** How long a fetch is reused: Cost Explorer costs money per request. */
 const TTL_MS: Record<string, number> = { aws: 6 * 3600_000, azure: 3600_000, gcp: 3600_000, oracle: 3600_000 };
@@ -270,4 +272,142 @@ export async function getSpendSummary(userId: string) {
     runningPerHourUsd: r2(Number(running.rows[0].h) || 0),
     generatedAt: now.toISOString(),
   };
+}
+
+// ============================================================================
+// INVOICES (what you owe, and when) and BILLING ACCESS (how to switch it on)
+// ============================================================================
+
+
+const INVOICE_TTL_MS = 6 * 3600_000;
+const invoiceCache = new Map<string, { at: number; value: CloudInvoiceResult }>();
+
+export interface CloudInvoiceResult extends Partial<CloudInvoices> {
+  provider: string;
+  label: string;
+  status: 'ok' | 'needs-setup' | 'error' | 'not-connected';
+  error?: FriendlyError;
+  checkedAt?: string;
+}
+
+/** Each connected cloud's recent invoices (cached 6 h; refresh asks again). */
+export async function getInvoices(userId: string, refresh = false): Promise<CloudInvoiceResult[]> {
+  const connected = new Set((await listCredentialSummaries(userId)).map((c) => c.provider));
+  return Promise.all((['aws', 'azure', 'gcp', 'oracle'] as const).map(async (p): Promise<CloudInvoiceResult> => {
+    const label = CATALOGS[p].label;
+    if (!connected.has(p)) return { provider: p, label, status: 'not-connected' };
+    const key = `${userId}:${p}`;
+    const hit = invoiceCache.get(key);
+    if (!refresh && hit && Date.now() - hit.at < INVOICE_TTL_MS) return hit.value;
+    let value: CloudInvoiceResult;
+    try {
+      const cloud: any = await providerFor(userId, p);
+      if (typeof cloud.getInvoices !== 'function') throw new FriendlyCloudError({ code: 'BILLING_UNSUPPORTED', title: 'Not supported for this cloud yet', explanation: '', fixes: [] });
+      const r: CloudInvoices = await cloud.getInvoices(await getBillingSettings(userId, p));
+      value = { provider: p, label, status: 'ok', ...r, checkedAt: new Date().toISOString() };
+    } catch (error) {
+      const f = error instanceof FriendlyCloudError ? error.friendly : toFriendlyError(error, p);
+      value = { provider: p, label, status: /SETUP|PERMISSION/.test(f.code || '') ? 'needs-setup' : 'error', error: f, checkedAt: new Date().toISOString() };
+    }
+    invoiceCache.set(key, { at: Date.now(), value });
+    return value;
+  }));
+}
+
+export interface BillingAccess {
+  provider: string;
+  label: string;
+  connected: boolean;
+  /** Where to run the commands. */
+  shell: { name: string; url: string };
+  /** What it switches on, in plain words. */
+  summary: string;
+  steps: string[];
+  /** One complete command per line, filled in with this account's ids. */
+  cli: string;
+  consoleUrl: string;
+  consoleLabel: string;
+  notes?: string[];
+}
+
+/**
+ * How to give the app read access to actual costs and invoices, per cloud,
+ * with the commands filled in from the saved keys (account / subscription
+ * / project / tenancy ids — none of them secret).
+ */
+export async function getBillingAccess(userId: string): Promise<BillingAccess[]> {
+  const saved = await listCredentialSummaries(userId);
+  const meta = (p: string) => (saved.find((s) => s.provider === p)?.metadata || {}) as Record<string, any>;
+  const has = (p: string) => saved.some((s) => s.provider === p);
+  const aws = meta('aws'), az = meta('azure'), g = meta('gcp'), o = meta('oracle');
+
+  const awsUser = String(aws.arn || '').match(/:user\/(?:.*\/)?([^/]+)$/)?.[1] || 'cloudgaming-hub';
+  const sub = az.subscriptionId || '<subscription-id>';
+  const appId = az.clientId || '<app-client-id>';
+  const project = g.projectId || '<your-project-id>';
+  const sa = g.clientEmail || '<service-account-email>';
+  const tenancy = o.tenancyOcid || '<tenancy-ocid>';
+
+  return [
+    {
+      provider: 'aws', label: CATALOGS.aws.label, connected: has('aws'),
+      shell: { name: 'AWS CloudShell', url: 'https://console.aws.amazon.com/cloudshell/home' },
+      summary: 'Actual daily costs (Cost Explorer) and your invoices with due dates (Invoicing).',
+      steps: [
+        `Open AWS CloudShell signed in as an administrator (not as the app's key) and run the commands: they let the app's IAM user "${awsUser}" read costs and invoices, and switch on the "${RESOURCE_TAG.key}" cost tag so the app's own spend can be shown separately.`,
+        'Never opened Cost Explorer on this account? Open it once (Billing → Cost Explorer): AWS then prepares the data, which takes up to 24 hours.',
+        'Payments are taken from the card on file on or after each invoice\'s due date (Billing → Payments shows what\'s paid).',
+      ],
+      cli: [
+        `aws iam put-user-policy --user-name ${awsUser} --policy-name cloudgaming-billing --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ce:GetCostAndUsage","ce:UpdateCostAllocationTagsStatus","invoicing:ListInvoiceSummaries"],"Resource":"*"}]}'`,
+        `aws ce update-cost-allocation-tags-status --cost-allocation-tags-status TagKey=${RESOURCE_TAG.key},Status=Active`,
+      ].join('\n'),
+      consoleUrl: 'https://console.aws.amazon.com/cost-management/home#/cost-explorer', consoleLabel: 'Open Cost Explorer',
+    },
+    {
+      provider: 'azure', label: CATALOGS.azure.label, connected: has('azure'),
+      shell: { name: 'Azure Cloud Shell (Bash)', url: 'https://portal.azure.com/#cloudshell/' },
+      summary: 'Actual daily costs (Cost Management) and your invoices (Billing).',
+      steps: [
+        'Run the commands in Azure Cloud Shell as the subscription owner: they give the app\'s identity read access to cost data and to this subscription\'s billing.',
+        'Invoices with amounts and due dates (Microsoft Customer Agreement — most Pay-As-You-Go sign-ups since 2020) also need a billing role: Cost Management + Billing → Billing scopes → your billing account → Billing profiles → your profile → Access control (IAM) → Add → "Billing profile reader" → search the app\'s name (the app registration you created for the keys) → Add.',
+        'Free-trial, student and sponsorship subscriptions don\'t offer cost or invoice data through the API; Pay-As-You-Go does.',
+      ],
+      cli: [
+        `az role assignment create --assignee ${appId} --role "Cost Management Reader" --scope /subscriptions/${sub}`,
+        `az role assignment create --assignee ${appId} --role "Billing Reader" --scope /subscriptions/${sub}`,
+      ].join('\n'),
+      consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_GTM/ModernBillingMenuBlade/~/BillingAccounts', consoleLabel: 'Open Billing accounts',
+      notes: ['Older (MOSP) Pay-As-You-Go accounts list invoices without amounts or due dates through the API; the card on file is charged when each invoice is issued.'],
+    },
+    {
+      provider: 'gcp', label: CATALOGS.gcp.label, connected: has('gcp'),
+      shell: { name: 'Google Cloud Shell', url: 'https://shell.cloud.google.com/' },
+      summary: 'Actual daily costs and per-invoice-month totals, from the billing export to BigQuery (Google has no cost or invoice API).',
+      steps: [
+        'Run the commands in Cloud Shell: they turn on BigQuery, create a dataset "billing_export" and let the app\'s service account read it.',
+        'Then the one step Google only offers in the console: Billing → Billing export → BigQuery export → "Standard usage cost" → Edit settings → project ' + project + ', dataset "billing_export" → Save.',
+        'Data starts from that day and appears within a few hours. The app finds the export table by itself — nothing to paste.',
+        'Due dates aren\'t available from Google: self-serve accounts are charged automatically at the start of each month (or at a threshold); invoiced accounts follow their payment terms.',
+      ],
+      cli: [
+        `gcloud services enable bigquery.googleapis.com bigquerydatatransfer.googleapis.com --project=${project}`,
+        `bq --project_id=${project} mk --dataset --location=US ${project}:billing_export`,
+        `gcloud projects add-iam-policy-binding ${project} --member=serviceAccount:${sa} --role=roles/bigquery.jobUser --condition=None`,
+        `gcloud projects add-iam-policy-binding ${project} --member=serviceAccount:${sa} --role=roles/bigquery.dataViewer --condition=None`,
+      ].join('\n'),
+      consoleUrl: 'https://console.cloud.google.com/billing/export', consoleLabel: 'Open Billing export',
+    },
+    {
+      provider: 'oracle', label: CATALOGS.oracle.label, connected: has('oracle'),
+      shell: { name: 'OCI Cloud Shell', url: 'https://cloud.oracle.com/?cloudshell=true' },
+      summary: 'Actual daily costs (Usage API) and your invoices with due dates (OSP Gateway).',
+      steps: [
+        'Run the command in OCI Cloud Shell as an administrator: it adds a policy letting the app\'s group read cost data and invoices.',
+        'It assumes the group from the setup guide, "CloudGaming"; if yours has another name, change it in both statements.',
+      ],
+      cli: `oci iam policy create --compartment-id ${tenancy} --name cloudgaming-billing --description "Cost data and invoices for Gints Global Gaming Hub" --statements '["Allow group CloudGaming to read usage-report in tenancy","Allow group CloudGaming to read invoices in tenancy"]'`,
+      consoleUrl: 'https://cloud.oracle.com/identity/domains/policies', consoleLabel: 'Open Policies',
+    },
+  ];
 }

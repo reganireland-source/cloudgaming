@@ -29,6 +29,7 @@ import Link from 'next/link';
 import { usd } from '@/lib/money';
 import CloudLogo from '@/components/CloudLogo';
 import StandingCosts from '@/components/StandingCosts';
+import BillsAndAccess from '@/components/BillsAndAccess';
 import BillingReconciliation, { withAlso, type Reconciliation } from '@/components/BillingReconciliation';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiFetch } from '@/lib/auth';
@@ -161,6 +162,8 @@ export default function CostsPage() {
 
       {/* ---- What the clouds actually billed vs the estimates ---- */}
       {recon && <BillingReconciliation data={recon} alsoIn={alsoIn} onChanged={() => loadRecon(true)} />}
+
+      <BillsAndAccess />
 
       {/* ---- Standing costs: the money spent while not playing ---- */}
       <StandingCosts onTotal={setStanding} />

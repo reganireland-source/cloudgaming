@@ -31,7 +31,7 @@
 
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
-import { getReconciliation, saveBillingSettings, getSpendSummary } from '../../services/BillingService';
+import { getReconciliation, saveBillingSettings, getSpendSummary, getInvoices, getBillingAccess } from '../../services/BillingService';
 import { isProviderName } from '../../providers/registry';
 
 const router = Router();
@@ -223,6 +223,26 @@ router.get('/summary', async (req: Request, res: Response) => {
 });
 
 /** PUT /api/costs/billing-settings/:provider — body e.g. { exportTable: "proj.dataset.table" } */
+/** GET /api/costs/invoices — each cloud's recent invoices (amount, due date, status). ?refresh=true asks again. */
+router.get('/invoices', async (req: Request, res: Response) => {
+  try {
+    res.json({ clouds: await getInvoices(req.userId!, req.query.refresh === 'true') });
+  } catch (error) {
+    console.error('Invoices error:', (error as Error).message);
+    res.status(500).json({ error: 'Could not load invoices' });
+  }
+});
+
+/** GET /api/costs/billing-access — how to switch on cost and invoice access, per cloud, commands filled in. */
+router.get('/billing-access', async (req: Request, res: Response) => {
+  try {
+    res.json({ clouds: await getBillingAccess(req.userId!) });
+  } catch (error) {
+    console.error('Billing access error:', (error as Error).message);
+    res.status(500).json({ error: 'Could not load the billing setup steps' });
+  }
+});
+
 router.put('/billing-settings/:provider', async (req: Request, res: Response) => {
   try {
     if (!isProviderName(req.params.provider)) return res.status(400).json({ error: 'Unknown cloud.' });

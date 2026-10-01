@@ -179,6 +179,23 @@ export interface InventoryItem {
 
 export interface BillingDay { date: string; amount: number }  // date = YYYY-MM-DD (UTC)
 
+/** One bill from the cloud (what you owe, and when). */
+export interface CloudInvoice {
+  id: string;
+  /** Billing period, e.g. "2026-09". */
+  period?: string;
+  issued?: string;       // YYYY-MM-DD
+  due?: string;          // YYYY-MM-DD
+  amount: number | null; // total, in `currency`
+  currency: string;
+  /** Still to pay, where the cloud says (null/undefined = not reported). */
+  balance?: number | null;
+  status?: string;       // e.g. "Paid", "Due", "Past due"
+}
+
+/** Invoices plus any notes (e.g. "this cloud has no invoice API"). */
+export interface CloudInvoices { invoices: CloudInvoice[]; notes?: string[]; consoleUrl?: string; consoleLabel?: string }
+
 export interface BillingActuals {
   currency: string;
   /** What `daily` covers: only what this app created ('app'), a compartment, or the whole account. */

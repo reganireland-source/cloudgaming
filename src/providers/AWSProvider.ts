@@ -79,7 +79,7 @@ import {
 } from './aws/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import { AWS_USER_DATA_LIMIT, buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
-import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 
 /** The parsed, checked credentials. */
 export interface AwsCredentials {
@@ -1234,6 +1234,61 @@ export class AWSProvider extends CloudProvider {
   // ==========================================================================
 
   /** Who does this key belong to? Throws if AWS rejects the key. */
+  /**
+   * Invoices (amount, issue and due dates) from the AWS Invoicing API
+   * (ListInvoiceSummaries, 2024). This SDK version predates it, so the call
+   * is signed by hand (SigV4, JSON 1.0 protocol). Needs
+   * invoicing:ListInvoiceSummaries.
+   */
+  async getInvoices(): Promise<CloudInvoices> {
+    const { accountId } = await this.getCallerIdentity();
+    const end = new Date();
+    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 6, 1));
+    const endpoint = new AWS.Endpoint('https://invoicing.us-east-1.api.aws') // the Invoicing API is dual-stack only (api.aws);
+    const req = new AWS.HttpRequest(endpoint, 'us-east-1');
+    req.method = 'POST';
+    req.path = '/';
+    req.headers['Host'] = endpoint.host;
+    req.headers['Content-Type'] = 'application/x-amz-json-1.0';
+    req.headers['X-Amz-Target'] = 'Invoicing.ListInvoiceSummaries';
+    req.body = JSON.stringify({
+      Selector: { ResourceType: 'ACCOUNT_ID', Value: accountId },
+      Filter: { TimeInterval: { StartDate: Math.floor(start.getTime() / 1000), EndDate: Math.floor(end.getTime() / 1000) } },
+      MaxResults: 50,
+    });
+    const signer = new (AWS as any).Signers.V4(req, 'invoicing');
+    signer.addAuthorization(new AWS.Credentials(this.creds.accessKeyId, this.creds.secretAccessKey), new Date());
+    const res = await fetch(`https://${endpoint.host}/`, { method: 'POST', headers: req.headers as any, body: req.body });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const type = String(json?.__type || json?.code || '');
+      if (res.status === 403 || /AccessDenied|NotAuthorized|UnrecognizedClient/i.test(type)) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_PERMISSION', title: 'Your AWS key can\'t read invoices',
+          explanation: `AWS answered: ${json?.message || json?.Message || type || res.statusText}`,
+          fixes: ['Allow invoicing:ListInvoiceSummaries for the app\'s IAM user (the Billing access command on the Costs page adds it).'],
+          consoleUrl: 'https://console.aws.amazon.com/billing/home#/bills', consoleLabel: 'Open Bills',
+        });
+      }
+      throw new FriendlyCloudError({ code: 'BILLING_ERROR', title: 'AWS couldn\'t return invoices', explanation: String(json?.message || type || res.statusText), fixes: ['Try again later.'] });
+    }
+    const day = (t: any) => (t ? new Date(typeof t === 'number' ? t * 1000 : t).toISOString().slice(0, 10) : undefined);
+    const invoices: CloudInvoice[] = (json.InvoiceSummaries || []).map((s: any) => ({
+      id: String(s.InvoiceId),
+      period: s.BillingPeriod ? `${s.BillingPeriod.Year}-${String(s.BillingPeriod.Month).padStart(2, '0')}` : undefined,
+      issued: day(s.IssuedDate),
+      due: day(s.DueDate),
+      amount: s.PaymentCurrencyAmount?.TotalAmount != null ? Number(s.PaymentCurrencyAmount.TotalAmount) : s.BaseCurrencyAmount?.TotalAmount != null ? Number(s.BaseCurrencyAmount.TotalAmount) : null,
+      currency: String(s.PaymentCurrencyAmount?.CurrencyCode || s.BaseCurrencyAmount?.CurrencyCode || 'USD'),
+      status: s.InvoiceType && s.InvoiceType !== 'INVOICE' ? String(s.InvoiceType).toLowerCase().replace(/_/g, ' ') : undefined,
+    })).sort((a: CloudInvoice, b: CloudInvoice) => String(b.issued || b.period).localeCompare(String(a.issued || a.period)));
+    return {
+      invoices,
+      notes: ['AWS charges the card on file automatically on or after the due date unless you pay by invoice/bank transfer. Payment status: Billing → Payments.'],
+      consoleUrl: 'https://console.aws.amazon.com/billing/home#/paymentsoverview', consoleLabel: 'Open Payments',
+    };
+  }
+
   async getCallerIdentity(): Promise<{ accountId: string; arn: string }> {
     const sts = new AWS.STS(this.clientConfig(this.defaultRegion));
     const who = await sts.getCallerIdentity({}).promise();
@@ -1322,8 +1377,7 @@ export class AWSProvider extends CloudProvider {
           title: 'Your AWS key can\'t read billing data',
           explanation: 'Actual charges come from AWS Cost Explorer, which needs its own permission.',
           fixes: [
-            'IAM → Users → cloudgaming-hub → Add permissions → Create inline policy (JSON):',
-            '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ce:GetCostAndUsage","ce:UpdateCostAllocationTagsStatus"],"Resource":"*"}]}',
+            'Below, under Bills & billing access → AWS → Billing access setup: one CloudShell command (filled in for your IAM user) gives the app read access to Cost Explorer and invoices.',
             'If Cost Explorer was never opened on this account, open it once in the Billing console (AWS takes up to 24 hours to prepare the data).',
           ],
           consoleUrl: 'https://console.aws.amazon.com/iam/home#/users',

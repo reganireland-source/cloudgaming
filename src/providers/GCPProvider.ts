@@ -35,7 +35,7 @@ import compute from '@google-cloud/compute';
 import { JWT } from 'google-auth-library';
 import { CloudProvider, ProviderConfig, LaunchOptions, SnapshotInfo, RestoreOptions } from './Provider';
 import { RegionData } from '../types';
-import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 import { RESOURCE_TAG } from './shared/streaming';
 import { FriendlyCloudError, isZoneSpecificError, toFriendlyError } from './gcp/errors';
 import {
@@ -633,8 +633,58 @@ export class GCPProvider extends CloudProvider {
    * The key needs BigQuery Job User (to run the query) in this project and
    * BigQuery Data Viewer on the export dataset.
    */
+  /**
+   * Find the billing export table in this project ("…gcp_billing_export_v1_…"),
+   * so it doesn't have to be pasted. Needs BigQuery read access (Data Viewer).
+   */
+  async findBillingExportTable(): Promise<string | null> {
+    try {
+      const { JWT } = await import('google-auth-library');
+      const client = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const ds: any = (await client.request({ url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/datasets?maxResults=200` })).data;
+      for (const d of ds?.datasets || []) {
+        const id = d.datasetReference?.datasetId;
+        const t: any = (await client.request({ url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/datasets/${id}/tables?maxResults=500` })).data;
+        const hit = (t?.tables || []).map((x: any) => x.tableReference?.tableId).find((n: string) => /^gcp_billing_export_v1_/.test(n || ''));
+        if (hit) return `${this.projectId}.${id}.${hit}`;
+      }
+    } catch { /* no access or no BigQuery: fall back to the saved name */ }
+    return null;
+  }
+
+  /**
+   * Google has no invoice API. The billing export tags every row with the
+   * invoice it lands on (invoice.month), so this gives per-invoice totals
+   * for this project; due dates aren't available.
+   */
+  async getInvoices(settings: { exportTable?: string } = {}): Promise<CloudInvoices> {
+    const table = String(settings.exportTable || '').trim().replace(/`/g, '') || await this.findBillingExportTable();
+    if (!table) {
+      throw new FriendlyCloudError({ code: 'BILLING_SETUP', title: 'Google Cloud billing export isn\'t set up yet', explanation: 'Google gives invoice totals only through the billing export to BigQuery.', fixes: ['Follow Billing access → Google Cloud on the Costs page.'], consoleUrl: 'https://console.cloud.google.com/billing/export', consoleLabel: 'Open Billing export' });
+    }
+    const { JWT } = await import('google-auth-library');
+    const client = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const sql = `SELECT invoice.month AS month, currency, SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total
+      FROM \`${table}\` WHERE project.id = @project AND invoice.month IS NOT NULL
+      GROUP BY month, currency ORDER BY month DESC LIMIT 7`;
+    const res: any = (await client.request({
+      url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/queries`, method: 'POST',
+      data: { query: sql, useLegacySql: false, parameterMode: 'NAMED', timeoutMs: 30000, queryParameters: [{ name: 'project', parameterType: { type: 'STRING' }, parameterValue: { value: this.projectId } }] },
+    })).data;
+    const thisMonth = new Date().toISOString().slice(0, 7).replace('-', '');
+    const invoices: CloudInvoice[] = (res?.rows || []).map((r: any) => {
+      const [m, cur, total] = r.f.map((x: any) => x.v);
+      return { id: `invoice month ${m}`, period: `${String(m).slice(0, 4)}-${String(m).slice(4)}`, amount: Math.round(Number(total) * 100) / 100, currency: String(cur), status: m === thisMonth ? 'In progress (this month)' : 'Billed' };
+    });
+    return {
+      invoices,
+      notes: ['Google has no invoice API: these are this project\'s totals per invoice month from your billing export, without due dates. Self-serve accounts are charged automatically at the start of each month (or when a threshold is reached); invoiced accounts follow their payment terms.'],
+      consoleUrl: 'https://console.cloud.google.com/billing/payment', consoleLabel: 'Open Payments & invoices',
+    };
+  }
+
   async getBillingActuals(from: string, to: string, settings: { exportTable?: string } = {}): Promise<BillingActuals> {
-    const table = String(settings.exportTable || '').trim().replace(/`/g, '');
+    const table = String(settings.exportTable || '').trim().replace(/`/g, '') || await this.findBillingExportTable() || '';
     if (!table) {
       throw new FriendlyCloudError({
         code: 'BILLING_SETUP', title: 'Google Cloud billing export isn\'t set up yet',
@@ -642,7 +692,7 @@ export class GCPProvider extends CloudProvider {
         fixes: [
           'Billing → Billing export → BigQuery export → Standard usage cost → Edit settings: pick this project and create a dataset (e.g. "billing"). Save.',
           `Give the app's service account (${this.clientEmail}) the roles "BigQuery Job User" on this project and "BigQuery Data Viewer" on that dataset.`,
-          'After a few hours, BigQuery shows a table named gcp_billing_export_v1_…; paste its full name ("project.dataset.table") into the app\'s Costs page.',
+          'After a few hours BigQuery shows a table named gcp_billing_export_v1_…: the app finds it by itself (Bills & billing access → Google Cloud has the commands for the dataset and permissions).',
         ],
         consoleUrl: 'https://console.cloud.google.com/billing/export', consoleLabel: 'Open Billing export',
       });

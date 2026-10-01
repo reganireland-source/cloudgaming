@@ -32,6 +32,7 @@
     "oci-core": "^2.142.0",
     "oci-identity": "^2.142.0",
     "oci-limits": "^2.142.0",
+    "oci-ospgateway": "^2.142.1",
     "oci-usageapi": "^2.142.0",
     "pg": "^8.10.0",
     "uuid": "^9.0.1"

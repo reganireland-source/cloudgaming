@@ -75,7 +75,7 @@ import {
   findShape,
   resourceGroupFor,
 } from './azure/catalog';
-import type { InventoryItem, BillingActuals, BillingDay } from './shared/types';
+import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 
@@ -864,6 +864,58 @@ export class AzureProvider extends CloudProvider {
    * them), daily per resource group, in the subscription's billing
    * currency. "This app" = resource groups named cloudgaming-hub-<region>.
    */
+  /**
+   * Invoices. Microsoft Customer Agreement accounts (most Pay-As-You-Go
+   * sign-ups since 2020) give amount due, due date and status per invoice;
+   * older (MOSP) Pay-As-You-Go accounts only list invoice periods.
+   * Needs a billing role (see the Costs page's Billing access steps).
+   */
+  async getInvoices(): Promise<CloudInvoices> {
+    const token = await this.credential.getToken('https://management.azure.com/.default');
+    const get = async (url: string) => {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token?.token}` } });
+      const json: any = await res.json().catch(() => ({}));
+      if (res.status === 401 || res.status === 403) {
+        throw new FriendlyCloudError({
+          code: 'BILLING_PERMISSION', title: 'Your Azure key can\'t read invoices',
+          explanation: `Azure answered: ${json?.error?.message || res.statusText}`,
+          fixes: ['Give the app\'s identity a billing reader role (Costs page → Billing access → Azure).'],
+          consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_GTM/ModernBillingMenuBlade/~/BillingAccounts', consoleLabel: 'Open Billing accounts',
+        });
+      }
+      if (!res.ok) throw new FriendlyCloudError({ code: 'BILLING_ERROR', title: 'Azure couldn\'t return invoices', explanation: String(json?.error?.message || res.statusText), fixes: ['Try again later.'] });
+      return json;
+    };
+    const day = (t: any) => (t ? String(t).slice(0, 10) : undefined);
+    const end = new Date();
+    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 6, 1));
+    const prop = await get(`https://management.azure.com/subscriptions/${this.subscriptionId}/providers/Microsoft.Billing/billingProperty/default?api-version=2024-04-01`).catch((e) => { if ((e as any)?.friendly?.code === 'BILLING_PERMISSION') throw e; return null; });
+    const accountId: string = prop?.properties?.billingAccountId || '';
+    const agreement: string = prop?.properties?.billingAccountAgreementType || '';
+    if (accountId && /MicrosoftCustomerAgreement|MicrosoftPartnerAgreement/i.test(agreement)) {
+      const data = await get(`https://management.azure.com${accountId}/billingSubscriptions/${this.subscriptionId}/invoices?api-version=2024-04-01&periodStartDate=${start.toISOString().slice(0, 10)}&periodEndDate=${end.toISOString().slice(0, 10)}`);
+      const invoices: CloudInvoice[] = (data?.value || []).map((v: any) => {
+        const p = v.properties || {};
+        return {
+          id: String(v.name), period: day(p.invoicePeriodStartDate)?.slice(0, 7), issued: day(p.invoiceDate), due: day(p.dueDate),
+          amount: p.billedAmount?.value ?? p.totalAmount?.value ?? null, currency: String(p.billedAmount?.currency || p.amountDue?.currency || 'USD'),
+          balance: p.amountDue?.value ?? null, status: p.status,
+        };
+      }).sort((a: CloudInvoice, b: CloudInvoice) => String(b.issued).localeCompare(String(a.issued)));
+      return { invoices, consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/invoices', consoleLabel: 'Open Invoices' };
+    }
+    // Older Pay-As-You-Go (MOSP): periods and PDF links only.
+    const legacy = await get(`https://management.azure.com/subscriptions/${this.subscriptionId}/providers/Microsoft.Billing/invoices?api-version=2018-03-01-preview`);
+    const invoices: CloudInvoice[] = (legacy?.value || []).slice(0, 6).map((v: any) => ({
+      id: String(v.name), period: day(v.properties?.invoicePeriodStartDate)?.slice(0, 7), issued: day(v.properties?.invoicePeriodEndDate), amount: null, currency: '',
+    }));
+    return {
+      invoices,
+      notes: ['This is an older Pay-As-You-Go account: Azure lists the invoices but not their amounts or due dates through the API. Pay-As-You-Go cards are charged automatically when the invoice is issued.'],
+      consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/invoices', consoleLabel: 'Open Invoices',
+    };
+  }
+
   async getBillingActuals(from: string, to: string): Promise<BillingActuals> {
     const token = await this.credential.getToken('https://management.azure.com/.default');
     const url = `https://management.azure.com/subscriptions/${this.subscriptionId}/providers/Microsoft.CostManagement/query?api-version=2023-11-01`;
@@ -892,7 +944,7 @@ export class AzureProvider extends CloudProvider {
             explanation: `Azure answered: ${msg}`,
             fixes: [
               'Give the app\'s identity the "Cost Management Reader" role on the subscription:',
-              `az role assignment create --assignee <CLIENT_ID> --role "Cost Management Reader" --scope /subscriptions/${this.subscriptionId}`,
+              `az role assignment create --assignee ${this.clientId} --role "Cost Management Reader" --scope /subscriptions/${this.subscriptionId}`,
               'Free-trial, student and sponsorship subscriptions don\'t offer cost data through the API; Pay-As-You-Go does.',
             ],
             consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis', consoleLabel: 'Open Cost analysis',
