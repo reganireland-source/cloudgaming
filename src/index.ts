@@ -77,6 +77,7 @@ import authRoutes from './api/routes/auth';                 // sign-up / login /
 import machineRoutes from './api/routes/machines';          // launch / start / stop / delete gaming VMs
 import costRoutes from './api/routes/costs';                // spend history and forecasts
 import regionRoutes from './api/routes/regions';            // cloud regions and their prices
+import { loadOfferings } from './services/Offerings';
 import reconRoutes from './api/routes/recon';              // Recon page: best region per hardware tier
 import { prewarmSpotPrices } from './services/SpotPriceService';
 import performanceRoutes from './api/routes/performance';   // CPU/GPU/network metrics for a machine
@@ -239,6 +240,7 @@ failOrphanedOperations();
 // confirm a deploy succeeded.
 app.listen(PORT, () => {
   prewarmSpotPrices(); // fetch AWS's live spot data now, so the first Recon page is quick
+  loadOfferings();     // re-apply GPU-per-region corrections learned by earlier live checks
   console.log(`Gints Global Gaming Hubjob backend running on port ${PORT}`);
   console.log(`Environment: ${env.NODE_ENV}`);
   console.log(`Log level: ${env.LOG_LEVEL}`);
