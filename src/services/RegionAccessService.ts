@@ -40,7 +40,7 @@ import { CATALOGS, isProviderName } from '../providers/registry';
 import type { ProviderName } from '../providers/shared/types';
 import { toFriendlyError, FriendlyError } from '../providers/errors';
 import { listCredentialSummaries, providerFor } from './CredentialService';
-import { GCP_SHAPES, GCP_CATALOG, gpuOfMetric, quotaRequestOf, spotMetricOf } from '../providers/gcp/catalog';
+import { GCP_SHAPES, GCP_CATALOG, gpuOfMetric, quotaRequestOf, spotMetricOf, vwsMetricOf } from '../providers/gcp/catalog';
 import { AWS_SHAPES } from '../providers/aws/catalog';
 import { AZURE_SHAPES, T4_QUOTA_FAMILY } from '../providers/azure/catalog';
 import { ORACLE_SHAPES } from '../providers/oracle/catalog';
@@ -287,9 +287,9 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       // (spot: the PREEMPTIBLE_ one; big screen: the _VWS_ one), and the
       // project-wide "GPUs (all regions)" must have room too.
       const globalFree = globalLimit - globalUsage;
-      type Sh = { gpuModel: string; gpuQuotaMetric: string; spotQuotaMetric?: string };
+      type Sh = { gpuModel: string; gpuQuotaMetric: string; spotQuotaMetric?: string; vwsQuotaMetric?: string };
       const metricFor = (s: Sh, m: RunMode): string | null =>
-        isBigMode(m) ? (noBig.includes(s.gpuModel) ? null : (isSpotMode(m) ? 'PREEMPTIBLE_' : '') + s.gpuQuotaMetric.replace(/_GPUS$/, '_VWS_GPUS'))
+        isBigMode(m) ? (noBig.includes(s.gpuModel) ? null : (isSpotMode(m) ? 'PREEMPTIBLE_' : '') + vwsMetricOf(s))
         : isSpotMode(m) ? spotMetricOf(s) : s.gpuQuotaMetric;
       const gcpLabel = (metric: string) => {
         if (metric === 'GPUS_ALL_REGIONS') return 'GPUs (all regions)';
@@ -304,8 +304,8 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         const l = line(k);
         const free = l.limit - l.used;
         const uses = [k, 'GPUS_ALL_REGIONS'];
-        // Family quotas (G4) may not be readable: say so instead of "none".
-        if (k.startsWith('GPU_FAMILY:') && !reported(k)) return { ok: null, why: `Couldn’t read the ${gcpLabel(k)} quota (needs the Cloud Quotas API) — request it, then try a launch`, uses };
+        // G4's quotas (per-family, new vWS) may not be readable: say so instead of "none".
+        if ((k.startsWith('GPU_FAMILY:') || k.includes('RTX_PRO_6000')) && !reported(k)) return { ok: null, why: `Couldn’t read the ${gcpLabel(k)} quota (needs the Cloud Quotas API) — request it, then try a launch`, uses };
         if (free < 1 && l.limit === 0) return { ok: false, why: `No ${gcpLabel(k)} quota here`, uses };
         if (globalFree < 1) return globalLimit > 0
           ? { ok: false, inUse: true, why: `“GPUs (all regions)”: all ${globalLimit} in use by your running machine${globalUsage === 1 ? '' : 's'}`, uses }

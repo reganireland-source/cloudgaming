@@ -78,7 +78,7 @@ function isNotFound(error: any): boolean {
 }
 
 /** Google's licensed "virtual workstation" GPU types (GRID driver allowed), per our GPU model. */
-const VWS_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4-vws', L4: 'nvidia-l4-vws' };
+const VWS_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4-vws', L4: 'nvidia-l4-vws', 'RTX PRO 6000': 'nvidia-rtx-pro-6000-vws' };
 
 /** Live GPU zones per project (see getGpuZones). */
 const GPU_FAMILY_CACHE = new Map<string, { at: number; value: Array<{ region: string; family: string; limit: number }> }>();

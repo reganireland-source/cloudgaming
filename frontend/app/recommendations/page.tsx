@@ -771,7 +771,7 @@ function GpuCompareNote() {
       </p>
       <p className="mt-2 leading-relaxed">
         <span className="text-neon-magenta">Big screen (experimental):</span> these GPUs normally stream at most 2560×1600. Tick “Big screen” when launching
-        to get up to 4096×2160 (a 3440×1440 ultrawide at full size): AWS and Azure at no extra cost (AWS includes the L40S), Google with its paid “vWS” GPUs (not on the RTX PRO 6000), not Oracle.
+        to get up to 4096×2160 (a 3440×1440 ultrawide at full size): AWS and Azure at no extra cost (AWS includes the L40S), Google with its paid “vWS” GPUs (including the RTX PRO 6000), not Oracle.
       </p>
     </details>
   );

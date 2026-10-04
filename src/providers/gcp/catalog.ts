@@ -29,6 +29,7 @@ export interface GcpShape {
   gpuModel: 'T4' | 'L4' | 'RTX PRO 6000';
   gpuQuotaMetric: string;   // the regional quota that must be ≥ 1
   spotQuotaMetric?: string; // spot's quota, if not PREEMPTIBLE_ + gpuQuotaMetric
+  vwsQuotaMetric?: string;  // big screen's (vWS) quota, if not gpuQuotaMetric with _VWS_GPUS
   vcpus: number;
   memoryGb: number;
   usCentralOnDemand: number; // $/hour, machine + GPU, us-central1
@@ -95,6 +96,7 @@ export const GCP_SHAPES: GcpShape[] = [
     gpuModel: 'RTX PRO 6000',
     gpuQuotaMetric: 'GPU_FAMILY:NVIDIA_RTX_PRO_6000',
     spotQuotaMetric: 'PREEMPTIBLE_NVIDIA_RTX_PRO_6000_GPUS',
+    vwsQuotaMetric: 'NVIDIA_RTX_PRO_6000_VWS_GPUS',   // big screen: nvidia-rtx-pro-6000-vws
     vcpus: 48,
     memoryGb: 180,
     usCentralOnDemand: 4.5,
@@ -102,10 +104,12 @@ export const GCP_SHAPES: GcpShape[] = [
   },
 ];
 
-/** G4 machines: Hyperdisk boot disk + gVNIC required, no vWS (big screen) driver. */
+/** G4 machines: Hyperdisk boot disk + gVNIC required. */
 export const isG4 = (machineType: string) => machineType.startsWith('g4-');
 
 /** The quota a spot machine of this shape uses. */
+export const vwsMetricOf = (s: Pick<GcpShape, 'gpuQuotaMetric' | 'vwsQuotaMetric'>) => s.vwsQuotaMetric || s.gpuQuotaMetric.replace(/_GPUS$/, '_VWS_GPUS');
+
 export const spotMetricOf = (s: Pick<GcpShape, 'gpuQuotaMetric' | 'spotQuotaMetric'>) => s.spotQuotaMetric || `PREEMPTIBLE_${s.gpuQuotaMetric}`;
 
 /**
@@ -258,6 +262,6 @@ export const GCP_CATALOG: ProviderCatalog = {
   diskPerGbMonth: BALANCED_DISK_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,
   restoreAnyRegion: true,
-  bigScreen: { available: true, extraPerHour: 0.2, note: 'Uses Google\'s "vWS" (virtual workstation) GPUs: an extra licence charge per GPU-hour (≈USD 0.20, estimate) and their OWN quota — request "NVIDIA T4 Virtual Workstation GPUs" or "NVIDIA L4 Virtual Workstation GPUs" in the region first. Not on the RTX PRO 6000 (no vWS version).', notOnGpus: ['RTX PRO 6000'] },
+  bigScreen: { available: true, extraPerHour: 0.2, note: 'Uses Google\'s "vWS" (virtual workstation) GPUs: an extra licence charge per GPU-hour (≈USD 0.20, estimate) and their OWN quota — request "NVIDIA T4 Virtual Workstation GPUs" or "NVIDIA L4 Virtual Workstation GPUs" in the region first. SUPER tier: "NVIDIA RTX PRO 6000 Virtual Workstation GPUs".' },
   priceNote: 'Estimates from Google\'s list prices (±15%); excludes tax and discounts. Spot prices move daily.',
 };
