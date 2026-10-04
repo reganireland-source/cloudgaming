@@ -1242,36 +1242,58 @@ export class AWSProvider extends CloudProvider {
    */
   async getInvoices(): Promise<CloudInvoices> {
     const { accountId } = await this.getCallerIdentity();
-    const end = new Date();
-    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 6, 1));
-    const endpoint = new AWS.Endpoint('https://invoicing.us-east-1.api.aws') // the Invoicing API is dual-stack only (api.aws);
-    const req = new AWS.HttpRequest(endpoint, 'us-east-1');
-    req.method = 'POST';
-    req.path = '/';
-    req.headers['Host'] = endpoint.host;
-    req.headers['Content-Type'] = 'application/x-amz-json-1.0';
-    req.headers['X-Amz-Target'] = 'Invoicing.ListInvoiceSummaries';
-    req.body = JSON.stringify({
-      Selector: { ResourceType: 'ACCOUNT_ID', Value: accountId },
-      Filter: { TimeInterval: { StartDate: Math.floor(start.getTime() / 1000), EndDate: Math.floor(end.getTime() / 1000) } },
-      MaxResults: 50,
-    });
-    const signer = new (AWS as any).Signers.V4(req, 'invoicing');
-    signer.addAuthorization(new AWS.Credentials(this.creds.accessKeyId, this.creds.secretAccessKey), new Date());
-    const res = await fetch(`https://${endpoint.host}/`, { method: 'POST', headers: req.headers as any, body: req.body });
-    const json: any = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const type = String(json?.__type || json?.code || '');
-      if (res.status === 403 || /AccessDenied|NotAuthorized|UnrecognizedClient/i.test(type)) {
-        throw new FriendlyCloudError({
-          code: 'BILLING_PERMISSION', title: 'Your AWS key can\'t read invoices',
-          explanation: `AWS answered: ${json?.message || json?.Message || type || res.statusText}`,
-          fixes: ['Allow invoicing:ListInvoiceSummaries for the app\'s IAM user (the Billing access command on the Costs page adds it).'],
-          consoleUrl: 'https://console.aws.amazon.com/billing/home#/bills', consoleLabel: 'Open Bills',
-        });
+    const endpoint = new AWS.Endpoint('https://invoicing.us-east-1.api.aws'); // the Invoicing API is dual-stack only (api.aws)
+    const call = async (body: object): Promise<any> => {
+      const req = new AWS.HttpRequest(endpoint, 'us-east-1');
+      req.method = 'POST';
+      req.path = '/';
+      req.headers['Host'] = endpoint.host;
+      req.headers['Content-Type'] = 'application/x-amz-json-1.0';
+      req.headers['X-Amz-Target'] = 'Invoicing.ListInvoiceSummaries';
+      req.body = JSON.stringify(body);
+      const signer = new (AWS as any).Signers.V4(req, 'invoicing');
+      signer.addAuthorization(new AWS.Credentials(this.creds.accessKeyId, this.creds.secretAccessKey), new Date());
+      const res = await fetch(`https://${endpoint.host}/`, { method: 'POST', headers: req.headers as any, body: req.body });
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const type = String(json?.__type || json?.code || '');
+        if (res.status === 403 || /AccessDenied|NotAuthorized|UnrecognizedClient/i.test(type)) {
+          throw new FriendlyCloudError({
+            code: 'BILLING_PERMISSION', title: 'Your AWS key can\'t read invoices',
+            explanation: `AWS answered: ${json?.message || json?.Message || type || res.statusText}`,
+            fixes: ['Allow invoicing:ListInvoiceSummaries for the app\'s IAM user (the Billing access command on the Costs page adds it).'],
+            consoleUrl: 'https://console.aws.amazon.com/billing/home#/bills', consoleLabel: 'Open Bills',
+          });
+        }
+        throw new FriendlyCloudError({ code: 'BILLING_ERROR', title: 'AWS couldn\'t return invoices', explanation: String(json?.message || json?.Message || type || res.statusText), fixes: ['Try again later.'] });
       }
-      throw new FriendlyCloudError({ code: 'BILLING_ERROR', title: 'AWS couldn\'t return invoices', explanation: String(json?.message || type || res.statusText), fixes: ['Try again later.'] });
+      return json;
+    };
+    // One billing month per call: AWS refuses a date range longer than a
+    // month ("TimePeriod cannot last more than a month"). This month + 6 back.
+    const now = new Date();
+    const months = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      return { Year: d.getUTCFullYear(), Month: d.getUTCMonth() + 1 };
+    });
+    const summaries: any[] = [];
+    let failed: unknown = null;
+    for (const BillingPeriod of months) {
+      try {
+        let NextToken: string | undefined;
+        for (let page = 0; page < 5; page++) {
+          const json = await call({ Selector: { ResourceType: 'ACCOUNT_ID', Value: accountId }, Filter: { BillingPeriod }, MaxResults: 100, ...(NextToken ? { NextToken } : {}) });
+          summaries.push(...(json.InvoiceSummaries || []));
+          NextToken = json.NextToken;
+          if (!NextToken) break;
+        }
+      } catch (error) {
+        if ((error as any)?.friendly?.code === 'BILLING_PERMISSION') throw error;
+        failed = error; // one bad month shouldn't hide the others
+      }
     }
+    if (failed && !summaries.length) throw failed;
+    const json = { InvoiceSummaries: Array.from(new Map(summaries.map((x) => [String(x.InvoiceId), x])).values()) };
     const day = (t: any) => (t ? new Date(typeof t === 'number' ? t * 1000 : t).toISOString().slice(0, 10) : undefined);
     const invoices: CloudInvoice[] = (json.InvoiceSummaries || []).map((s: any) => ({
       id: String(s.InvoiceId),
