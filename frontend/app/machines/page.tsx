@@ -86,7 +86,7 @@ interface Standing {
   restoreAnyRegion: boolean;
 }
 type Region = { id: string; name: string; gpus: string[]; lat?: number; lng?: number };
-type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing' | 'disk';
+type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing' | 'disk' | 'update-script';
 /** Clouds that switch an existing (stopped) machine between spot and on-demand in place; others do it via Shelve → Restore. */
 const PRICING_IN_PLACE = new Set(['gcp']);
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
@@ -322,7 +322,8 @@ function MachineCard({
             <div className="mt-2">
               <DiskMeter machineId={machine.id} status={machine.status} busy={busy}
                 perGbMonth={sd && machine.disk_size_gb ? sd.diskMonthly / machine.disk_size_gb : undefined}
-                onResize={(sizeGb) => onAction(machine, 'disk', { sizeGb })} />
+                onResize={(sizeGb) => onAction(machine, 'disk', { sizeGb })}
+                onUpdateScript={machine.provider === 'gcp' ? (restart) => onAction(machine, 'update-script', { restart }) : undefined} />
             </div>
           )}
         </div>

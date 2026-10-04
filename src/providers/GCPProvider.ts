@@ -542,6 +542,30 @@ export class GCPProvider extends CloudProvider {
   }
 
   /**
+   * Google re-runs the "startup-script" metadata at every boot, and the
+   * script installs itself when it differs from the copy on the machine
+   * (see the first-run block of shared/setupScript.ts): so writing the
+   * current script here upgrades the machine at its next start. Finished
+   * setup steps are skipped; games and settings are untouched.
+   */
+  async refreshSetupScript(instanceId: string, opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string }): Promise<boolean> {
+    const { zone, name } = this.splitId(instanceId);
+    const [inst] = await this.instances.get({ project: this.projectId, zone, instance: name });
+    const items: Array<{ key: string; value: string }> = inst.metadata?.items || [];
+    const get = (k: string) => items.find((i) => i.key === k)?.value;
+    const sunshineUsername = opts.sunshineUsername || get('sunshine-username');
+    const sunshinePassword = opts.sunshinePassword || get('sunshine-password');
+    if (!sunshineUsername || !sunshinePassword) throw new Error('The machine\'s streaming login isn\'t stored with it, so its script can\'t be rebuilt.');
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes: opts.autoStopMinutes, displayDriver: opts.displayDriver, gridSource: 'gcp', serverName: opts.nickname || get('cg-nickname') });
+    const next = items.filter((i) => i.key !== 'startup-script');
+    next.push({ key: 'startup-script', value: script });
+    await this.report('info', `Writing the current setup script to ${name} (used from its next start)…`);
+    const [lro] = await this.instances.setMetadata({ project: this.projectId, zone, instance: name, metadataResource: { fingerprint: inst.metadata?.fingerprint, items: next } } as any);
+    await this.waitZoneOp(lro, zone);
+    return true;
+  }
+
+  /**
    * Spot <-> on-demand on a stopped VM (Google allows changing the
    * provisioning model while TERMINATED). Same scheduling as at launch.
    */

@@ -171,6 +171,40 @@ GRID_DIR=/var/lib/cloudgaming/grid
 SUNSHINE_IMAGE='__SUNSHINE_IMAGE__'
 APT="apt-get -o DPkg::Lock::Timeout=900 -y"
 
+# Disk reporter + auto-grow (section 4b). A function so the first-run block
+# can install it too: a machine upgraded in place (app: "Update machine
+# script") gets it at once even while its old setup run is still going.
+disk_reporter() {
+  cat > /usr/local/sbin/cloudgaming-disk.sh <<'DISK'
+#!/bin/bash
+while true; do
+  for f in /sys/class/block/*/device/rescan; do echo 1 > "$f" 2>/dev/null; done
+  SRC=$(findmnt -no SOURCE /)
+  PK=$(lsblk -no PKNAME "$SRC" 2>/dev/null | head -1)
+  PN=$(cat "/sys/class/block/$(basename "$SRC")/partition" 2>/dev/null)
+  if [ -n "$PK" ] && [ -n "$PN" ] && growpart "/dev/$PK" "$PN" >/dev/null 2>&1; then
+    resize2fs "$SRC" >/dev/null 2>&1 || xfs_growfs / >/dev/null 2>&1
+  fi
+  read -r USED SIZE <<< "$(df -B1 --output=used,size / | tail -1)"
+  echo "CLOUDGAMING_DISK $((USED / 1048576)) $((SIZE / 1048576)) $(date +%s)" > /dev/ttyS0 2>/dev/null
+  sleep 300
+done
+DISK
+  chmod 700 /usr/local/sbin/cloudgaming-disk.sh
+  cat > /etc/systemd/system/cloudgaming-disk.service <<'UNIT'
+[Unit]
+Description=Gints Global Gaming Hubjob disk grow + usage report
+[Service]
+ExecStart=/usr/local/sbin/cloudgaming-disk.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable cloudgaming-disk.service
+  systemctl restart cloudgaming-disk.service
+}
+
 # ---- First run (from the cloud's boot hook): install ourselves as a systemd
 # service that runs on every boot, start it, and hand over.
 # Google Cloud re-runs its boot hook on EVERY boot, so this block must never
@@ -199,6 +233,7 @@ WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
   systemctl enable cloudgaming-setup.service
+  disk_reporter
   STATE_NOW=$(systemctl show -p ActiveState --value cloudgaming-setup.service)
   if [ "$CHANGED" = "1" ] && [ "$STATE_NOW" != "activating" ]; then
     systemctl restart --no-block cloudgaming-setup.service
@@ -1206,34 +1241,7 @@ fi
 # Every 5 minutes: let the kernel see a resized disk, grow the root partition
 # and filesystem into it (no reboot), and print "CLOUDGAMING_DISK used total
 # (MiB) epoch" on the serial console, where the app reads it.
-cat > /usr/local/sbin/cloudgaming-disk.sh <<'DISK'
-#!/bin/bash
-while true; do
-  for f in /sys/class/block/*/device/rescan; do echo 1 > "$f" 2>/dev/null; done
-  SRC=$(findmnt -no SOURCE /)
-  PK=$(lsblk -no PKNAME "$SRC" 2>/dev/null | head -1)
-  PN=$(cat "/sys/class/block/$(basename "$SRC")/partition" 2>/dev/null)
-  if [ -n "$PK" ] && [ -n "$PN" ] && growpart "/dev/$PK" "$PN" >/dev/null 2>&1; then
-    resize2fs "$SRC" >/dev/null 2>&1 || xfs_growfs / >/dev/null 2>&1
-  fi
-  read -r USED SIZE <<< "$(df -B1 --output=used,size / | tail -1)"
-  echo "CLOUDGAMING_DISK $((USED / 1048576)) $((SIZE / 1048576)) $(date +%s)" > /dev/ttyS0 2>/dev/null
-  sleep 300
-done
-DISK
-chmod 700 /usr/local/sbin/cloudgaming-disk.sh
-cat > /etc/systemd/system/cloudgaming-disk.service <<'UNIT'
-[Unit]
-Description=Gints Global Gaming Hubjob disk grow + usage report
-[Service]
-ExecStart=/usr/local/sbin/cloudgaming-disk.sh
-Restart=always
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload
-systemctl enable cloudgaming-disk.service
-systemctl restart cloudgaming-disk.service
+disk_reporter
 
 # ============================================================================
 # 5. Auto-stop when idle (CloudyPad-style, dependency-free)

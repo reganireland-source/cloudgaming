@@ -541,6 +541,47 @@ export class MachineService {
   }
 
   /**
+   * UPDATE THE ON-MACHINE SCRIPT of an existing machine (Google), so it gets
+   * features added since it was launched — e.g. disk usage reporting and
+   * growing into an enlarged disk. Applies at the next start; restart=true
+   * restarts a running machine now (a stopped one is just left updated).
+   */
+  static async refreshScript(userId: string, machineId: string, restart = false): Promise<{ operationId: string }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    if (!machine.instance_id || neverCreated(machine) || !['running', 'stopped'].includes(machine.status)) {
+      throw new MachineRequestError(409, 'The machine must be running or stopped.', 'Wait for the current change to finish, or press Sync.');
+    }
+    if (machine.provider !== 'gcp') {
+      throw new MachineRequestError(409, 'Only Google machines can update their script in place.', 'On AWS, Azure and Oracle the script only runs when the machine is first created: Shelve, then Restore, to get the newest one.');
+    }
+    let login: { username?: string; password?: string } = {};
+    try { login = decryptCredentials(userId, `sunshine:${machineId}`, machine.connection_secret); } catch { /* read from the machine's metadata instead */ }
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'update-script', machineId,
+      title: `Update the on-machine script of ${machine.nickname || machine.instance_type}${restart && machine.status === 'running' ? ' and restart it' : ''}` });
+    op.runInBackground(async () => {
+      const provider = await providerFor(userId, machine.provider, op.reporter);
+      if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+      await provider.refreshSetupScript(machine.instance_id, {
+        sunshineUsername: login.username, sunshinePassword: login.password,
+        autoStopMinutes: machine.auto_stop_minutes ?? 15, displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard', nickname: machine.nickname || undefined,
+      });
+      DISK_CACHE.delete(machineId);
+      if (restart && machine.status === 'running') {
+        await op.info('Restarting so the new script runs now (about 1–3 minutes; it skips finished setup steps, games are untouched)…');
+        await provider.rebootInstance(machine.instance_id);
+        await op.info('Restarted. Disk usage shows up within a few minutes.');
+      } else {
+        await op.info(machine.status === 'running'
+          ? 'Updated: it takes effect at the next restart or start.'
+          : 'Updated: it takes effect when you next start the machine.');
+      }
+      return { updated: true };
+    }, 'On-machine script updated.');
+    return { operationId: op.id };
+  }
+
+  /**
    * RENAME. The app uses it at once; the machine (Sunshine, so Moonlight's
    * list) picks it up at its next start, from the cloud tag / metadata
    * "cg-nickname" it reads at boot. Empty = back to the default name.

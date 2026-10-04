@@ -138,6 +138,16 @@ export abstract class CloudProvider {
    */
   readonly diskResizeWhileRunning: boolean = false;
 
+  /**
+   * Replace the machine's stored startup script with the current version
+   * (new on-machine features, e.g. disk reporting, for machines launched
+   * before them). Applies at the next boot. false = not possible on this
+   * cloud (the script there only runs at first boot).
+   */
+  async refreshSetupScript(_instanceId: string, _opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string }): Promise<boolean> {
+    return false;
+  }
+
   /** Enlarge the machine's boot disk to sizeGb (bigger only). The machine grows its filesystem itself. */
   async resizeDisk(_instanceId: string, _sizeGb: number): Promise<void> {
     throw new Error('This cloud can’t enlarge the disk from the app.');

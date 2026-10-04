@@ -26,13 +26,15 @@ const level = (pct: number) =>
   : { bar: 'bg-neon-lime', text: 'text-neon-lime', word: '' };
 const PRESETS = [50, 100, 250];
 
-export default function DiskMeter({ machineId, status, compact = false, perGbMonth, busy = false, onResize }: {
+export default function DiskMeter({ machineId, status, compact = false, perGbMonth, busy = false, onResize, onUpdateScript }: {
   machineId: string; status: string; compact?: boolean;
   /** USD per GB-month, to price the bigger disk. */
   perGbMonth?: number;
   busy?: boolean;
   /** Starts the resize (the parent shows its operation log). */
   onResize?: (sizeGb: number) => void;
+  /** Google: write the current on-machine script to an older machine so it starts reporting. */
+  onUpdateScript?: (restart: boolean) => void;
 }) {
   const [info, setInfo] = useState<DiskInfo | null>(null);
   const [open, setOpen] = useState(false);
@@ -76,6 +78,20 @@ export default function DiskMeter({ machineId, status, compact = false, perGbMon
         )}
       </div>
       {!u && info.note && <p className="text-[0.66rem] text-slate-500">{info.note}</p>}
+      {!u && onUpdateScript && ['running', 'stopped'].includes(status) && (
+        <div className="rounded border border-white/10 bg-white/[0.02] p-2 text-[0.7rem] text-slate-400 space-y-1.5">
+          <p>Launched before disk reporting existed? Update its on-machine script — games, settings and login stay the same; finished setup steps are skipped.</p>
+          <div className="flex flex-wrap gap-2">
+            {status === 'running' && (
+              <button type="button" disabled={busy} onClick={() => { onUpdateScript(true); setTimeout(() => load(true), 240_000); }} className="btn-neon text-[0.7rem] px-2 py-1 disabled:opacity-40"
+                title="Restarts the machine (1–3 minutes) — don't do it mid-game">Update &amp; restart now</button>
+            )}
+            <button type="button" disabled={busy} onClick={() => onUpdateScript(false)} className="text-neon-cyan hover:underline disabled:opacity-40">
+              {status === 'running' ? 'Update, apply at next restart' : 'Update (applies at next start)'}
+            </button>
+          </div>
+        </div>
+      )}
       {open && (
         <div className="rounded border border-neon-cyan/30 bg-neon-cyan/[0.04] p-2.5 space-y-2 text-xs text-slate-300">
           <p>Grow the disk from {size} GB — games and settings stay, no rebuild. Disks can only grow, never shrink.</p>

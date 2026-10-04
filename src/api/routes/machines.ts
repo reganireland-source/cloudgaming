@@ -232,6 +232,15 @@ router.post('/:id/disk', async (req: Request, res: Response) => {
   }
 });
 
+// Write the current on-machine script to an existing (Google) machine: { restart?: boolean }.
+router.post('/:id/update-script', async (req: Request, res: Response) => {
+  try {
+    res.status(202).json(await MachineService.refreshScript(req.userId!, req.params.id, req.body?.restart === true));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to update the machine\'s script');
+  }
+});
+
 // Rescue an unfinished setup: start the machine if it stopped (e.g. a
 // reclaimed spot machine), restart it if its setup went quiet.
 router.post('/:id/resume-setup', async (req: Request, res: Response) => {
