@@ -268,7 +268,7 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
 
   return mapLimit(regionIds, 5, verdict('gcp', log, async (region): Promise<RegionAccess> => {
     const sold = gpuZones ? allModels.filter((m) => gpuZones[region]?.[m]?.length) : allModels;
-    if (gpuZones) void applyOffering('gcp', region, sold); // live answer corrects the catalog (Recon, launch)
+    if (gpuZones) void applyOffering('gcp', region, sold, allModels); // live answer corrects the catalog (Recon, launch)
     const notSold = allModels.filter((m) => !sold.includes(m));
     if (!sold.length) return notOffered(region, `Google sells no ${allModels.join(', ')} GPUs in this region`, 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones', 'Google’s GPU locations');
     const soldMetrics = metrics.filter((m) => sold.includes(shapeOfMetric(m).gpuModel));
@@ -397,7 +397,7 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
     try {
       const offered: Set<string> = await provider.getGpuTypesOffered(region);
       const sold = allModels.filter((m) => AWS_SHAPES.some((sh) => sh.gpuModel === m && offered.has(sh.id)));
-      void applyOffering('aws', region, sold); // live answer corrects the catalog (Recon, launch)
+      void applyOffering('aws', region, sold, allModels); // live answer corrects the catalog (Recon, launch)
       if (!sold.length) return notOffered(region, 'AWS sells no g4dn (T4), g5 (A10G) or g6e (L40S) machines in this region', 'https://aws.amazon.com/ec2/instance-types/g4/', 'AWS G4dn instances');
       notSold = allModels.filter((m) => !sold.includes(m));
     } catch { /* unknown: assume the catalog is right */ }
@@ -475,7 +475,7 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
     try {
       const sizes: Record<string, { restricted?: string }> = await provider.getSizeAvailability(region);
       const listed = Object.values(sizes);
-      void applyOffering('azure', region, listed.length ? ['T4'] : []); // live answer corrects the catalog
+      void applyOffering('azure', region, listed.length ? ['T4'] : [], ['T4']); // live answer corrects the catalog
       if (!listed.length) return notOffered(region, 'Azure sells no NCasT4_v3 (T4) machines in this region', 'https://azure.microsoft.com/explore/global-infrastructure/products-by-region/', 'Azure products by region');
       if (listed.every((x) => x.restricted)) {
         return { region, status: 'not-enabled' as const, summary: `Azure holds the T4 sizes back for your subscription here (${listed[0].restricted})`, quotas: [], spot: null, spotReady: null,
@@ -600,7 +600,7 @@ async function oracleAccess(provider: any, regionIds: string[], log: Log = noLog
     }
     try {
       const lim = await provider.getGpuLimit(region);
-      void applyOffering('oracle', region, lim ? ['A10'] : []); // live answer corrects the catalog
+      void applyOffering('oracle', region, lim ? ['A10'] : [], ['A10']); // live answer corrects the catalog
       if (!lim) return notOffered(region, 'Oracle lists no A10 GPU limit here, so it doesn’t sell A10 machines in this region', 'https://docs.oracle.com/iaas/Content/Compute/References/computeshapes.htm', 'Oracle GPU shapes');
       // What can I run: 1 A10 GPU per machine; preemptible (spot) machines
       // count against the same limit. No big screen on Oracle.

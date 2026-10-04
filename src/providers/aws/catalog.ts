@@ -132,7 +132,7 @@ export const AWS_REGIONS: AwsRegion[] = [
   { id: 'eu-central-2', name: 'Zurich', lat: 47.37, lng: 8.54, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.09 },                     // opt-in
   { id: 'il-central-1', name: 'Tel Aviv', lat: 32.08, lng: 34.78, gpus: ['T4'], priceFactor: 1.25, egressPerGb: 0.11 },                 // opt-in
   { id: 'me-south-1', name: 'Bahrain', lat: 26.07, lng: 50.56, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.117 },                   // opt-in
-  { id: 'me-central-1', name: 'UAE (Dubai)', lat: 25.2, lng: 55.27, gpus: ['T4'], priceFactor: 1.3, egressPerGb: 0.11 },                // opt-in
+  { id: 'me-central-1', name: 'UAE (Dubai)', lat: 25.2, lng: 55.27, gpus: ['T4', 'L40S'], priceFactor: 1.3, egressPerGb: 0.11 },                // opt-in
   { id: 'af-south-1', name: 'Cape Town', lat: -33.92, lng: 18.42, gpus: ['T4'], priceFactor: 1.35, egressPerGb: 0.154 },                // opt-in
   { id: 'ap-south-2', name: 'Hyderabad', lat: 17.39, lng: 78.49, gpus: ['T4', 'L40S'], priceFactor: 1.1, egressPerGb: 0.1093 },                 // opt-in
   { id: 'ap-southeast-3', name: 'Jakarta', lat: -6.21, lng: 106.85, gpus: ['A10G', 'L40S'], priceFactor: 1.35, egressPerGb: 0.132 },              // opt-in
