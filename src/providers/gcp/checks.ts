@@ -144,11 +144,11 @@ export const GCP_SETUP: ProviderSetupModule = {
       const found = models.map((m) => ({ metric: m, limit: quotas.find((q) => q.metric === m)?.limit || 0 }));
       const usable = found.filter((f) => f.limit >= 1);
       checks.push(usable.length
-        ? { id: 'gpu-region', label: `GPU quota in ${region}`, status: 'pass', message: usable.map((u) => `${u.metric.replace(/_/g, ' ')}: ${u.limit}`).join(', ') }
+        ? { id: 'gpu-region', label: `GPU quota in ${region}`, status: 'pass', message: usable.map((u) => `${u.metric.replace(/^GPU_FAMILY:/, '').replace(/_/g, ' ')}: ${u.limit}`).join(', ') }
         : {
             id: 'gpu-region', label: `GPU quota in ${region}`, status: 'warn',
-            message: `No T4 or L4 GPU quota in ${region} yet.`,
-            tip: `On the Quotas page, filter for "NVIDIA T4 GPUs" (cheaper) or "NVIDIA L4 GPUs", pick region ${region}, and request 1.`,
+            message: `No GPU quota in ${region} yet.`,
+            tip: `On the Quotas page, filter for "NVIDIA T4 GPUs" (cheaper) or "NVIDIA L4 GPUs" (or "GPUs per GPU family" for the Super tier's RTX PRO 6000), pick region ${region}, and request 1.`,
             consoleUrl: consoleUrl('iam-admin/quotas', creds.projectId),
             consoleLabel: 'Open Quotas',
           });

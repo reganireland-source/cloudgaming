@@ -54,7 +54,11 @@ import {
   estimateHourly,
   findRegion,
   findShape,
+  isG4,
+  type GcpShape,
 } from './gcp/catalog';
+
+type GpuModel = GcpShape['gpuModel'];
 import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
 
 /** The parsed, checked credentials. */
@@ -77,7 +81,8 @@ function isNotFound(error: any): boolean {
 const VWS_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4-vws', L4: 'nvidia-l4-vws' };
 
 /** Live GPU zones per project (see getGpuZones). */
-const GPU_ZONES_CACHE = new Map<string, { at: number; value: Record<string, Partial<Record<'T4' | 'L4', string[]>>> }>();
+const GPU_FAMILY_CACHE = new Map<string, { at: number; value: Array<{ region: string; family: string; limit: number }> }>();
+const GPU_ZONES_CACHE = new Map<string, { at: number; value: Record<string, Partial<Record<GpuModel, string[]>>> }>();
 
 export class GCPProvider extends CloudProvider {
   name = 'gcp' as const;
@@ -366,6 +371,15 @@ export class GCPProvider extends CloudProvider {
       });
     }
 
+    if (options.displayDriver === 'grid' && !VWS_ACCELERATOR[shape.gpuModel]) {
+      throw new FriendlyCloudError({
+        code: 'NO_BIG_SCREEN',
+        title: `Big screen isn't available on ${shape.gpuModel} machines`,
+        explanation: `Google only licenses the GRID driver on its virtual workstation (vWS) GPUs, and offers no vWS version of the ${shape.gpuModel}.`,
+        fixes: ['Launch it without big screen (2560×1600 is the most a headless screen can do on it), or pick an L4 machine for big screen.'],
+      });
+    }
+
     await this.report('info', `Project ${this.projectId} · ${shape.label} · ${region.name} (${region.id})` +
       `${options.spot ? ' · SPOT (cheaper, can be interrupted)' : ''}`);
     await this.ensureNetwork(region.id);
@@ -414,7 +428,8 @@ export class GCPProvider extends CloudProvider {
               // map can find it — e.g. if it's ever left behind on its own.
               labels: { app: 'cloudgaming-hub' },
               diskSizeGb: String(options.diskSizeGb),
-              diskType: `zones/${zone}/diskTypes/pd-balanced`,
+              // G4 (RTX PRO 6000) only takes Hyperdisk.
+              diskType: `zones/${zone}/diskTypes/${isG4(shape.machineType) ? 'hyperdisk-balanced' : 'pd-balanced'}`,
               ...(options.sourceSnapshot
                 ? { sourceSnapshot: options.sourceSnapshot }
                 : { sourceImage: BOOT_IMAGE }),
@@ -426,6 +441,8 @@ export class GCPProvider extends CloudProvider {
             network: `global/networks/${NETWORK_NAME}`,
             subnetwork: `regions/${region.id}/subnetworks/cloudgaming-${region.id}`,
             accessConfigs: [{ name: 'External NAT', type: 'ONE_TO_ONE_NAT', networkTier: 'PREMIUM' }],
+            // G4 needs Google's gVNIC network card (Ubuntu 22.04 has the driver).
+            ...(isG4(shape.machineType) ? { nicType: 'GVNIC' } : {}),
           },
         ],
         // GPU machines can't be live-migrated during Google maintenance, so
@@ -903,11 +920,11 @@ export class GCPProvider extends CloudProvider {
    * from the live accelerator list (one call for every zone). Cached for 6 h
    * per project.
    */
-  async getGpuZones(): Promise<Record<string, Partial<Record<'T4' | 'L4', string[]>>>> {
+  async getGpuZones(): Promise<Record<string, Partial<Record<GpuModel, string[]>>>> {
     const hit = GPU_ZONES_CACHE.get(this.projectId);
     if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.value;
-    const byName: Record<string, 'T4' | 'L4'> = { 'nvidia-tesla-t4': 'T4', 'nvidia-l4': 'L4' };
-    const value: Record<string, Partial<Record<'T4' | 'L4', string[]>>> = {};
+    const byName: Record<string, GpuModel> = { 'nvidia-tesla-t4': 'T4', 'nvidia-l4': 'L4', 'nvidia-rtx-pro-6000': 'RTX PRO 6000' };
+    const value: Record<string, Partial<Record<GpuModel, string[]>>> = {};
     for await (const [scope, list] of this.acceleratorTypes.aggregatedListAsync({ project: this.projectId })) {
       const zone = String(scope).replace(/^zones\//, '');
       for (const a of (list as any)?.acceleratorTypes || []) {
@@ -944,7 +961,8 @@ export class GCPProvider extends CloudProvider {
           const pending = p.reconciling === true || (granted != null && requested > granted);
           if (!pending) continue;
           out.push({
-            metric: String(p.quotaId || '').replace(/-per-.*$/, '').replace(/-/g, '_').toUpperCase(),
+            metric: p.dimensions?.gpu_family ? `GPU_FAMILY:${p.dimensions.gpu_family}` // GPUS-PER-GPU-FAMILY (G4)
+              : String(p.quotaId || '').replace(/-per-.*$/, '').replace(/-/g, '_').toUpperCase(),
             region: String(p.dimensions?.region || ''),
             requested, granted,
             status: p.reconciling ? 'being processed' : (p.quotaConfig?.stateDetail || 'not granted yet'),
@@ -962,7 +980,29 @@ export class GCPProvider extends CloudProvider {
 
   async getRegionQuotas(region: string = DEFAULT_REGION): Promise<Array<{ metric: string; limit: number; usage: number }>> {
     const [info] = await this.regions.get({ project: this.projectId, region });
-    return (info.quotas || []).map((q: any) => ({ metric: String(q.metric), limit: Number(q.limit) || 0, usage: Number(q.usage) || 0 }));
+    const out = (info.quotas || []).map((q: any) => ({ metric: String(q.metric), limit: Number(q.limit) || 0, usage: Number(q.usage) || 0 }));
+    // Newer GPUs (G4's RTX PRO 6000) use the per-family quota
+    // GPUS-PER-GPU-FAMILY; if the region list doesn't carry it, read the
+    // limits from the Cloud Quotas API (usage unknown there → 0).
+    if (!out.some((q: { metric: string }) => q.metric.startsWith('GPU_FAMILY:'))) {
+      for (const f of (await this.getGpuFamilyLimits().catch(() => [])).filter((x) => x.region === region)) {
+        out.push({ metric: `GPU_FAMILY:${f.family}`, limit: f.limit, usage: 0 });
+      }
+    }
+    return out;
+  }
+
+  /** GPUS-PER-GPU-FAMILY limits per region and family (Cloud Quotas API). Cached 10 min. */
+  private async getGpuFamilyLimits(): Promise<Array<{ region: string; family: string; limit: number }>> {
+    const hit = GPU_FAMILY_CACHE.get(this.projectId);
+    if (hit && Date.now() - hit.at < 600_000) return hit.value;
+    const jwt = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const res: any = await jwt.request({ url: `https://cloudquotas.googleapis.com/v1/projects/${this.projectId}/locations/global/services/compute.googleapis.com/quotaInfos/GPUS-PER-GPU-FAMILY-per-project-region` });
+    const value = (res.data?.dimensionsInfos || [])
+      .filter((d: any) => d.dimensions?.region && d.dimensions?.gpu_family)
+      .map((d: any) => ({ region: String(d.dimensions.region), family: String(d.dimensions.gpu_family), limit: Number(d.details?.value) || 0 }));
+    GPU_FAMILY_CACHE.set(this.projectId, { at: Date.now(), value });
+    return value;
   }
 
   /** Does our own network ("cloudgaming-net") exist yet? (Created on first launch.) */
@@ -1028,7 +1068,7 @@ export class GCPProvider extends CloudProvider {
         const instanceId = `${zone}/${vm.name}`;
         const machineType = lastPart(vm.machineType);
         const gpu = lastPart(vm.guestAccelerators?.[0]?.acceleratorType);
-        const shapeId = machineType.startsWith('g2-') ? machineType : gpu.includes('t4') ? `${machineType}+t4` : machineType;
+        const shapeId = machineType.startsWith('g2-') || isG4(machineType) ? machineType : gpu.includes('t4') ? `${machineType}+t4` : machineType;
         const spot = String(vm.scheduling?.provisioningModel) === 'SPOT';
         for (const d of vm.disks || []) if (d.source) vmIdByDiskLink.set(d.source, instanceId);
         const raw = String(vm.status);

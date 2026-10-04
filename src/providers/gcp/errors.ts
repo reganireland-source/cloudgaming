@@ -112,6 +112,21 @@ export const GCP_RULES: Rule[] = [
     }),
   },
   {
+    // G4 (RTX PRO 6000) on-demand: the per-family quota.
+    test: /Quota '?GPUS_PER_GPU_FAMILY'? exceeded.*?(?:region:?\s*([a-z0-9-]+))?/i,
+    build: (_raw, m) => ({
+      code: 'GPU_QUOTA_REGION',
+      title: `No RTX PRO 6000 quota${m[1] ? ` in ${m[1]}` : ''}`,
+      explanation: 'G4 machines use the "GPUs per GPU family" quota (gpu_family NVIDIA_RTX_PRO_6000), per region. Spot G4 uses "Preemptible NVIDIA RTX PRO 6000 GPUs" instead.',
+      fixes: [
+        'Click the button below, filter "GPUs per GPU family", pick the row for NVIDIA_RTX_PRO_6000 in ' + (m[1] || 'your region') + ', click "Edit", request 1 and submit.',
+        'The Regions page has a ready-to-paste gcloud command for it.',
+      ],
+      consoleUrl: consoleLink('iam-admin/quotas?metric=compute.googleapis.com%2Fgpus_per_gpu_family'),
+      consoleLabel: 'Open Quotas',
+    }),
+  },
+  {
     test: /Quota '?((?:PREEMPTIBLE_)?NVIDIA_[A-Z0-9_]+_GPUS)'? exceeded.*?(?:region:?\s*([a-z0-9-]+))?/i,
     build: (_raw, m) => ({
       code: 'GPU_QUOTA_REGION',

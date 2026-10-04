@@ -182,7 +182,7 @@ export const AWS_RULES: Rule[] = [
         'This isn\'t a problem with your account — AWS temporarily has no spare machines of this type in the availability zones we tried. It usually clears within minutes to hours.',
       fixes: [
         'Try again in a few minutes.',
-        'Or pick a different machine type (g4dn ↔ g5) or a different region.',
+        'Or pick a different machine type (g4dn ↔ g5 ↔ g6e) or a different region.',
         'Spot machines are the first to run out; switching spot off can help.',
       ],
     }),

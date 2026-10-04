@@ -5,12 +5,14 @@
  *
  * Feeds the Recon page. Given where the player is (lat/lng — the page turns a
  * city or country into coordinates first), it ranks every cloud region the
- * app can launch in, separately for three hardware tiers:
+ * app can launch in, separately for four hardware tiers:
  *
  *   GOOD    T4-class GPU          → 1080p60   indie, esports, older AAA
  *   BETTER  L4 / A10G, 4 vCPU     → 1440p60   modern AAA
  *   BEST    L4 / A10G, 8+ vCPU,   → 1440p–4K  demanding AAA, CPU-heavy games
  *           or Oracle's A10 VM
+ *   SUPER   L40S / RTX PRO 6000   → 4K60+     modern AAA with ray tracing and
+ *                                             DLSS frame generation
  *
  * Everything comes from the same catalogs the launch form uses
  * (src/providers/<cloud>/catalog.ts), so a recommendation can be launched
@@ -38,7 +40,7 @@ import { CATALOGS } from '../providers/registry';
 import type { CatalogShape, ProviderName } from '../providers/shared/types';
 import { getSpotInfo, type SpotInfo } from './SpotPriceService';
 
-export type TierId = 'good' | 'better' | 'best';
+export type TierId = 'good' | 'better' | 'best' | 'super';
 
 // Streaming quality per tier; GB/h matches the streaming_qualities seed data.
 export const TIERS: Array<{
@@ -50,17 +52,22 @@ export const TIERS: Array<{
     bestFor: 'Modern AAA games' },
   { id: 'best', label: 'Best', gpuClass: 'NVIDIA L4 / A10G / A10 with 8+ vCPU', gpuShort: 'A10 · 8+ CPU', resolution: '4K', fps: 60, gbPerHour: 9,
     bestFor: 'Demanding AAA and CPU-heavy games' },
+  // Ada / Blackwell: the only cloud GPUs with DLSS 3/4 frame generation and
+  // RTX 4090/5090-class power. 2–5× the price of BEST.
+  { id: 'super', label: 'Super', gpuClass: 'NVIDIA L40S / RTX PRO 6000', gpuShort: 'L40S · RTX PRO 6000', resolution: '4K', fps: 60, gbPerHour: 9,
+    bestFor: 'Modern AAA with ray tracing and DLSS frame generation; 4K or high frame rates' },
 ];
 
 /** Which tier a catalog shape belongs to. */
 export function tierOf(shape: CatalogShape): TierId {
+  if (shape.gpuModel === 'L40S' || shape.gpuModel === 'RTX PRO 6000') return 'super';
   if (shape.gpuModel === 'T4') return 'good';                       // T4 with 8 vCPU is still a T4
   if (shape.gpuModel === 'A10') return 'best';                      // Oracle's A10 VM: 30 vCPU, 240 GB
   return shape.vcpus >= 8 ? 'best' : 'better';                      // L4 / A10G
 }
 
 // game_profiles.gpu_class → suggested tier
-const GAME_TIER: Record<string, TierId> = { t4: 'good', a10g: 'better', a100: 'best', h100: 'best' };
+const GAME_TIER: Record<string, TierId> = { t4: 'good', a10g: 'better', a100: 'best', h100: 'super' };
 
 /** Same estimate as the map (frontend/components/InfraMap.tsx estimatePingMs). */
 export function estimatePingMs(lat1: number, lng1: number, lat2: number, lng2: number): number {

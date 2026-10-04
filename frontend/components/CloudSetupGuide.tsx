@@ -103,6 +103,7 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'Filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs" for your region (e.g. asia-southeast1) → request at least 1.',
         'For spot machines, also request "Preemptible NVIDIA T4 GPUs" (or L4).',
         'Quota is per GPU model: T4 quota covers GOOD-tier machines only; BETTER (L4) needs "NVIDIA L4 GPUs" as well. Request both in each region you travel to.',
+        'SUPER tier (G4, RTX PRO 6000): filter "GPUs per GPU family", pick the row with gpu_family NVIDIA_RTX_PRO_6000 in your region → request 1. For spot, "Preemptible NVIDIA RTX PRO 6000 GPUs". No CPU quota needed. Big screen isn\'t available on G4.',
         'Region names: asia-southeast1 = Singapore, asia-east2 = Hong Kong, asia-east1 = Taiwan, asia-northeast1 = Tokyo, asia-northeast3 = Seoul, asia-south1 = Mumbai, australia-southeast1 = Sydney, us-west1 = Oregon, us-west2 = Los Angeles.',
         'Approval usually takes from a few minutes to 2 business days.',
       ],
@@ -131,7 +132,10 @@ gcloud beta quotas preferences create --project=$P --billing-project=$P --servic
 gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-T4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
 # BETTER / BEST tiers (L4), on-demand / spot:
 gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
-gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"`,
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
+# SUPER tier (RTX PRO 6000, G4), on-demand / spot:
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=GPUS-PER-GPU-FAMILY-per-project-region --preferred-value=1 --dimensions=region=$R,gpu_family=NVIDIA_RTX_PRO_6000 --email=<your email> --justification="Personal cloud gaming VM"
+gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-RTX-PRO-6000-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"`,
       },
     },
     bigScreen: {
@@ -226,7 +230,7 @@ aws iam create-access-key --user-name $U --query 'AccessKey.[AccessKeyId,SecretA
         { href: 'https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas/L-3819A6DF', label: 'Spot G and VT (L-3819A6DF)' },
         { href: 'https://console.aws.amazon.com/servicequotas/home/requests', label: 'Your quota requests' },
       ],
-      summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge needs 8.',
+      summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge (including the SUPER-tier g6e.2xlarge, L40S) needs 8.',
       steps: [
         'Service Quotas → AWS services → Amazon EC2, in the region you\'ll use.',
         'Find "Running On-Demand G and VT instances" (quota code L-DB2E81BA) → Request increase at account level → 8. "Account level" is just AWS\'s name for your account\'s limit: it still applies only to the region selected.',
@@ -248,7 +252,7 @@ for R in $REGIONS; do
   echo "$R on-demand=$(aws service-quotas get-service-quota --region $R --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value) spot=$(aws service-quotas get-service-quota --region $R --service-code ec2 --quota-code L-3819A6DF --query Quota.Value)"
 done
 
-# Request 8 vCPUs of each (enough for one g5.2xlarge)
+# Request 8 vCPUs of each (enough for one g5.2xlarge or one SUPER-tier g6e.2xlarge)
 for R in $REGIONS; do
   aws service-quotas request-service-quota-increase --region $R --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
   aws service-quotas request-service-quota-increase --region $R --service-code ec2 --quota-code L-3819A6DF --desired-value 8
@@ -261,7 +265,7 @@ aws account enable-region --region-name ap-east-1`,
     },
     bigScreen: {
       available: true,
-      summary: 'No extra quota or cost: big screen runs on the same g4dn (T4) / g5 (A10G) machines and uses the same "Running On-Demand G and VT instances" (and spot) quota as above. AWS provides the GRID driver and its licence.',
+      summary: 'No extra quota or cost: big screen runs on the same g4dn (T4) / g5 (A10G) / g6e (L40S) machines and uses the same "Running On-Demand G and VT instances" (and spot) quota as above. AWS provides the GRID driver and its licence.',
       steps: [
         'Nothing extra to request — tick "Big screen" when launching.',
         'Optional: check the machines can reach AWS\'s GRID driver (it\'s downloaded during setup).',

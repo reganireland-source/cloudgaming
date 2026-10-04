@@ -13,8 +13,9 @@
  *    sets the hardware tier AND what matters most when ranking regions:
  *    esports → lowest ping; indie → lowest price; AAA → balanced.
  * 3. General first, specific if wanted: the tier cards — GOOD (T4,
- *    1080p60), BETTER (L4/A10G, 1440p60), BEST (more GPU + CPU, up to 4K60)
- *    — can be switched directly, and "Fine-tune" holds a specific game,
+ *    1080p60), BETTER (L4/A10G, 1440p60), BEST (more GPU + CPU, up to 4K60),
+ *    SUPER (L40S / RTX PRO 6000, 4K with ray tracing and DLSS frame
+ *    generation) — can be switched directly, and "Fine-tune" holds a specific game,
  *    a budget and the sort order.
  * 4. Pricing: RELIABLE (on-demand) or SPOT — the clouds' spare capacity at a
  *    steep discount, which the cloud can take back at short notice. Spot
@@ -36,12 +37,12 @@ import { usd } from '@/lib/money';
 import CloudLogo from '@/components/CloudLogo';
 import { apiFetch, ApiError } from '@/lib/auth';
 import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
-import { GPU_COMPARE, TIER_CONSUMER } from '@/lib/gpuCompare';
+import { GPU_COMPARE, TIER_CONSUMER, TIER_DLSS } from '@/lib/gpuCompare';
 import { useAuth } from '@/components/AuthProvider';
 import LaunchMachineModal, { type LaunchPreset } from '@/components/LaunchMachineModal';
 import { placeLabel, type Place } from '@/lib/places';
 
-type TierId = 'good' | 'better' | 'best';
+type TierId = 'good' | 'better' | 'best' | 'super';
 type Priority = 'latency' | 'balanced' | 'price';
 type Rating = 'excellent' | 'good' | 'fair' | 'poor';
 
@@ -91,6 +92,8 @@ const CATEGORIES: Array<{ id: string; label: string; examples: string; tier: Tie
     why: 'Needs a current GPU for 1440p — the best-value region with a good ping.' },
   { id: 'demanding', label: 'Demanding / 4K', examples: 'Flight Simulator, Baldur’s Gate 3, big sims & strategy', tier: 'best', priority: 'balanced',
     why: 'Heavy on GPU and CPU — the most powerful machines, at a good ping.' },
+  { id: 'max', label: 'Max settings / RT', examples: 'Cyberpunk 2077 path tracing, Alan Wake 2, Black Myth: Wukong, Indiana Jones, WoW at 4K', tier: 'super', priority: 'balanced',
+    why: 'Ray tracing and DLSS frame generation need an RTX 4090/5090-class GPU (L40S or RTX PRO 6000). Costs 2–5× more per hour, so spot is worth a look.' },
   { id: 'classic', label: 'Classic', examples: 'Skyrim, The Witcher 3, Fallout 4, older AAA', tier: 'good', priority: 'balanced',
     why: 'A T4 runs these at 1080p60 — no need to pay for more; good ping, then lowest price.' },
   { id: 'indie', label: 'Indie & casual', examples: 'Hades, Stardew Valley, Minecraft, turn-based', tier: 'good', priority: 'price',
@@ -103,7 +106,7 @@ const ANTI_CHEAT_BLOCKED = /valorant|fortnite|apex legends|pubg|league of legend
 const PRIORITY_LABEL: Record<Priority, string> = { latency: 'Lowest ping', balanced: 'Balanced', price: 'Lowest price' };
 
 // Tier → the launch form's streaming quality.
-const TIER_QUALITY: Record<TierId, string> = { good: 'good', better: 'high', best: 'ultra' };
+const TIER_QUALITY: Record<TierId, string> = { good: 'good', better: 'high', best: 'ultra', super: 'ultra' };
 const QUICK_PICKS = ['Sydney', 'Singapore', 'Tokyo', 'London', 'New York', 'Los Angeles'];
 const STORE_KEY = 'recon.place';
 
@@ -277,7 +280,7 @@ export default function RecommendationsPage() {
 
         <div>
           <p id="recon-cat" className="block text-xs font-bold text-neon-cyan mb-1.5 font-mono">WHAT_DO_YOU_PLAY</p>
-          <div role="radiogroup" aria-labelledby="recon-cat" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          <div role="radiogroup" aria-labelledby="recon-cat" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {CATEGORIES.map((c) => {
               const on = c.id === categoryId;
               return (
@@ -423,8 +426,8 @@ export default function RecommendationsPage() {
         <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; SCANNING_REGIONS…</p>
       ) : (
         <>
-          {/* ---- Tier picker: GOOD / BETTER / BEST ---- */}
-          <div role="radiogroup" aria-label="Hardware tier" className="grid grid-cols-3 gap-2 sm:gap-3">
+          {/* ---- Tier picker: GOOD / BETTER / BEST / SUPER ---- */}
+          <div role="radiogroup" aria-label="Hardware tier" className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
             {result.tiers.map((t) => {
               const pick = t.options[0];
               const selected = t.id === tierId;
@@ -436,7 +439,7 @@ export default function RecommendationsPage() {
                   <span className={`block font-mono font-bold text-sm tracking-label ${selected ? 'text-neon-cyan' : 'text-slate-200'}`}>{t.label.toUpperCase()}</span>
                   <span className="block text-[0.7rem] text-slate-400">{t.resolution}{t.fps}</span>
                   <span className="block text-[0.7rem] text-slate-500 truncate" title={t.gpuClass}>{t.gpuShort}</span>
-                  <span className="block text-[0.7rem] text-slate-500 truncate" title="Rough gaming-PC equivalent (datacenter GPUs differ)">{TIER_CONSUMER[t.id]}</span>
+                  <span className="block text-[0.7rem] text-slate-500 truncate" title={`Rough gaming-PC equivalent (datacenter GPUs differ) · ${TIER_DLSS[t.id]}`}>{TIER_CONSUMER[t.id]}</span>
                   <span className="block mt-1 text-sm text-slate-100 tabular-nums">{pick ? <>{money(pick.totalPerHour)}<span className="text-slate-500 text-[0.7rem]">/h</span></> : <span className="text-slate-500 text-xs">over budget</span>}</span>
                   {pick && <span className={`block text-[0.7rem] tabular-nums ${RATING[pick.latencyRating].className}`}>~{pick.latencyMs} ms</span>}
                   {spot && pick?.spotOffer && pick.spot ? (
@@ -709,7 +712,7 @@ function CoordinatesEditor({ place, onSet }: { place: ChosenPlace | null; onSet:
  * selected tier (or GOOD) on-demand, say so — that's the point of spot.
  */
 function GoLarge({ tiers, tierId, spot, onSwitch }: { tiers: Tier[]; tierId: TierId; spot: boolean; onSwitch: (t: TierId, spot: boolean) => void }) {
-  const order: TierId[] = ['good', 'better', 'best'];
+  const order: TierId[] = ['good', 'better', 'best', 'super'];
   const current = tiers.find((t) => t.id === tierId);
   if (!current?.onDemandFrom) return null;
   // Biggest tier above the current one whose spot price beats the current tier on-demand.
@@ -762,12 +765,13 @@ function GpuCompareNote() {
       <p className="mt-2 leading-relaxed">
         Datacenter cards aren’t gaming cards: they run lower clocks within a tight power limit, have more memory, no monitor output (the machine streams a
         virtual screen) and server drivers, and cloud vCPUs are usually slower per core than a gaming PC’s. So these are ballpark equivalents from public
-        benchmarks of the same chips — real results vary by game. None of the GPUs these clouds rent for gaming reaches an RTX 3080 Ti; the A10 / A10G
-        come closest at roughly two-thirds of one. Streaming also adds a little lag and compression on top.
+        benchmarks of the same chips — real results vary by game. Up to BEST, none reaches an RTX 3080 Ti (the A10 / A10G come closest at roughly
+        two-thirds of one). The SUPER tier is different: the L40S (AWS g6e) is the RTX 4090’s chip and the RTX PRO 6000 (Google G4) the RTX 5090’s,
+        with DLSS 3 / DLSS 4 frame generation in games that support it — at 2–5× the hourly price. Streaming also adds a little lag and compression on top.
       </p>
       <p className="mt-2 leading-relaxed">
         <span className="text-neon-magenta">Big screen (experimental):</span> these GPUs normally stream at most 2560×1600. Tick “Big screen” when launching
-        to get up to 4096×2160 (a 3440×1440 ultrawide at full size): AWS and Azure at no extra cost, Google with its paid “vWS” GPUs, not Oracle.
+        to get up to 4096×2160 (a 3440×1440 ultrawide at full size): AWS and Azure at no extra cost (AWS includes the L40S), Google with its paid “vWS” GPUs (not on the RTX PRO 6000), not Oracle.
       </p>
     </details>
   );

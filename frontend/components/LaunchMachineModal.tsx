@@ -41,7 +41,7 @@ interface ProviderOption {
   provider: string; label: string; configured: boolean; lastCheckOk: boolean | null; lastCheckSummary: string | null;
   available: boolean; supportsSpot: boolean; spotLabel: string; spotOnReclaim?: string; defaultRegion: string; defaultDiskGb: number;
   minDiskGb: number; diskPerGbMonth: number; snapshotPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
-  bigScreen?: { available: boolean; extraPerHour: number; note: string };
+  bigScreen?: { available: boolean; extraPerHour: number; note: string; notOnGpus?: string[] };
 }
 interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[] }
 
@@ -139,7 +139,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
 
   const shape = shapesHere.find((s) => s.id === shapeId);
   const price = shape?.prices[region];
-  const bigOk = !!current?.bigScreen?.available;
+  const bigOk = !!current?.bigScreen?.available && !(shape && current?.bigScreen?.notOnGpus?.includes(shape.gpuModel));
   const hourly = (spot && price?.spot != null ? price.spot : price?.onDemand || 0) + (bigScreen && bigOk ? current!.bigScreen!.extraPerHour : 0);
   const diskMonthly = current ? diskGb * current.diskPerGbMonth : 0;
   // Shelved: snapshot billed on data stored — ~30 GB fresh install … full disk.
@@ -258,7 +258,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                         }
                         if (!a || st === 'ready' && !(spot && a.spotReady === false)) return <p className="text-xs text-slate-500 mt-1">{a ? <span className="text-neon-lime">✓ Your account has GPU quota here. </span> : null}Pick the one closest to you — distance adds lag.</p>;
                         const msg = st === 'ready' ? 'Your spot quota here is too low — launch on-demand, or raise it.'
-                          : a.status === 'ready' ? `No ${shape?.gpuModel} quota here (${a.summary}). Pick a ${a.quotas.filter((q) => q.limit - q.used >= 1 && /T4|L4/.test(q.label)).map((q) => q.label.replace(/NVIDIA | GPUs/g, '')).join('/') || 'different'} size, or request it.`
+                          : a.status === 'ready' ? `No ${shape?.gpuModel} quota here (${a.summary}). Pick a ${a.quotas.filter((q) => q.limit - q.used >= 1 && /T4|L4|A10|L40S|RTX/.test(q.label)).map((q) => q.label.replace(/NVIDIA | GPUs/g, '')).join('/') || 'different'} size, or request it.`
                           : `${ACCESS_STYLE[a.status].label}: ${a.summary}. The launch will probably fail.`;
                         return <p className="text-xs text-neon-amber mt-1">! {msg} <Link href="/regions" className="text-neon-cyan hover:underline whitespace-nowrap">How to fix</Link></p>;
                       })()}
@@ -291,7 +291,9 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                             }`}
                           >
                             <span className="flex justify-between gap-2">
-                              <span className="font-semibold text-slate-100">{s.label}</span>
+                              <span className="font-semibold text-slate-100">{s.label}
+                                {(s.gpuModel === 'L40S' || s.gpuModel === 'RTX PRO 6000') && <span className="ml-1.5 text-[0.64rem] tracking-label text-neon-amber border border-neon-amber/50 rounded px-1" title="SUPER tier: RTX 4090/5090-class GPU with DLSS frame generation">SUPER</span>}
+                              </span>
                               <span className="text-neon-lime tabular-nums">≈USD {p?.onDemand.toFixed(2)}/h</span>
                             </span>
                             {p?.spot != null && (

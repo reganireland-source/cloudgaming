@@ -40,7 +40,7 @@ import { CATALOGS, isProviderName } from '../providers/registry';
 import type { ProviderName } from '../providers/shared/types';
 import { toFriendlyError, FriendlyError } from '../providers/errors';
 import { listCredentialSummaries, providerFor } from './CredentialService';
-import { GCP_SHAPES } from '../providers/gcp/catalog';
+import { GCP_SHAPES, GCP_CATALOG, gpuOfMetric, quotaRequestOf, spotMetricOf } from '../providers/gcp/catalog';
 import { AWS_SHAPES } from '../providers/aws/catalog';
 import { AZURE_SHAPES, T4_QUOTA_FAMILY } from '../providers/azure/catalog';
 import { ORACLE_SHAPES } from '../providers/oracle/catalog';
@@ -113,7 +113,7 @@ const isBigMode = (m: RunMode) => m === 'big' || m === 'bigSpot';
 
 /** One row per tier (its cheapest machine sold here), plus which quota unlocks what. */
 function buildRun<S extends { id: string; gpuModel: string; vcpus: number }>(
-  shapes: S[], isSold: (gpuModel: string) => boolean, bigScreen: boolean,
+  shapes: S[], isSold: (gpuModel: string) => boolean, bigScreen: boolean | ((gpuModel: string) => boolean),
   cell: (shape: S, mode: RunMode) => RunCell, quotas: QuotaDetail[],
 ): { run: RunRow[]; quotaDetail: QuotaDetail[] } {
   const run: RunRow[] = TIERS.map((t) => {
@@ -124,6 +124,7 @@ function buildRun<S extends { id: string; gpuModel: string; vcpus: number }>(
       !ofTier.length ? na('This cloud has no machine in this tier')
       : !s ? na(`No ${uniq(ofTier.map((x) => x.gpuModel)).join('/')} machines sold in this region`)
       : isBigMode(m) && !bigScreen ? na('Big screen isn’t offered on this cloud')
+      : isBigMode(m) && typeof bigScreen === 'function' && !bigScreen(s.gpuModel) ? na(`Big screen isn’t offered on the ${s.gpuModel}`)
       : cell(s, m)])) as Record<RunMode, RunCell>;
     return { tier: t.id, label: t.label, shape: s ? `${s.gpuModel} · ${s.vcpus} vCPU` : ofTier[0] ? `${ofTier[0].gpuModel}` : '—', cells };
   });
@@ -179,7 +180,7 @@ const API: Record<ProviderName, Record<string, Describe>> = {
   aws: {
     getRegionOptIn: (_a, r) => ({ api: 'EC2 DescribeRegions AllRegions=true', host: 'ec2.us-east-1.amazonaws.com',
       out: r && `${Object.keys(r).length} regions, ${Object.values(r).filter((v) => v === 'not-opted-in').length} not switched on` }),
-    getGpuTypesOffered: ([reg], r) => ({ api: 'EC2 DescribeInstanceTypeOfferings g4dn/g5', host: `ec2.${reg}.amazonaws.com`, out: r && ([...r].join(', ') || 'none sold') }),
+    getGpuTypesOffered: ([reg], r) => ({ api: 'EC2 DescribeInstanceTypeOfferings g4dn/g5/g6e', host: `ec2.${reg}.amazonaws.com`, out: r && ([...r].join(', ') || 'none sold') }),
     getQuotaRequests: ([reg], r) => ({ api: 'ServiceQuotas ListRequestedServiceQuotaChangeHistory ec2', host: `servicequotas.${reg}.amazonaws.com`, out: r === null ? 'not readable' : r && `${r.length} open request${r.length === 1 ? '' : 's'}` }),
     getEc2Quota: ([reg, code], r) => ({ api: `ServiceQuotas GetServiceQuota ec2/${code}${code === 'L-3819A6DF' ? ' (spot)' : ' (on-demand)'}`, host: `servicequotas.${reg}.amazonaws.com`, out: r == null ? undefined : `${r} vCPUs` }),
   },
@@ -254,7 +255,9 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
   const globalLimit = Number((project.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.limit) || 0;
   const globalUsage = Number((project.quotas || []).find((q: any) => q.metric === 'GPUS_ALL_REGIONS')?.usage) || 0;
   const quotasUrl = `https://console.cloud.google.com/iam-admin/quotas?project=${pid}`;
-  const metrics = Array.from(new Set(GCP_SHAPES.map((s) => s.gpuQuotaMetric)));   // NVIDIA_T4_GPUS, NVIDIA_L4_GPUS
+  const metrics = Array.from(new Set(GCP_SHAPES.map((s) => s.gpuQuotaMetric)));   // NVIDIA_T4_GPUS, NVIDIA_L4_GPUS, GPU_FAMILY:NVIDIA_RTX_PRO_6000
+  const shapeOfMetric = (m: string) => GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!;
+  const noBig = GCP_CATALOG.bigScreen.notOnGpus || [];
 
   // Open quota requests for the whole project (one call; null = can't read).
   const gcpPending = await provider.getQuotaRequests?.().catch(() => null) ?? null;
@@ -267,36 +270,42 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
     const sold = gpuZones ? allModels.filter((m) => gpuZones[region]?.[m]?.length) : allModels;
     if (gpuZones) void applyOffering('gcp', region, sold); // live answer corrects the catalog (Recon, launch)
     const notSold = allModels.filter((m) => !sold.includes(m));
-    if (!sold.length) return notOffered(region, 'Google sells no T4 or L4 GPUs in this region', 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones', 'Google’s GPU locations');
-    const soldMetrics = metrics.filter((m) => sold.includes(GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!.gpuModel));
+    if (!sold.length) return notOffered(region, `Google sells no ${allModels.join(', ')} GPUs in this region`, 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones', 'Google’s GPU locations');
+    const soldMetrics = metrics.filter((m) => sold.includes(shapeOfMetric(m).gpuModel));
+    const soldList = sold.join(' / ');
     const withSold = (a: RegionAccess): RegionAccess => (notSold.length ? { ...a, notSold, summary: `${a.summary} · only ${sold.join('/')} sold here` } : a);
     try {
       return withSold(await (async (): Promise<RegionAccess> => {
       const q = await provider.getRegionQuotas(region);
       const line = (metric: string): QuotaLine => {
         const m = q.find((x: any) => x.metric === metric);
-        return { label: metric.replace(/_/g, ' ').replace('NVIDIA ', 'NVIDIA ').replace(' GPUS', ' GPUs').replace('PREEMPTIBLE ', 'Spot '), limit: m?.limit || 0, used: m?.usage || 0, unit: 'GPUs' };
+        return { label: `${metric.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}NVIDIA ${gpuOfMetric(metric)}${metric.includes('_VWS_') ? ' vWS' : ''} GPUs`, limit: m?.limit || 0, used: m?.usage || 0, unit: 'GPUs' };
       };
+      const reported = (metric: string) => q.some((x: any) => x.metric === metric);
       const quotas = [{ label: 'GPUs (all regions)', limit: globalLimit, used: globalUsage, unit: 'GPUs' as const }, ...metrics.map(line)];
       // What can I run: each machine needs 1 GPU of its model's quota
       // (spot: the PREEMPTIBLE_ one; big screen: the _VWS_ one), and the
       // project-wide "GPUs (all regions)" must have room too.
       const globalFree = globalLimit - globalUsage;
-      const metricFor = (s: { gpuQuotaMetric: string }, m: RunMode) =>
-        (isSpotMode(m) ? 'PREEMPTIBLE_' : '') + (isBigMode(m) ? s.gpuQuotaMetric.replace(/_GPUS$/, '_VWS_GPUS') : s.gpuQuotaMetric);
+      type Sh = { gpuModel: string; gpuQuotaMetric: string; spotQuotaMetric?: string };
+      const metricFor = (s: Sh, m: RunMode): string | null =>
+        isBigMode(m) ? (noBig.includes(s.gpuModel) ? null : (isSpotMode(m) ? 'PREEMPTIBLE_' : '') + s.gpuQuotaMetric.replace(/_GPUS$/, '_VWS_GPUS'))
+        : isSpotMode(m) ? spotMetricOf(s) : s.gpuQuotaMetric;
       const gcpLabel = (metric: string) => {
         if (metric === 'GPUS_ALL_REGIONS') return 'GPUs (all regions)';
-        const gpu = metric.match(/NVIDIA_([A-Z0-9]+)_/)?.[1] || '?';
-        return `${metric.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}${gpu}${metric.includes('_VWS_') ? ' vWS (big screen)' : ''} GPUs`;
+        return `${metric.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}${gpuOfMetric(metric)}${metric.includes('_VWS_') ? ' vWS (big screen)' : ''} GPUs`;
       };
       const pendingFor = (metric: string) => (gcpPending || [])
         .filter((x: any) => x.metric === metric && (metric === 'GPUS_ALL_REGIONS' ? !x.region : x.region === region))
         .map((x: any) => ({ requested: x.requested, status: x.status, created: x.created }));
-      const gcpCell = (s: { gpuQuotaMetric: string }, m: RunMode): RunCell => {
+      const gcpCell = (s: Sh, m: RunMode): RunCell => {
         const k = metricFor(s, m);
+        if (!k) return na(`Big screen isn’t offered on the ${s.gpuModel}`);
         const l = line(k);
         const free = l.limit - l.used;
         const uses = [k, 'GPUS_ALL_REGIONS'];
+        // Family quotas (G4) may not be readable: say so instead of "none".
+        if (k.startsWith('GPU_FAMILY:') && !reported(k)) return { ok: null, why: `Couldn’t read the ${gcpLabel(k)} quota (needs the Cloud Quotas API) — request it, then try a launch`, uses };
         if (free < 1 && l.limit === 0) return { ok: false, why: `No ${gcpLabel(k)} quota here`, uses };
         if (globalFree < 1) return globalLimit > 0
           ? { ok: false, inUse: true, why: `“GPUs (all regions)”: all ${globalLimit} in use by your running machine${globalUsage === 1 ? '' : 's'}`, uses }
@@ -304,26 +313,25 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         if (free >= 1) return { ok: true, why: `${gcpLabel(k)}: ${free} free`, uses };
         return { ok: false, inUse: true, why: `${gcpLabel(k)}: all ${l.limit} in use by your running machine${l.used === 1 ? '' : 's'}`, uses };
       };
-      const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.map((m) => metricFor(s, m)))]);
-      const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), true, gcpCell,
+      const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.map((m) => metricFor(s, m)).filter((k): k is string => !!k))]);
+      const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), (g) => !noBig.includes(g), gcpCell,
         usedKeys.map((k) => {
           const l = k === 'GPUS_ALL_REGIONS' ? { limit: globalLimit, used: globalUsage } : line(k);
           const pend = pendingFor(k);
           const short = l.limit - l.used < 1;
-          const global = k === 'GPUS_ALL_REGIONS';
-          const quotaId = global ? 'GPUS-ALL-REGIONS-per-project' : `${k.replace(/_/g, '-')}-per-project-region`;
+          const { quotaId, dims, consoleMetric } = quotaRequestOf(k, region);
           const want = Math.max(1, l.used + 1);
           const request = short ? {
-            consoleUrl: `https://console.cloud.google.com/iam-admin/quotas?project=${pid}&metric=compute.googleapis.com%2F${k.toLowerCase()}`,
+            consoleUrl: `https://console.cloud.google.com/iam-admin/quotas?project=${pid}&metric=compute.googleapis.com%2F${consoleMetric}`,
             consoleLabel: `Request in the console`,
-            cli: `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${global ? '' : ` --dimensions=region=${region}`} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`,
+            cli: `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${dims} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`,
             note: `Asks for ${want}. Run in Cloud Shell (check the email is yours); if it says the preference already exists, use the console link instead.`,
           } : undefined;
           return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], short, ...(request ? { request } : {}), ...(pend.length ? { pending: pend } : {}) };
         }));
       const extra = { ...detail, ...(gcpPending ? {} : { pendingNote: 'Couldn’t read open quota requests (needs the Cloud Quotas API and “Cloud Quotas Viewer” on the service account).' }) };
       const regional = soldMetrics.map(line).filter((l) => l.limit - l.used >= 1);
-      const spotLines = soldMetrics.map((m) => line('PREEMPTIBLE_' + m));
+      const spotLines = soldMetrics.map((m) => line(spotMetricOf(shapeOfMetric(m))));
       const spotOk = spotLines.some((l) => l.limit - l.used >= 1);
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
       // Ready-to-paste requests (one complete command per line): the
@@ -331,7 +339,7 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const req1 = (quotaId: string, dims: string) => `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=1${dims} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`;
       const cli = [
         ...(globalLimit < 1 ? [req1('GPUS-ALL-REGIONS-per-project', '')] : []),
-        req1(`${(soldMetrics.includes('NVIDIA_T4_GPUS') ? 'NVIDIA_T4_GPUS' : soldMetrics[0] || 'NVIDIA_T4_GPUS').replace(/_/g, '-')}-per-project-region`, ` --dimensions=region=${region}`),
+        (() => { const r = quotaRequestOf(soldMetrics.includes('NVIDIA_T4_GPUS') ? 'NVIDIA_T4_GPUS' : soldMetrics[0] || 'NVIDIA_T4_GPUS', region); return req1(r.quotaId, r.dims); })(),
       ].join('\n');
       if (globalLimit - globalUsage < 1) {
         const globalFull = globalLimit > 0;
@@ -355,9 +363,9 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
             consoleUrl: quotasUrl, consoleLabel: 'Open Quotas', cli } };
       }
       const missingGpus = soldMetrics.filter((m) => { const l = line(m); return l.limit - l.used < 1; })
-        .map((m) => GCP_SHAPES.find((sh) => sh.gpuQuotaMetric === m)!.gpuModel);
+        .map((m) => shapeOfMetric(m).gpuModel);
       return { region, status: 'ready', onDemandReady: true, summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, ...extra, spot: bestSpot, spotReady: spotOk, missingGpus,
-        ...(missingGpus.length ? { fix: { steps: [`Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here. For ${missingGpus.join('/')} machines, request "NVIDIA ${missingGpus[0]} GPUs" = 1 in ${region}.`], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', cli } } : {}) };
+        ...(missingGpus.length ? { fix: { steps: [`Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here. For ${missingGpus.join('/')} machines, request "${line(GCP_SHAPES.find((sh) => sh.gpuModel === missingGpus[0])!.gpuQuotaMetric).label}" = 1 in ${region}${missingGpus.includes('RTX PRO 6000') ? ' (the RTX PRO 6000 is listed as "GPUs per GPU family", gpu_family NVIDIA_RTX_PRO_6000)' : ''}.`], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', cli } } : {}) };
       })());
     } catch (error) {
       return unknown(region, error, 'gcp');
@@ -390,7 +398,7 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const offered: Set<string> = await provider.getGpuTypesOffered(region);
       const sold = allModels.filter((m) => AWS_SHAPES.some((sh) => sh.gpuModel === m && offered.has(sh.id)));
       void applyOffering('aws', region, sold); // live answer corrects the catalog (Recon, launch)
-      if (!sold.length) return notOffered(region, 'AWS sells no g4dn (T4) or g5 (A10G) machines in this region', 'https://aws.amazon.com/ec2/instance-types/g4/', 'AWS G4dn instances');
+      if (!sold.length) return notOffered(region, 'AWS sells no g4dn (T4), g5 (A10G) or g6e (L40S) machines in this region', 'https://aws.amazon.com/ec2/instance-types/g4/', 'AWS G4dn instances');
       notSold = allModels.filter((m) => !sold.includes(m));
     } catch { /* unknown: assume the catalog is right */ }
     const withSold = (a: RegionAccess): RegionAccess => (notSold.length ? { ...a, notSold, summary: `${a.summary} · no ${notSold.join('/')} machines sold here` } : a);

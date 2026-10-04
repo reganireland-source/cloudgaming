@@ -72,9 +72,9 @@ export class RecommendationEngine {
         'gcp': ['a2-highgpu-1g'],
         'oracle': ['VM.GPU3.4'],
       },
-      'h100': {
-        'aws': ['p5.48xlarge'],
-        'gcp': ['a3-megagpu-8g'],
+      'h100': {   // SUPER tier: graphics GPUs with DLSS frame generation
+        'aws': ['g6e.2xlarge'],
+        'gcp': ['g4-standard-48'],
         'oracle': ['VM.GPU3.8'],
       },
     };

@@ -206,6 +206,9 @@ export class MachineService {
     if (bigScreen && !catalog.bigScreen.available) {
       throw new MachineRequestError(400, `Big screen isn't available on ${catalog.label}.`, catalog.bigScreen.note);
     }
+    if (bigScreen && catalog.bigScreen.notOnGpus?.includes(shape.gpuModel)) {
+      throw new MachineRequestError(400, `Big screen isn't available on ${shape.gpuModel} machines.`, catalog.bigScreen.note);
+    }
     const autoStopMinutes = req.autoStopMinutes === undefined ? 15 : Math.round(Number(req.autoStopMinutes));
     if (!Number.isFinite(autoStopMinutes) || autoStopMinutes < 0 || autoStopMinutes > 1440) {
       throw new MachineRequestError(400, 'Auto-stop must be between 0 (off) and 1440 minutes.', 'The default, 15 minutes, suits most people.');

@@ -28,7 +28,7 @@ export function defaultNickname(m: { provider: string; region: string; instanceT
   const parts = [
     CLOUD_WORD[m.provider] || m.provider.toUpperCase(),
     cityWord(region?.name || m.region),
-    shape?.gpuModel.toUpperCase() || 'GPU',
+    shape?.gpuModel.toUpperCase().replace(/\s+/g, '') || 'GPU',   // RTX PRO 6000 → RTXPRO6000
     shape ? tierOf(shape).toUpperCase() : '',
     m.spot ? 'S' : '',
     m.bigScreen ? 'BS' : '',

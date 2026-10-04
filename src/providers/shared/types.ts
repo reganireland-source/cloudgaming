@@ -64,7 +64,7 @@ export interface ProviderCatalog {
    * EXPERIMENTAL "big screen" (GRID driver, screens up to 4096x2160): can this
    * cloud do it, what extra it costs per hour (USD, estimate), and the catch.
    */
-  bigScreen: { available: boolean; extraPerHour: number; note: string };
+  bigScreen: { available: boolean; extraPerHour: number; note: string; notOnGpus?: string[] };  // notOnGpus: GPU models without a GRID option
 }
 
 // ---------------------------------------------------------------------------
