@@ -20,7 +20,7 @@ type G = Record<string, number | string | null>;
 interface Sample {
   t: number; c?: number | null; cm?: number | null; l?: number | null; m?: [number, number]; sw?: number | null;
   d?: [number, number]; dr?: number | null; dw?: number | null; ni?: number | null; no?: number | null;
-  g?: G | null; ct?: number | null; up?: number | null; x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
+  g?: G | null; gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null; ct?: number | null; up?: number | null; x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
 }
 interface Alert { level: 'critical' | 'warning' | 'info'; key: string; text: string }
 interface Telemetry { samples: Sample[]; latest: Sample | null; alerts: Alert[]; readAt: string | null; note?: string }
@@ -137,10 +137,17 @@ export default function TelemetryPanel({ machineId, status, compact = false }: {
           tone={vu != null && vt && vu / vt >= 0.95 ? 'warn' : undefined} sub={num(g?.cl) != null ? `${fmt(num(g?.cl))} of ${fmt(num(g?.cx))} MHz` : ''}>
           <Spark samples={samples} pick={(x) => { const a = num(x.g?.vu); return a == null ? null : a / 1024; }} unit=" GB" max={vt ? vt / 1024 : undefined} digits={1} />
         </Tile>
-        <Tile label="Stream encoder" value={es ? `${fmt(num(g?.ef))} fps` : 'not streaming'}
-          sub={es ? `${es} session${es === 1 ? '' : 's'} · ${fmt((num(g?.el) ?? 0) / 1000, 1)} ms encode` : 'starts when Moonlight connects'}>
-          <Spark samples={samples} pick={(x) => (num(x.g?.es) ? num(x.g?.ef) : 0)} unit=" fps" />
-        </Tile>
+        {s.gf ? (
+          <Tile label={`Game fps · ${s.gf.n}`} value={`${fmt(s.gf.f)} fps`} tone={s.gf.f != null && s.gf.f < 30 ? 'warn' : undefined}
+            sub={`low ${fmt(s.gf.lo)} · worst frame ${fmt(s.gf.ft, 0)} ms${es ? ` · stream ${fmt(num(g?.ef))} fps` : ''}`}>
+            <Spark samples={samples} pick={(x) => x.gf?.f ?? null} unit=" fps" />
+          </Tile>
+        ) : (
+          <Tile label="Stream encoder" value={es ? `${fmt(num(g?.ef))} fps` : 'not streaming'}
+            sub={es ? `${es} session${es === 1 ? '' : 's'} · ${fmt((num(g?.el) ?? 0) / 1000, 1)} ms encode · no game fps yet` : 'starts when Moonlight connects'}>
+            <Spark samples={samples} pick={(x) => (num(x.g?.es) ? num(x.g?.ef) : 0)} unit=" fps" />
+          </Tile>
+        )}
         <Tile label="CPU" value={`${fmt(s.c ?? null)}%`} tone={(s.cm ?? 0) >= 97 ? 'warn' : undefined} sub={`peak ${fmt(s.cm ?? null)}% · load ${fmt(s.l ?? null, 1)}${s.ct != null ? ` · ${s.ct} °C` : ''}`}>
           <Spark samples={samples} pick={(x) => x.c ?? null} unit="%" max={100} />
         </Tile>
@@ -227,7 +234,7 @@ export function TelemetryLine({ machineId }: { machineId: string }) {
     num(g.tp) != null ? `${g.tp} °C` : null,
     `CPU ${fmt(s.c ?? null)}%`,
     s.m ? `RAM ${s.m[0]}/${s.m[1]} GB` : null,
-    num(g.es) ? `${fmt(num(g.ef))} fps streaming` : null,
+    s.gf ? `${fmt(s.gf.f)} fps in ${s.gf.n}` : num(g.es) ? `${fmt(num(g.ef))} fps streaming` : null,
   ].filter(Boolean);
   return (
     <span className="block text-[0.68rem] text-slate-400 tabular-nums truncate" title={worst?.text}>

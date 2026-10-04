@@ -71,6 +71,8 @@ export function alertsFor(s: TelemetrySample | null, prev?: TelemetrySample | nu
   if (mask & 0x68) a.push({ level: 'warning', key: 'throttle', text: 'GPU is throttling (heat or power) — frame rates may dip' });
   if (s.m && s.m[1] && s.m[0] / s.m[1] >= 0.92) a.push({ level: 'warning', key: 'ram', text: `RAM almost full (${s.m[0]} of ${s.m[1]} GB)` });
   if (s.d && s.d[1] && s.d[0] / s.d[1] >= 0.9) a.push({ level: s.d[0] / s.d[1] >= 0.97 ? 'critical' : 'warning', key: 'disk', text: `Disk ${Math.round((s.d[0] / s.d[1]) * 100)}% full — enlarge it on the Machines page` });
+  if (s.gf?.f != null && s.gf.f < 30) a.push({ level: 'warning', key: 'fps', text: `${s.gf.n} is running at ${Math.round(s.gf.f)} fps — lower its graphics settings, or try a bigger tier` });
+  else if (s.gf?.lo != null && s.gf.f != null && s.gf.lo < s.gf.f * 0.5) a.push({ level: 'info', key: 'stutter', text: `${s.gf.n} stutters: dips to ${Math.round(s.gf.lo)} fps (worst frame ${Math.round(s.gf.ft ?? 0)} ms)` });
   if ((s.cm ?? 0) >= 97) a.push({ level: 'info', key: 'cpu', text: `CPU maxed out (peak ${s.cm}%) — a bigger machine may help CPU-heavy games` });
   if ((s.x ?? 0) > 0) a.push({ level: 'critical', key: 'xid', text: `${s.x} NVIDIA GPU error${s.x === 1 ? '' : 's'} (Xid) since boot${s.xl ? `: ${s.xl.replace(/^NVRM: /, '')}` : ''}` });
   if ((s.o ?? 0) > 0) a.push({ level: 'critical', key: 'oom', text: `${s.o} program${s.o === 1 ? ' was' : 's were'} killed for lack of memory since boot` });

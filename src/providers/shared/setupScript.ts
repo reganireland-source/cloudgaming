@@ -427,7 +427,8 @@ fi
 #    login always applies)
 # ============================================================================
 stage 60 sunshine "Configuring the Sunshine streaming container"
-mkdir -p "$SUN_DIR/data" "$SUN_DIR/conf/xfce4" "$SUN_DIR/conf/heroic" "$SUN_DIR/home" "$SUN_DIR/project"
+mkdir -p "$SUN_DIR/data" "$SUN_DIR/conf/xfce4" "$SUN_DIR/conf/heroic" "$SUN_DIR/home" "$SUN_DIR/project" "$SUN_DIR/fps"
+chmod 1777 "$SUN_DIR/fps"
 # Settings + logins of the apps we add live under XDG_CONFIG_HOME
 # (/cloudy/conf) inside the container, which is NOT kept when the container
 # is recreated. Keep them on the machine's disk like Steam and the home
@@ -557,6 +558,8 @@ services:
       - $SUN_DIR/conf/discord:/cloudy/conf/discord
       - $SUN_DIR/conf/lutris:/cloudy/conf/lutris
       - $SUN_DIR/home:/home/cloudy
+      - $SUN_DIR/project/mangohud.conf:/etc/mangohud.conf:ro
+      - $SUN_DIR/fps:/cloudy/fps
       - $SUN_DIR/project/sunshine.conf.template:/cloudy/conf/sunshine/sunshine.conf.template:ro
       - $SUN_DIR/tls:/cloudy/conf/tls:ro
     ports:
@@ -615,6 +618,10 @@ COMPOSE
 # number, small and translucent, top-right. Right Shift + F12 hides/shows it.
 # Separate from Moonlight's own stats overlay (which shows what arrives at
 # your device): this one is what the game renders on the machine.
+# It also logs the game's fps once a second (CSV in $SUN_DIR/fps, shared)
+# for the app's telemetry (the agent reads the newest log, deletes logs
+# older than 2 days). The file is mounted over the image's copy, so changing
+# it needs no image rebuild.
 cat > "$SUN_DIR/project/mangohud.conf" <<'MANGOHUD'
 fps_only
 cpu_stats=0
@@ -628,6 +635,9 @@ background_alpha=0.25
 alpha=0.85
 round_corners=4
 toggle_hud=Shift_R+F12
+output_folder=/cloudy/fps
+autostart_log=1
+log_interval=1000
 blacklist=steam,steamwebhelper,lutris,heroic,google-chrome,chrome,Discord,discord,firefox,xfdashboard,kasmxproxy,Xkasmvnc,Battle.net.exe,Battle.net Launcher.exe,EpicGamesLauncher.exe
 MANGOHUD
 
@@ -1312,6 +1322,8 @@ export interface TelemetrySample {
   t: number; c?: number | null; cm?: number | null; l?: number | null; m?: [number, number]; sw?: number | null;
   d?: [number, number]; dr?: number | null; dw?: number | null; ni?: number | null; no?: number | null;
   g?: Record<string, number | string | null> | null; ct?: number | null; up?: number | null;
+  /** The game's own frame rate (MangoHud log): game, avg fps, lowest 1-s fps, worst frame time ms. */
+  gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null;
   x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
 }
 

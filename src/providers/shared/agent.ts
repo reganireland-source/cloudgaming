@@ -11,6 +11,9 @@
  *   g: u gpu%, um peak gpu%, mu memory-controller%, vu/vt VRAM MiB, tp °C,
  *      pw/pl power W, cl/cx clock MHz, es/ef/el encoder sessions/fps/latency
  *      µs, ps P-state, eu encoder% and th throttle reasons where supported.
+ *   gf: the game's own frame rate from MangoHud's log (null when no game
+ *      is running): n game, f average fps, lo lowest 1-s fps, ft worst
+ *      frame time (ms) over the last 15 s.
  * Every 5 min: grows the root filesystem into new disk space and prints
  * CLOUDGAMING_DISK; every 10 min: re-prints the current setup stage so it
  * never scrolls out of the console buffer. No ports are opened: the app
@@ -59,6 +62,20 @@ def dio():
   f=l.split()
   if len(f)>9 and re.match(r'(sd|vd|xvd)[a-z]+$|nvme\d+n\d+$',f[2]):r+=int(f[5]);w+=int(f[9])
  return r*512,w*512
+def fps():
+ L='/var/lib/cloudgaming/sunshine/fps/'
+ try:fs=sorted((os.path.getmtime(L+f),f)for f in os.listdir(L)if f.endswith('.csv'))
+ except Exception:return None
+ for t,f in fs[:-1]:
+  if time.time()-t>172800:
+   try:os.remove(L+f)
+   except Exception:pass
+ if not fs or time.time()-fs[-1][0]>20:return None
+ b=open(L+fs[-1][1],'rb');b.seek(0,2);b.seek(max(0,b.tell()-4000))
+ v=[(float(x[0]),float(x[1]))for x in(l.split(',')for l in b.read().decode('utf8','ignore').split('\n')[1:])if len(x)>2 and re.match(r'[0-9.]+$',x[0])and re.match(r'[0-9.]+$',x[1])][-15:]
+ if not v:return None
+ f=[a for a,_ in v]
+ return{'n':re.sub(r'_[0-9]{4}-[0-9-]{5}_[0-9-]{8}\.csv$','',fs[-1][1]),'f':n(sum(f)/len(f)),'lo':n(min(f)),'ft':n(max(a for _,a in v))}
 def grow():
  for p in sh('ls /sys/class/block/*/device/rescan 2>/dev/null').split():
   try:open(p,'w').write('1')
@@ -83,7 +100,7 @@ while 1:
  out('CGT '+json.dumps({'t':int(t),'c':n(100*(1-(c[1]-c0[1])/max(1,c[0]-c0[0]))),'cm':n(cm),'l':n(rd('/proc/loadavg').split()[0]),
   'm':[n((m['MemTotal']-m['MemAvailable'])/1048576),n(m['MemTotal']/1048576)],'sw':n((m.get('SwapTotal',0)-m.get('SwapFree',0))/1048576),
   'd':[n((s.f_blocks-s.f_bfree)*s.f_frsize/2**30),n(s.f_blocks*s.f_frsize/2**30)],'dr':n((d[0]-d0[0])/dt/2**20),'dw':n((d[1]-d0[1])/dt/2**20),
-  'ni':n((nt[0]-n0[0])*8/dt/1e6),'no':n((nt[1]-n0[1])*8/dt/1e6),'g':g,'ct':max(tz)if tz else None,'up':n(rd('/proc/uptime').split()[0]),
+  'ni':n((nt[0]-n0[0])*8/dt/1e6),'no':n((nt[1]-n0[1])*8/dt/1e6),'g':g,'gf':fps(),'ct':max(tz)if tz else None,'up':n(rd('/proc/uptime').split()[0]),
   'x':len(re.findall('NVRM: Xid',j)),'xl':(re.findall(r'NVRM: Xid[^\n]{0,160}',j)or[None])[-1],'o':len(re.findall('Out of memory: Killed',j)),
   'f':sh("systemctl --failed --no-legend --plain | awk '{print $1}'").split(),'k':[x for x in sh("docker ps -a --format '{{.Names}}: {{.Status}}'").split('\n')if x],
   'p':[l.split(None,1)[::-1]for l in sh("top -bn2 -d0.5 -o %CPU -w 200 | awk '/^top -/{f++} f==2 && $1~/^[0-9]+$/{print $9, $12}' | head -3").split('\n')if l.strip()]},separators=(',',':')))
