@@ -214,6 +214,16 @@ router.post('/:id/pricing', async (req: Request, res: Response) => {
   }
 });
 
+// Live telemetry from the machine's agent: ?minutes=30 (5 min – 7 days).
+router.get('/:id/telemetry', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await MachineService.getTelemetry(req.userId!, req.params.id, Number(req.query.minutes) || 30));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to read the machine\'s telemetry');
+  }
+});
+
 // Disk: GET how full it is (?refresh=true asks the machine's console again);
 // POST { sizeGb } enlarges it in place (bigger only).
 router.get('/:id/disk', async (req: Request, res: Response) => {

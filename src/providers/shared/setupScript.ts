@@ -62,6 +62,12 @@ export const NVIDIA_DRIVER_VERSION = '590.48.01';          // datacenter (Tesla)
 export const CLOUDYPAD_SUNSHINE_IMAGE = 'ghcr.io/pierrebeucher/cloudypad/sunshine:0.45.2';
 
 export interface SetupScriptOptions {
+  /**
+   * Download the telemetry agent from this URL at boot (checked against its
+   * sha256) instead of shipping it inside the script — for AWS, whose 16 KB
+   * user-data limit can't hold it. Unset = shipped inline.
+   */
+  agentUrl?: string;
   sunshineUsername: string;   // letters/digits only
   sunshinePassword: string;   // base64url characters only
   /**
@@ -133,7 +139,11 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__GRID_AZURE__').join(GRID_DRIVER.azure)
     .split('__GRID_GCP_PINNED__').join(GRID_DRIVER.gcpPinned)
     .split('__GRID_GCP__').join(GRID_DRIVER.gcp)
-    .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE));
+    .split('__SUNSHINE_IMAGE__').join(CLOUDYPAD_SUNSHINE_IMAGE))
+    // After compactScript, so nothing in the agent can be stripped.
+    .split('__CG_AGENT__').join(opts.agentUrl ? '' : AGENT_SOURCE.replace(/\n$/, ''))
+    .split('__CG_AGENT_URL__').join(opts.agentUrl || '')
+    .split('__CG_AGENT_SHA__').join(AGENT_SHA256);
 }
 
 /**
@@ -171,38 +181,37 @@ GRID_DIR=/var/lib/cloudgaming/grid
 SUNSHINE_IMAGE='__SUNSHINE_IMAGE__'
 APT="apt-get -o DPkg::Lock::Timeout=900 -y"
 
-# Disk reporter + auto-grow (section 4b). A function so the first-run block
-# can install it too: a machine upgraded in place (app: "Update machine
-# script") gets it at once even while its old setup run is still going.
-disk_reporter() {
-  cat > /usr/local/sbin/cloudgaming-disk.sh <<'DISK'
-#!/bin/bash
-while true; do
-  for f in /sys/class/block/*/device/rescan; do echo 1 > "$f" 2>/dev/null; done
-  SRC=$(findmnt -no SOURCE /)
-  PK=$(lsblk -no PKNAME "$SRC" 2>/dev/null | head -1)
-  PN=$(cat "/sys/class/block/$(basename "$SRC")/partition" 2>/dev/null)
-  if [ -n "$PK" ] && [ -n "$PN" ] && growpart "/dev/$PK" "$PN" >/dev/null 2>&1; then
-    resize2fs "$SRC" >/dev/null 2>&1 || xfs_growfs / >/dev/null 2>&1
-  fi
-  read -r USED SIZE <<< "$(df -B1 --output=used,size / | tail -1)"
-  echo "CLOUDGAMING_DISK $((USED / 1048576)) $((SIZE / 1048576)) $(date +%s)" > /dev/ttyS0 2>/dev/null
-  sleep 300
-done
-DISK
-  chmod 700 /usr/local/sbin/cloudgaming-disk.sh
-  cat > /etc/systemd/system/cloudgaming-disk.service <<'UNIT'
+# On-machine agent (section 4b): every 15 s one "CGT {json}" line of
+# telemetry on the serial console (CPU, RAM, disk, disk I/O, network, GPU
+# load/VRAM/temperature/power/clocks/encoder, Xid errors, OOM kills, failed
+# services, containers, top processes); every 5 min a CLOUDGAMING_DISK line
+# after growing the root filesystem into any new disk space; every 10 min the
+# current setup stage again (so it never scrolls out of the console buffer).
+# The app reads them through the cloud API: no extra open ports. A function
+# so the first-run block installs it too (machines upgraded in place get it
+# at once). The app parses the lines in parseTelemetry() below.
+cg_agent() {
+  A=/usr/local/sbin/cloudgaming-agent.py
+  cat > $A.new <<'CGA'
+__CG_AGENT__
+CGA
+  grep -q import $A.new || curl -fsSL --retry 3 -m 60 '__CG_AGENT_URL__' -o $A.new 2>/dev/null
+  [ "$(sha256sum < $A.new | cut -c1-64)" = '__CG_AGENT_SHA__' ] || { rm -f $A.new; return 0; }
+  mv $A.new $A
+  cat > /etc/systemd/system/cloudgaming-agent.service <<'UNIT'
 [Unit]
-Description=Gints Global Gaming Hubjob disk grow + usage report
+Description=Gints Global Gaming Hubjob telemetry (serial console)
 [Service]
-ExecStart=/usr/local/sbin/cloudgaming-disk.sh
+ExecStart=/usr/bin/python3 /usr/local/sbin/cloudgaming-agent.py
 Restart=always
+RestartSec=10
 [Install]
 WantedBy=multi-user.target
 UNIT
+  systemctl disable --now cloudgaming-disk.service >/dev/null 2>&1
   systemctl daemon-reload
-  systemctl enable cloudgaming-disk.service
-  systemctl restart cloudgaming-disk.service
+  systemctl enable cloudgaming-agent.service
+  systemctl restart cloudgaming-agent.service
 }
 
 # ---- First run (from the cloud's boot hook): install ourselves as a systemd
@@ -233,7 +242,7 @@ WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
   systemctl enable cloudgaming-setup.service
-  disk_reporter
+  cg_agent
   STATE_NOW=$(systemctl show -p ActiveState --value cloudgaming-setup.service)
   if [ "$CHANGED" = "1" ] && [ "$STATE_NOW" != "activating" ]; then
     systemctl restart --no-block cloudgaming-setup.service
@@ -1236,12 +1245,9 @@ if docker container inspect mlweb >/dev/null 2>&1; then
 fi
 
 # ============================================================================
-# 4b. Disk: grow into new space ("Bigger disk" in the app) + report usage
+# 4b. On-machine agent: telemetry + disk grow (see cg_agent above)
 # ============================================================================
-# Every 5 minutes: let the kernel see a resized disk, grow the root partition
-# and filesystem into it (no reboot), and print "CLOUDGAMING_DISK used total
-# (MiB) epoch" on the serial console, where the app reads it.
-disk_reporter
+cg_agent
 
 # ============================================================================
 # 5. Auto-stop when idle (CloudyPad-style, dependency-free)
@@ -1298,7 +1304,27 @@ stage 100 ready "Ready to stream - open Moonlight and add this machine's IP"
 `;
 
 import type { SetupStage } from './types';
+import { AGENT_SOURCE, AGENT_SHA256 } from './agent';
 export type { SetupStage };
+
+/** One 15-second telemetry sample from the on-machine agent (fields: see shared/agent.ts). */
+export interface TelemetrySample {
+  t: number; c?: number | null; cm?: number | null; l?: number | null; m?: [number, number]; sw?: number | null;
+  d?: [number, number]; dr?: number | null; dw?: number | null; ni?: number | null; no?: number | null;
+  g?: Record<string, number | string | null> | null; ct?: number | null; up?: number | null;
+  x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
+}
+
+/** Every "CGT {json}" line in serial-console text, oldest first (bad lines skipped). */
+export function parseTelemetry(serialOutput: string): TelemetrySample[] {
+  const out: TelemetrySample[] = [];
+  const re = /CGT (\{[^\r\n]*\})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(serialOutput)) !== null) {
+    try { const s = JSON.parse(m[1]); if (typeof s.t === 'number') out.push(s); } catch { /* a line cut by other console output */ }
+  }
+  return out;
+}
 
 /** Disk usage the machine reported (CLOUDGAMING_DISK, every 5 minutes). */
 export interface DiskUsage { usedGb: number; totalGb: number; percent: number; at: string | null }

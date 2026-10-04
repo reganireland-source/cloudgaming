@@ -9,11 +9,11 @@
  * every 5 minutes), how long it has been up, what it's costing, and the
  * estimated ping from where you are to its region.
  *
- * GPU / FPS readings: shown only if real ones exist. Nothing records them
- * yet (the old job that invented random numbers is switched off — see
- * src/jobs/index.ts), so the page says so plainly and points to Moonlight's
- * own statistics overlay, which shows real FPS, latency and dropped frames
- * while you stream.
+ * Live telemetry per machine (components/TelemetryPanel): GPU load and
+ * temperature, video memory, the stream encoder's fps, CPU, RAM, network and
+ * disk, from the on-machine agent (every 15 s, kept 7 days). Moonlight's own
+ * overlay (Ctrl+Alt+Shift+S) still shows the client side: network latency,
+ * decode time and dropped frames.
  * ============================================================================
  */
 
@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
+import TelemetryPanel from '@/components/TelemetryPanel';
 
 interface Machine {
   id: string; nickname?: string | null; provider: string; region: string; instance_type: string; status: string;
@@ -128,12 +129,12 @@ export default function PerformancePage() {
             {machines.length} machine{machines.length === 1 ? '' : 's'} · {running.length} running · ≈USD {running.reduce((s, m) => s + (Number(m.cost_per_hour) || 0), 0).toFixed(2)}/hour right now
             {me && <> · pings estimated from {me.label}</>}
           </p>
-          <ul className="grid gap-3 lg:grid-cols-2">
+          <ul className="grid gap-3 grid-cols-[minmax(0,1fr)]">
             {machines.map((m) => {
               const r = regions[`${m.provider}:${m.region}`];
               const metric = metrics[m.id];
               return (
-                <li key={m.id} className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
+                <li key={m.id} className="min-w-0 rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-sm text-slate-100 truncate">{m.nickname || m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</p>
@@ -147,7 +148,9 @@ export default function PerformancePage() {
                     <Stat label="Est. ping" value={me && r ? `~${pingMs(me, r)} ms` : '—'} />
                     <Stat label="Checked" value={m.last_synced_at ? `${since(m.last_synced_at)} ago` : '—'} />
                   </dl>
-                  {metric ? (
+                  {m.status !== 'shelved' && !/^(pending|shelved):/.test(String((m as any).instance_id || '')) ? (
+                    <TelemetryPanel machineId={m.id} status={m.status} compact />
+                  ) : metric ? (
                     <div className="rounded border border-white/10 px-2 py-1.5 text-xs text-slate-300">
                       <p className="label mb-1">Latest reading</p>
                       <p className="tabular-nums">

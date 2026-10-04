@@ -43,6 +43,7 @@ import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
 import LaunchMachineModal from '@/components/LaunchMachineModal';
 import OperationConsole from '@/components/OperationConsole';
 import DiskMeter from '@/components/DiskMeter';
+import TelemetryPanel from '@/components/TelemetryPanel';
 import FriendlyErrorCard from '@/components/FriendlyErrorCard';
 import MachineConnectionPanel, { type ConnectionInfo } from '@/components/MachineConnectionPanel';
 import ArchitectureDiagram from '@/components/ArchitectureDiagram';
@@ -257,7 +258,7 @@ function MachineCard({
     return v != null ? v + (machine.display_driver === 'grid' ? bigExtra : 0) : null;
   };
   const canSwitchNow = machine.status === 'shelved' || (PRICING_IN_PLACE.has(machine.provider) && ['stopped', 'running'].includes(machine.status));
-  const [tab, setTab] = useState<'connect' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
+  const [tab, setTab] = useState<'connect' | 'monitor' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
   const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | null>(null);
   const [restoreRegion, setRestoreRegion] = useState(machine.region);
   const [restoreSpot, setRestoreSpot] = useState(!!machine.spot);
@@ -531,14 +532,14 @@ function MachineCard({
 
       {/* ---- Tabs ---- */}
       <div className="mt-4 flex gap-1 border-b border-white/5">
-        {(['connect', 'architecture', 'activity'] as const).map((t) => (
+        {(['connect', 'monitor', 'architecture', 'activity'] as const).map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(tab === t ? null : t)}
             className={`px-3 py-1.5 text-[0.72rem] uppercase tracking-label border-b-2 -mb-px ${tab === t ? 'border-neon-cyan text-neon-cyan' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
-            {{ connect: 'Connect', architecture: 'Architecture', activity: 'Activity' }[t]}
+            {{ connect: 'Connect', monitor: 'Monitor', architecture: 'Architecture', activity: 'Activity' }[t]}
           </button>
         ))}
       </div>
@@ -551,6 +552,13 @@ function MachineCard({
                 onResume={activeOp ? undefined : () => onAction(machine, 'resume-setup')} onStatusChange={onOpFinished}
                 onResumeOnDemand={activeOp || !machine.spot || !PRICING_IN_PLACE.has(machine.provider) ? undefined : () => onAction(machine, 'pricing', { spot: false, start: true })} />
             : <p className="text-xs text-slate-500">Connection details appear once the machine exists and is running.</p>}
+        </div>
+      )}
+      {tab === 'monitor' && (
+        <div className="pt-4">
+          {placeholderId || machine.status === 'shelved'
+            ? <p className="text-xs text-slate-500">Telemetry appears once the machine exists and is running.</p>
+            : <TelemetryPanel machineId={machine.id} status={machine.status} />}
         </div>
       )}
       {tab === 'architecture' && (

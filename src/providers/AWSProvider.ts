@@ -80,6 +80,7 @@ import {
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import { AWS_USER_DATA_LIMIT, buildSetupScript } from './shared/setupScript';
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
+import { env } from '../config/env';
 
 /** The parsed, checked credentials. */
 export interface AwsCredentials {
@@ -485,6 +486,9 @@ export class AWSProvider extends CloudProvider {
       displayDriver: options.displayDriver,
       gridSource: 'aws',
       serverName: options.nickname,
+      // The telemetry agent doesn't fit in AWS's 16 KB: the machine downloads it from this app
+      // (no API_PUBLIC_URL = no telemetry on AWS machines; everything else works).
+      agentUrl: env.API_PUBLIC_URL ? `${env.API_PUBLIC_URL}/agent/cgtel.py` : 'none',
     }), { level: 9 });
     if (gzipped.length > AWS_USER_DATA_LIMIT) {
       throw new Error(`The machine setup script is too big for AWS (${gzipped.length} of ${AWS_USER_DATA_LIMIT} bytes compressed). This is a bug in the app, not your account.`);

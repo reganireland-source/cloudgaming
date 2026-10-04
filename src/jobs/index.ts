@@ -44,6 +44,7 @@
 import cron from 'node-cron';
 import { syncCostsJob, checkIdleJob, budgetAlertJob, autoShelveJob, refreshBillingActualsJob } from './SyncCosts';
 import { collectPerformanceMetricsJob } from './CollectPerformance';
+import { collectTelemetryJob } from '../services/TelemetryService';
 
 /**
  * Initialize all background jobs
@@ -76,6 +77,12 @@ export function initializeJobs() {
   // Budget alerts daily at 9 AM (UTC on Railway). Only logs for now — no email is sent.
   cron.schedule('0 9 * * *', () => {
     budgetAlertJob().catch(err => console.error('Budget alert job error:', err));
+  });
+
+  // Every minute: real telemetry from each running machine's agent (read from
+  // its serial console; see src/services/TelemetryService.ts). Kept 7 days.
+  cron.schedule('* * * * *', () => {
+    collectTelemetryJob().catch(err => console.error('Telemetry job error:', err));
   });
 
   // Performance metrics: disabled — collectPerformanceMetricsJob only makes

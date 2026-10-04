@@ -94,6 +94,7 @@ import { recordRequest } from './services/Metrics';
 // Middleware that checks the user's login token (a "JWT") and rejects the
 // request if it's missing or invalid. See src/api/middleware/auth.ts.
 import { authMiddleware } from './api/middleware/auth';
+import { AGENT_SOURCE } from './providers/shared/agent';
 
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
@@ -181,7 +182,10 @@ app.get('/health', async (req: Request, res: Response) => {
 // Routes WITHOUT authMiddleware are public (no login needed).
 // ---------------------------------------------------------------------------
 app.use('/api/status', statusRoutes);          // PUBLIC: status lights must work before anyone logs in
-app.use('/api/auth', authRoutes);              // PUBLIC: you can't require login on the login page
+app.use('/api/auth', authRoutes);
+// PUBLIC: the telemetry agent AWS machines download at boot (no secrets in it; the
+// machine checks its sha256 against the one built into its setup script).
+app.get('/api/agent/cgtel.py', (_req, res) => { res.type('text/x-python').send(AGENT_SOURCE); });              // PUBLIC: you can't require login on the login page
 app.use('/api/machines', authMiddleware, machineRoutes);
 app.use('/api/credentials', authMiddleware, credentialRoutes);  // your encrypted cloud keys
 app.use('/api/operations', authMiddleware, operationRoutes);    // live progress of cloud actions

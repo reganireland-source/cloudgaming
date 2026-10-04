@@ -35,7 +35,7 @@
 import { Machine, RegionData, Snapshot } from '../types';
 import type { Reporter, EventLevel } from '../services/OperationLog';
 import type { SetupStage, InventoryItem } from './shared/types';
-import { parseSetupStages, parseDiskUsage, type DiskUsage } from './shared/setupScript';
+import { parseSetupStages, parseDiskUsage, parseTelemetry, type DiskUsage, type TelemetrySample } from './shared/setupScript';
 
 /** Where and what to launch. */
 export interface ProviderConfig {
@@ -130,6 +130,11 @@ export abstract class CloudProvider {
   /** The machine's latest disk usage report (null = none yet, or an older machine that doesn't report). */
   async getDiskUsage(instanceId: string): Promise<DiskUsage | null> {
     return parseDiskUsage(await this.getConsoleText(instanceId).catch(() => ''));
+  }
+
+  /** Telemetry samples the on-machine agent printed (still in the console buffer). */
+  async getTelemetry(instanceId: string): Promise<TelemetrySample[]> {
+    return parseTelemetry(await this.getConsoleText(instanceId).catch(() => ''));
   }
 
   /**

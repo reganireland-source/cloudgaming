@@ -52,6 +52,7 @@ import { decryptCredentials, encryptCredentials, providerFor } from './Credentia
 import { Operation, hasRunningOperation } from './OperationLog';
 import { SnapshotService } from './SnapshotService';
 import { cleanNickname, defaultNickname, uniqueNickname } from './Nickname';
+import { live as liveTelemetry } from './TelemetryService';
 
 const VALID_QUALITIES = ['budget', 'good', 'high', 'ultra'];
 
@@ -466,6 +467,12 @@ export class MachineService {
     return { operationId: op.id, spot };
   }
 
+  /** Live telemetry (Monitor tab): samples for the last `minutes`, the latest one, alerts. */
+  static async getTelemetry(userId: string, machineId: string, minutes = 30) {
+    const machine = await loadOwnedMachine(machineId, userId);
+    return liveTelemetry(userId, machine, minutes);
+  }
+
   /**
    * DISK USAGE: what the machine last reported (every 5 minutes, on its
    * serial console — see "4b. Disk" in shared/setupScript.ts), plus the
@@ -480,16 +487,22 @@ export class MachineService {
     const sizeGb = Number(machine.disk_size_gb) || 0;
     const base = { sizeGb, canResize: !!machine.instance_id && !['shelved', 'terminated', 'failed'].includes(machine.status), resizeWhileRunning: false, maxGb: MAX_DISK_GB };
     if (!machine.instance_id || neverCreated(machine)) return { ...base, usage: null, note: 'No disk yet.' };
-    const provider = await providerFor(userId, machine.provider);
+    const provider = await providerFor(userId, machine.provider).catch(() => null);
     const hit = DISK_CACHE.get(machineId);
     let usage = hit && !refresh && Date.now() - hit.at < 5 * 60_000 ? hit.usage : undefined;
-    if (usage === undefined && machine.status === 'running') {
+    if (usage === undefined && machine.status === 'running' && provider) {
       usage = await provider.getDiskUsage(machine.instance_id).catch(() => null);
       DISK_CACHE.set(machineId, { at: Date.now(), usage });
     }
     usage = usage ?? hit?.usage ?? null; // a stopped machine shows its last report
+    if (!usage) {
+      // The telemetry agent reports the disk every 15 s too (stored 7 days).
+      const row = (await query(`SELECT data FROM machine_telemetry WHERE machine_id = $1 ORDER BY t DESC LIMIT 1`, [machineId]).catch(() => ({ rows: [] as any[] }))).rows[0];
+      const d = row?.data?.d;
+      if (Array.isArray(d) && d[1]) usage = { usedGb: d[0], totalGb: d[1], percent: Math.round((d[0] / d[1]) * 100), at: new Date(row.data.t * 1000).toISOString() };
+    }
     return {
-      ...base, usage, resizeWhileRunning: provider.diskResizeWhileRunning,
+      ...base, usage, resizeWhileRunning: provider?.diskResizeWhileRunning ?? false,
       ...(usage ? {} : { note: machine.status !== 'running'
         ? 'Start the machine to see how full its disk is.'
         : 'No report yet: machines report every 5 minutes once set up (machines launched before this feature don’t report — the size can still be enlarged).' }),
