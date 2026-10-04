@@ -108,7 +108,7 @@ export async function live(userId: string, machine: any, minutes = 30): Promise<
   const latest = (latestRow[0]?.data as TelemetrySample) || null;
   if (!latest && !note) {
     note = machine.status === 'running'
-      ? 'No telemetry yet. Machines report every 15 seconds once their setup has started; machines launched before this feature need their on-machine script updated (Google: “Update machine script”; other clouds: Shelve, then Restore).'
+      ? 'No telemetry yet. Machines report every 15 seconds once their setup has started; machines launched before this feature need the newest on-machine script (Google: the “Update script” button next to Stop; other clouds: Shelve, then Restore).'
       : 'Start the machine to see live telemetry.';
   }
   const at = lastRead.get(machine.id);

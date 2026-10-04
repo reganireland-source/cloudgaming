@@ -259,7 +259,7 @@ function MachineCard({
   };
   const canSwitchNow = machine.status === 'shelved' || (PRICING_IN_PLACE.has(machine.provider) && ['stopped', 'running'].includes(machine.status));
   const [tab, setTab] = useState<'connect' | 'monitor' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
-  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | null>(null);
+  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | 'update-script' | null>(null);
   const [restoreRegion, setRestoreRegion] = useState(machine.region);
   const [restoreSpot, setRestoreSpot] = useState(!!machine.spot);
   const [keepSnapshot, setKeepSnapshot] = useState(false);
@@ -370,6 +370,10 @@ function MachineCard({
             // Sync only reads the state, so it stays usable when a machine looks stuck mid-change.
             <button type="button" disabled={!!activeOp} onClick={() => onAction(machine, 'sync')} className="btn-neon text-xs disabled:opacity-40" title="Ask the cloud for the real state">Sync</button>
           )}
+          {machine.provider === 'gcp' && !placeholderId && ['running', 'stopped'].includes(machine.status) && (
+            <button type="button" disabled={busy} onClick={() => setConfirm('update-script')} className="btn-neon text-xs disabled:opacity-40"
+              title="Install the newest on-machine script: telemetry, game FPS, disk reporting">Update script</button>
+          )}
           <button type="button" disabled={busy} onClick={() => setConfirm('delete')} className="text-xs border border-red-600/50 text-red-400 hover:border-red-500 rounded px-3 py-1.5 disabled:opacity-40">Delete</button>
         </div>
       </div>
@@ -432,6 +436,30 @@ function MachineCard({
           <p className="text-slate-400">To play again, press Restore: it rebuilds the disk from the snapshot, which takes several minutes longer than Start. Games, settings, logins and Moonlight pairing are kept; the IP address changes.</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'shelve'); }}>Shelve it</button>
+            <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {confirm === 'update-script' && (
+        <div className="mt-3 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
+          <p>
+            <strong className="text-slate-100">Update the on-machine script?</strong>{' '}
+            Installs the newest version: live telemetry (GPU, CPU, RAM, network, errors), game FPS from MangoHud and disk reporting.
+            Games, settings and your Moonlight pairing stay; finished setup steps are skipped.
+          </p>
+          <p className="text-slate-400">
+            {machine.status === 'running'
+              ? 'It takes effect when the machine restarts. “Update & restart now” restarts it straight away (1–3 minutes, the stream drops) — not mid-game.'
+              : 'It takes effect the next time you start the machine.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {machine.status === 'running' && (
+              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'update-script', { restart: true }); }}>Update &amp; restart now</button>
+            )}
+            <button type="button" className={machine.status === 'running' ? 'text-neon-cyan hover:underline px-2' : 'btn-neon text-xs'}
+              onClick={() => { setConfirm(null); onAction(machine, 'update-script', { restart: false }); }}>
+              {machine.status === 'running' ? 'Update, apply at next restart' : 'Update'}
+            </button>
             <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
           </div>
         </div>
