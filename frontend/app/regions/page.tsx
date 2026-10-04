@@ -21,6 +21,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import CloudLogo from '@/components/CloudLogo';
+import MegaQuotaCommand from '@/components/MegaQuotaCommand';
 import { useAuth } from '@/components/AuthProvider';
 import { fillCommand, useCommandContext } from '@/lib/commandContext';
 import { ACCESS_STYLE, RUN_MODES, quotaInUse, runRegionCheck, type AccessReport, type AccessStatus, type RegionAccess, type RunCell, type CheckLine } from '@/lib/regionAccess';
@@ -110,6 +111,7 @@ export default function RegionsPage() {
 
   // Live log of the check: every cloud API call as it happens.
   const [lines, setLines] = useState<CheckLine[]>([]);
+  const { ctx } = useCommandContext(!!user);
   const [showLog, setShowLog] = useState(false);
   const load = useCallback(async (refresh = false) => {
     setBusy(true);
@@ -214,6 +216,8 @@ export default function RegionsPage() {
               );
             })}
           </div>
+
+          <MegaQuotaCommand report={report} ctx={ctx} me={me} />
 
           {/* ---- Legend ---- */}
           <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:flex sm:flex-wrap text-[0.7rem] text-slate-400" aria-label="Legend">
