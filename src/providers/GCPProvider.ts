@@ -534,7 +534,7 @@ export class GCPProvider extends CloudProvider {
     const [lro] = await this.instances.setScheduling({
       project: this.projectId, zone, instance: name,
       schedulingResource: spot
-        ? { onHostMaintenance: 'TERMINATE', automaticRestart: false, provisioningModel: 'SPOT', instanceTerminationAction: 'STOP', preemptible: false }
+        ? { onHostMaintenance: 'TERMINATE', automaticRestart: false, provisioningModel: 'SPOT', instanceTerminationAction: 'STOP' } // no 'preemptible' here: false + SPOT is rejected as contradictory (as at launch, leave it unset)
         : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD', preemptible: false },
     } as any);
     await this.waitZoneOp(lro, zone);
