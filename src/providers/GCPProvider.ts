@@ -59,7 +59,7 @@ import {
 } from './gcp/catalog';
 
 type GpuModel = GcpShape['gpuModel'];
-import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import { buildSetupScript } from './shared/setupScript';
 
 /** The parsed, checked credentials. */
 export interface GcpCredentials {
@@ -1026,10 +1026,24 @@ export class GCPProvider extends CloudProvider {
    * Read the machine's serial console and extract the setup stages printed
    * by the startup script. Returns [] if nothing has been printed yet.
    */
-  async getSetupProgress(instanceId: string): Promise<SetupStage[]> {
+  async getConsoleText(instanceId: string): Promise<string> {
     const { zone, name } = this.splitId(instanceId);
     const [output] = await this.instances.getSerialPortOutput({ project: this.projectId, zone, instance: name, port: 1 });
-    return parseSetupStages(output?.contents || '');
+    return output?.contents || '';
+  }
+
+  readonly diskResizeWhileRunning = true;
+
+  /** Persistent disks / Hyperdisk grow online; the machine grows its filesystem itself. */
+  async resizeDisk(instanceId: string, sizeGb: number): Promise<void> {
+    const { zone, name } = this.splitId(instanceId);
+    const [instance] = await this.instances.get({ project: this.projectId, zone, instance: name });
+    const boot = (instance.disks || []).find((d: any) => d.boot) || instance.disks?.[0];
+    const disk = String(boot?.source || '').split('/').pop();
+    if (!disk) throw new Error(`Couldn't find the disk of ${name}.`);
+    await this.report('info', `Enlarging disk ${disk} to ${sizeGb} GB (Google does this while the machine runs)…`);
+    const [lro] = await this.disks.resize({ project: this.projectId, zone, disk, disksResizeRequestResource: { sizeGb: String(sizeGb) } });
+    await this.waitZoneOp(lro, zone);
   }
 
   /** The Sunshine admin login stored in the machine's metadata, plus its IP. */

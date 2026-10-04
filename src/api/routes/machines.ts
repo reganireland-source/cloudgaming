@@ -214,6 +214,24 @@ router.post('/:id/pricing', async (req: Request, res: Response) => {
   }
 });
 
+// Disk: GET how full it is (?refresh=true asks the machine's console again);
+// POST { sizeGb } enlarges it in place (bigger only).
+router.get('/:id/disk', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await MachineService.getDisk(req.userId!, req.params.id, req.query.refresh === 'true'));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to read the disk usage');
+  }
+});
+router.post('/:id/disk', async (req: Request, res: Response) => {
+  try {
+    res.status(202).json(await MachineService.resizeDisk(req.userId!, req.params.id, req.body?.sizeGb));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to enlarge the disk');
+  }
+});
+
 // Rescue an unfinished setup: start the machine if it stopped (e.g. a
 // reclaimed spot machine), restart it if its setup went quiet.
 router.post('/:id/resume-setup', async (req: Request, res: Response) => {

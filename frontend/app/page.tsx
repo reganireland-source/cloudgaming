@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { usd } from '@/lib/money';
 import CloudLogo from '@/components/CloudLogo';
 import { apiFetch } from '@/lib/auth';
+import DiskMeter from '@/components/DiskMeter';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Machine {
@@ -136,6 +137,7 @@ export default function Dashboard() {
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-slate-100 truncate">{m.nickname || m.instance_type}{m.game_title ? ` · ${m.game_title}` : ''}</span>
                         <span className="block text-[0.7rem] text-slate-500 truncate">{c.label} · {m.region}{m.spot ? ' · spot' : ''}</span>
+                        {['running', 'stopped'].includes(m.status) && <span className="block mt-1 max-w-xs"><DiskMeter machineId={m.id} status={m.status} compact /></span>}
                       </span>
                       <span className="shrink-0 text-right">
                         <span className={`block text-[0.7rem] uppercase tracking-label ${STATUS_CLASS[m.status] || 'text-neon-cyan'}`}>{m.status}</span>

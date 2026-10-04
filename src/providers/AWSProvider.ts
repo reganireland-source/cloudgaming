@@ -78,7 +78,7 @@ import {
   findShape,
 } from './aws/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
-import { AWS_USER_DATA_LIMIT, buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import { AWS_USER_DATA_LIMIT, buildSetupScript } from './shared/setupScript';
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 
 /** The parsed, checked credentials. */
@@ -981,15 +981,32 @@ export class AWSProvider extends CloudProvider {
    * by the setup script. Returns [] if nothing is available yet (AWS may
    * take a minute or two to start collecting console output).
    */
-  async getSetupProgress(instanceId: string): Promise<SetupStage[]> {
+  async getConsoleText(instanceId: string): Promise<string> {
+    const { region, id } = this.splitId(instanceId);
+    // Latest: true = the most recent output (supported on Nitro machines like g4dn/g5/g6e).
+    const result = await this.ec2For(region).getConsoleOutput({ InstanceId: id, Latest: true }).promise();
+    return Buffer.from(result.Output || '', 'base64').toString('utf8');
+  }
+
+  readonly diskResizeWhileRunning = true;
+
+  /** EBS volumes grow online (Elastic Volumes); one change per volume every 6 hours. */
+  async resizeDisk(instanceId: string, sizeGb: number): Promise<void> {
+    const { region, id } = this.splitId(instanceId);
+    const instance = await this.describeInstance(region, id);
+    if (!instance) throw new Error(`InvalidInstanceID.NotFound: ${id} doesn't exist in ${region}`);
+    const root = (instance.BlockDeviceMappings || []).find((m) => m.DeviceName === instance.RootDeviceName) || instance.BlockDeviceMappings?.[0];
+    const volumeId = root?.Ebs?.VolumeId;
+    if (!volumeId) throw new Error(`Couldn't find the disk of ${id}`);
+    await this.report('info', `Enlarging volume ${volumeId} to ${sizeGb} GB (AWS does this while the machine runs)…`);
     try {
-      const { region, id } = this.splitId(instanceId);
-      // Latest: true = the most recent output (supported on Nitro machines like g4dn/g5).
-      const result = await this.ec2For(region).getConsoleOutput({ InstanceId: id, Latest: true }).promise();
-      const text = Buffer.from(result.Output || '', 'base64').toString('utf8');
-      return parseSetupStages(text);
-    } catch {
-      return [];
+      await this.ec2For(region).modifyVolume({ VolumeId: volumeId, Size: sizeGb }).promise();
+    } catch (error: any) {
+      if (/VolumeModificationRateExceeded|wait at least 6 hours/i.test(`${error?.code} ${error?.message}`)) {
+        throw new FriendlyCloudError({ code: 'DISK_RESIZE_WAIT', title: 'AWS allows one disk change every 6 hours',
+          explanation: 'This disk was changed recently; AWS needs up to 6 hours before the next change.', fixes: ['Try again later.'] });
+      }
+      throw error;
     }
   }
 

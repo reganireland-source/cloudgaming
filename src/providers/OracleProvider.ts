@@ -79,7 +79,7 @@ import {
 } from './oracle/catalog';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import zlib from 'zlib';
-import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import { buildSetupScript } from './shared/setupScript';
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 
 /** The parsed, checked credentials. */
@@ -1530,7 +1530,7 @@ export class OracleProvider extends CloudProvider {
    * request a capture, wait for it, read it, then we delete it again so
    * captures don't pile up. Returns [] if anything goes wrong.
    */
-  async getSetupProgress(instanceId: string): Promise<SetupStage[]> {
+  async getConsoleText(instanceId: string): Promise<string> {
     let historyId: string | undefined;
     const { region, ocid } = this.splitId(instanceId);
     const { compute } = this.clients(region);
@@ -1547,14 +1547,34 @@ export class OracleProvider extends CloudProvider {
         timeoutMs: 30_000,
         intervalMs: 2_000,
       });
-      if (ready.lifecycleState !== 'SUCCEEDED') return [];
+      if (ready.lifecycleState !== 'SUCCEEDED') return '';
       // Up to 1 MB of the most recent console output.
       const content = await compute.getConsoleHistoryContent({ instanceConsoleHistoryId: id, offset: 0, length: 1024 * 1024 });
-      return parseSetupStages(String(content.value || ''));
+      return String(content.value || '');
     } catch {
-      return [];
+      return '';
     } finally {
       if (historyId) await compute.deleteConsoleHistory({ instanceConsoleHistoryId: historyId }).catch(() => undefined);
     }
+  }
+
+  readonly diskResizeWhileRunning = true;
+
+  /** Boot volumes grow online; the machine rescans the disk and grows its filesystem itself. */
+  async resizeDisk(instanceId: string, sizeGb: number): Promise<void> {
+    const { region, ocid } = this.splitId(instanceId);
+    const { compute, storage } = this.clients(region);
+    const { instance } = await compute.getInstance({ instanceId: ocid });
+    const attachments = await compute.listBootVolumeAttachments({ availabilityDomain: instance.availabilityDomain, compartmentId: instance.compartmentId, instanceId: ocid });
+    const bootVolumeId = attachments.items.find((a) => a.lifecycleState === 'ATTACHED')?.bootVolumeId;
+    if (!bootVolumeId) throw new Error(`Couldn't find the disk (boot volume) of ${instance.displayName}.`);
+    await this.report('info', `Enlarging the boot volume to ${sizeGb} GB (Oracle does this while the machine runs)…`);
+    await storage.updateBootVolume({ bootVolumeId, updateBootVolumeDetails: { sizeInGBs: sizeGb } });
+    await this.waitFor({
+      what: 'the boot volume to resize',
+      fetch: async () => (await storage.getBootVolume({ bootVolumeId })).bootVolume,
+      isDone: (v) => String(v.lifecycleState) === 'AVAILABLE' && Number(v.sizeInGBs) >= sizeGb,
+      timeoutMs: 10 * 60_000, intervalMs: 5_000,
+    });
   }
 }

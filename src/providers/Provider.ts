@@ -35,6 +35,7 @@
 import { Machine, RegionData, Snapshot } from '../types';
 import type { Reporter, EventLevel } from '../services/OperationLog';
 import type { SetupStage, InventoryItem } from './shared/types';
+import { parseSetupStages, parseDiskUsage, type DiskUsage } from './shared/setupScript';
 
 /** Where and what to launch. */
 export interface ProviderConfig {
@@ -113,12 +114,33 @@ export abstract class CloudProvider {
   }
 
   /**
-   * Progress of the on-machine setup script (shared/setupScript.ts), read
-   * from the machine's serial console via the cloud's API. Providers that
-   * can read it override this; the default says "unknown" ([]).
+   * The machine's serial console as text, read through the cloud's API.
+   * The on-machine setup script (shared/setupScript.ts) prints its progress
+   * and disk usage there. '' = can't read it (providers override this).
    */
-  async getSetupProgress(_instanceId: string): Promise<SetupStage[]> {
-    return [];
+  async getConsoleText(_instanceId: string): Promise<string> {
+    return '';
+  }
+
+  /** Progress of the on-machine setup script, from the serial console ([] = unknown). */
+  async getSetupProgress(instanceId: string): Promise<SetupStage[]> {
+    return parseSetupStages(await this.getConsoleText(instanceId).catch(() => ''));
+  }
+
+  /** The machine's latest disk usage report (null = none yet, or an older machine that doesn't report). */
+  async getDiskUsage(instanceId: string): Promise<DiskUsage | null> {
+    return parseDiskUsage(await this.getConsoleText(instanceId).catch(() => ''));
+  }
+
+  /**
+   * Can the boot disk be enlarged while the machine runs? (Google, AWS,
+   * Oracle: yes. Azure: only when stopped.) Shrinking is never possible.
+   */
+  readonly diskResizeWhileRunning: boolean = false;
+
+  /** Enlarge the machine's boot disk to sizeGb (bigger only). The machine grows its filesystem itself. */
+  async resizeDisk(_instanceId: string, _sizeGb: number): Promise<void> {
+    throw new Error('This cloud can’t enlarge the disk from the app.');
   }
 
   /**

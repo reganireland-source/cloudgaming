@@ -76,7 +76,7 @@ import {
   resourceGroupFor,
 } from './azure/catalog';
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
-import { buildSetupScript, parseSetupStages, SetupStage } from './shared/setupScript';
+import { buildSetupScript } from './shared/setupScript';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 
 /** The parsed, checked credentials. */
@@ -1518,18 +1518,23 @@ export class AzureProvider extends CloudProvider {
    * every minute or so, so progress can lag a little. Returns [] if nothing
    * is available yet (or on any error — progress is a nice-to-have).
    */
-  async getSetupProgress(instanceId: string): Promise<SetupStage[]> {
-    try {
-      const { rg, name } = this.splitId(instanceId);
-      const diag = await this.compute.virtualMachines.retrieveBootDiagnosticsData(rg, name, { sasUriExpirationTimeInMinutes: 5 });
-      if (!diag.serialConsoleLogBlobUri) return [];
-      // The URI is a short-lived, pre-signed link to the log file: no login needed.
-      const res = await fetch(diag.serialConsoleLogBlobUri);
-      if (!res.ok) return [];
-      return parseSetupStages(await res.text());
-    } catch {
-      return [];
-    }
+  async getConsoleText(instanceId: string): Promise<string> {
+    const { rg, name } = this.splitId(instanceId);
+    const diag = await this.compute.virtualMachines.retrieveBootDiagnosticsData(rg, name, { sasUriExpirationTimeInMinutes: 5 });
+    if (!diag.serialConsoleLogBlobUri) return '';
+    // The URI is a short-lived, pre-signed link to the log file: no login needed.
+    const res = await fetch(diag.serialConsoleLogBlobUri);
+    return res.ok ? res.text() : '';
+  }
+
+  /** Azure enlarges an OS disk only while the VM is stopped (deallocated). */
+  async resizeDisk(instanceId: string, sizeGb: number): Promise<void> {
+    const { rg, name } = this.splitId(instanceId);
+    const vm = await this.compute.virtualMachines.get(rg, name);
+    const ref = parseArmId(vm.storageProfile?.osDisk?.managedDisk?.id);
+    if (!ref) throw new Error(`Couldn't find the disk of ${name}.`);
+    await this.report('info', `Enlarging disk ${ref.name} to ${sizeGb} GB…`);
+    await this.compute.disks.beginUpdateAndWait(ref.rg, ref.name, { diskSizeGB: sizeGb });
   }
 
   /** The machine's IP, power state and the Sunshine username (the password isn't stored at Azure). */

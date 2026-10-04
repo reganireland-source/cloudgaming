@@ -95,6 +95,11 @@ export class MachineRequestError extends Error {
 }
 
 /** The machine row, checked for ownership. Throws 404 if not theirs. */
+/** Largest disk the app offers (games rarely need more). */
+const MAX_DISK_GB = 2000;
+/** Last disk report per machine (see MachineService.getDisk). */
+const DISK_CACHE = new Map<string, { at: number; usage: { usedGb: number; totalGb: number; percent: number; at: string | null } | null }>();
+
 async function loadOwnedMachine(machineId: string, userId: string): Promise<any> {
   const result = await query('SELECT * FROM machines WHERE id = $1 AND user_id = $2', [machineId, userId]);
   if (result.rows.length === 0) {
@@ -459,6 +464,80 @@ export class MachineService {
       }
     }, `Switched to ${spot ? 'spot' : 'on-demand'}.`);
     return { operationId: op.id, spot };
+  }
+
+  /**
+   * DISK USAGE: what the machine last reported (every 5 minutes, on its
+   * serial console — see "4b. Disk" in shared/setupScript.ts), plus the
+   * disk size the app knows. Cached 5 minutes per machine (reading the
+   * console is a cloud API call; Oracle's takes ~10 s).
+   */
+  static async getDisk(userId: string, machineId: string, refresh = false): Promise<{
+    sizeGb: number; usage: { usedGb: number; totalGb: number; percent: number; at: string | null } | null;
+    note?: string; canResize: boolean; resizeWhileRunning: boolean; maxGb: number;
+  }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    const sizeGb = Number(machine.disk_size_gb) || 0;
+    const base = { sizeGb, canResize: !!machine.instance_id && !['shelved', 'terminated', 'failed'].includes(machine.status), resizeWhileRunning: false, maxGb: MAX_DISK_GB };
+    if (!machine.instance_id || neverCreated(machine)) return { ...base, usage: null, note: 'No disk yet.' };
+    const provider = await providerFor(userId, machine.provider);
+    const hit = DISK_CACHE.get(machineId);
+    let usage = hit && !refresh && Date.now() - hit.at < 5 * 60_000 ? hit.usage : undefined;
+    if (usage === undefined && machine.status === 'running') {
+      usage = await provider.getDiskUsage(machine.instance_id).catch(() => null);
+      DISK_CACHE.set(machineId, { at: Date.now(), usage });
+    }
+    usage = usage ?? hit?.usage ?? null; // a stopped machine shows its last report
+    return {
+      ...base, usage, resizeWhileRunning: provider.diskResizeWhileRunning,
+      ...(usage ? {} : { note: machine.status !== 'running'
+        ? 'Start the machine to see how full its disk is.'
+        : 'No report yet: machines report every 5 minutes once set up (machines launched before this feature don’t report — the size can still be enlarged).' }),
+    };
+  }
+
+  /**
+   * ENLARGE THE DISK (never shrink): the cloud grows the disk in place —
+   * Google, AWS and Oracle while it runs, Azure only when stopped — and the
+   * machine grows its filesystem into the new space by itself within ~5
+   * minutes (machines launched before this feature: at their next restart).
+   * Games and settings are untouched.
+   */
+  static async resizeDisk(userId: string, machineId: string, rawGb: unknown): Promise<{ operationId: string; sizeGb: number }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    const current = Number(machine.disk_size_gb) || 0;
+    const sizeGb = Math.round(Number(rawGb));
+    if (!Number.isFinite(sizeGb) || sizeGb <= current) {
+      throw new MachineRequestError(400, `Pick a size bigger than the current ${current} GB.`, 'Disks can only grow; shrinking isn’t possible on any cloud.');
+    }
+    if (sizeGb > MAX_DISK_GB) throw new MachineRequestError(400, `Up to ${MAX_DISK_GB} GB.`, 'Bigger than that is rarely needed for games — ask if you do.');
+    if (!machine.instance_id || neverCreated(machine) || ['shelved', 'terminated', 'failed'].includes(machine.status)) {
+      throw new MachineRequestError(409, 'This machine has no disk to enlarge right now.', machine.status === 'shelved' ? 'Restore it first.' : 'Launch or repair it first.');
+    }
+    const provider0 = await providerFor(userId, machine.provider);
+    if (!provider0.diskResizeWhileRunning && machine.status !== 'stopped') {
+      throw new MachineRequestError(409, 'Azure enlarges a disk only while the machine is stopped.', 'Stop the machine, enlarge the disk, then start it again.');
+    }
+    if (!['stopped', 'running'].includes(machine.status)) {
+      throw new MachineRequestError(409, 'The machine must be running or stopped to enlarge its disk.', 'Wait for the current change to finish, or press Sync.');
+    }
+    const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'resize-disk', machineId,
+      title: `Enlarge the disk of ${machine.nickname || machine.instance_type} from ${current} to ${sizeGb} GB` });
+    op.runInBackground(async () => {
+      const provider = await providerFor(userId, machine.provider, op.reporter);
+      if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+      await provider.resizeDisk(machine.instance_id, sizeGb);
+      await query('UPDATE machines SET disk_size_gb = $2 WHERE id = $1', [machineId, sizeGb]);
+      DISK_CACHE.delete(machineId);
+      await op.info(`Disk is now ${sizeGb} GB (about USD ${(sizeGb * catalog.diskPerGbMonth).toFixed(2)}/month, also while stopped).`);
+      await op.info(machine.status === 'running'
+        ? 'The machine grows its filesystem into the new space within about 5 minutes — no restart needed. (A machine launched before this feature does it at its next restart.)'
+        : 'The new space is used from the next start.');
+      return { sizeGb };
+    }, `Disk enlarged to ${sizeGb} GB.`);
+    return { operationId: op.id, sizeGb };
   }
 
   /**

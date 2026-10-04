@@ -1201,6 +1201,41 @@ if docker container inspect mlweb >/dev/null 2>&1; then
 fi
 
 # ============================================================================
+# 4b. Disk: grow into new space ("Bigger disk" in the app) + report usage
+# ============================================================================
+# Every 5 minutes: let the kernel see a resized disk, grow the root partition
+# and filesystem into it (no reboot), and print "CLOUDGAMING_DISK used total
+# (MiB) epoch" on the serial console, where the app reads it.
+cat > /usr/local/sbin/cloudgaming-disk.sh <<'DISK'
+#!/bin/bash
+while true; do
+  for f in /sys/class/block/*/device/rescan; do echo 1 > "$f" 2>/dev/null; done
+  SRC=$(findmnt -no SOURCE /)
+  PK=$(lsblk -no PKNAME "$SRC" 2>/dev/null | head -1)
+  PN=$(cat "/sys/class/block/$(basename "$SRC")/partition" 2>/dev/null)
+  if [ -n "$PK" ] && [ -n "$PN" ] && growpart "/dev/$PK" "$PN" >/dev/null 2>&1; then
+    resize2fs "$SRC" >/dev/null 2>&1 || xfs_growfs / >/dev/null 2>&1
+  fi
+  read -r USED SIZE <<< "$(df -B1 --output=used,size / | tail -1)"
+  echo "CLOUDGAMING_DISK $((USED / 1048576)) $((SIZE / 1048576)) $(date +%s)" > /dev/ttyS0 2>/dev/null
+  sleep 300
+done
+DISK
+chmod 700 /usr/local/sbin/cloudgaming-disk.sh
+cat > /etc/systemd/system/cloudgaming-disk.service <<'UNIT'
+[Unit]
+Description=Gints Global Gaming Hubjob disk grow + usage report
+[Service]
+ExecStart=/usr/local/sbin/cloudgaming-disk.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable cloudgaming-disk.service
+systemctl restart cloudgaming-disk.service
+
+# ============================================================================
 # 5. Auto-stop when idle (CloudyPad-style, dependency-free)
 # ============================================================================
 if [ "$AUTOSTOP_MINUTES" != "0" ]; then
@@ -1256,6 +1291,25 @@ stage 100 ready "Ready to stream - open Moonlight and add this machine's IP"
 
 import type { SetupStage } from './types';
 export type { SetupStage };
+
+/** Disk usage the machine reported (CLOUDGAMING_DISK, every 5 minutes). */
+export interface DiskUsage { usedGb: number; totalGb: number; percent: number; at: string | null }
+
+/** The newest "CLOUDGAMING_DISK <usedMiB> <totalMiB> <epoch>" line, or null. */
+export function parseDiskUsage(serialOutput: string): DiskUsage | null {
+  const re = /CLOUDGAMING_DISK (\d+) (\d+)(?: (\d+))?/g;
+  let m: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((m = re.exec(serialOutput)) !== null) last = m;
+  if (!last) return null;
+  const used = Number(last[1]) / 1024, total = Number(last[2]) / 1024;
+  if (!total) return null;
+  return {
+    usedGb: Math.round(used * 10) / 10, totalGb: Math.round(total * 10) / 10,
+    percent: Math.round((used / total) * 100),
+    at: last[3] ? new Date(Number(last[3]) * 1000).toISOString() : null,
+  };
+}
 
 /**
  * Find the CLOUDGAMING_STAGE lines in raw serial-console text.
