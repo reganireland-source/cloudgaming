@@ -1423,8 +1423,16 @@ export class AWSProvider extends CloudProvider {
   async getQuotaRequests(region: string): Promise<Array<{ quota: string; requested: number; status: string; created?: string }> | null> {
     try {
       const sq = new AWS.ServiceQuotas(this.clientConfig(region));
-      const r = await sq.listRequestedServiceQuotaChangeHistory({ ServiceCode: 'ec2', MaxResults: 100 }).promise();
-      return (r.RequestedQuotas || [])
+      // All pages (oldest requests can fill the first page and hide new ones).
+      const all: AWS.ServiceQuotas.RequestedServiceQuotaChangeHistoryListDefinition = [];
+      let NextToken: string | undefined;
+      for (let page = 0; page < 5; page++) {
+        const r = await sq.listRequestedServiceQuotaChangeHistory({ ServiceCode: 'ec2', MaxResults: 100, ...(NextToken ? { NextToken } : {}) }).promise();
+        all.push(...(r.RequestedQuotas || []));
+        NextToken = r.NextToken;
+        if (!NextToken) break;
+      }
+      return all
         .filter((q) => q.Status === 'PENDING' || q.Status === 'CASE_OPENED')
         .map((q) => ({ quota: String(q.QuotaCode), requested: Number(q.DesiredValue) || 0, status: q.Status === 'CASE_OPENED' ? 'support case open' : 'pending', created: q.Created ? new Date(q.Created).toISOString() : undefined }));
     } catch {

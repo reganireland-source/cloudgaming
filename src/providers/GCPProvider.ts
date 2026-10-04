@@ -941,15 +941,19 @@ export class GCPProvider extends CloudProvider {
 
   /** A region's quotas (e.g. NVIDIA_T4_GPUS). */
   /**
-   * Quota increase requests still being processed ("quota preferences" in
-   * the Cloud Quotas API, which the console's quota page also uses). Keyed
-   * like compute metrics: NVIDIA_L4_GPUS, PREEMPTIBLE_NVIDIA_T4_GPUS…
+   * Every compute quota request ("quota preference" in the Cloud Quotas API,
+   * which the console's quota page also writes), whatever its state. The
+   * caller decides what is still pending by comparing with the current limit:
+   * a request under review often has no grantedValue and isn't "reconciling",
+   * so neither flag alone is enough. Keyed like compute metrics
+   * (NVIDIA_L4_GPUS, PREEMPTIBLE_NVIDIA_T4_GPUS, GPU_FAMILY:NVIDIA_RTX_PRO_6000).
+   * id = the preference's id (for "gcloud beta quotas preferences update").
    * null = can't read (API off or no permission). Region "" = global.
    */
-  async getQuotaRequests(): Promise<Array<{ metric: string; region: string; requested: number; granted: number | null; status: string; created?: string }> | null> {
+  async getQuotaRequests(): Promise<Array<{ id: string; quotaId: string; metric: string; region: string; requested: number; granted: number | null; reconciling: boolean; status: string; created?: string; updated?: string }> | null> {
     try {
       const jwt = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-      const out: Array<{ metric: string; region: string; requested: number; granted: number | null; status: string; created?: string }> = [];
+      const out: Array<{ id: string; quotaId: string; metric: string; region: string; requested: number; granted: number | null; reconciling: boolean; status: string; created?: string; updated?: string }> = [];
       let pageToken = '';
       for (let page = 0; page < 5; page++) {
         const url = `https://cloudquotas.googleapis.com/v1/projects/${this.projectId}/locations/global/quotaPreferences?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
@@ -957,16 +961,18 @@ export class GCPProvider extends CloudProvider {
         for (const p of res.data?.quotaPreferences || []) {
           if (p.service !== 'compute.googleapis.com') continue;
           const requested = Number(p.quotaConfig?.preferredValue);
+          if (!Number.isFinite(requested)) continue;
           const granted = p.quotaConfig?.grantedValue != null ? Number(p.quotaConfig.grantedValue) : null;
-          const pending = p.reconciling === true || (granted != null && requested > granted);
-          if (!pending) continue;
           out.push({
+            id: String(p.name || '').split('/').pop() || '',
+            quotaId: String(p.quotaId || ''),
             metric: p.dimensions?.gpu_family ? `GPU_FAMILY:${p.dimensions.gpu_family}` // GPUS-PER-GPU-FAMILY (G4)
               : String(p.quotaId || '').replace(/-per-.*$/, '').replace(/-/g, '_').toUpperCase(),
             region: String(p.dimensions?.region || ''),
-            requested, granted,
-            status: p.reconciling ? 'being processed' : (p.quotaConfig?.stateDetail || 'not granted yet'),
-            created: p.createTime,
+            requested, granted, reconciling: p.reconciling === true,
+            status: p.reconciling ? 'being processed'
+              : p.quotaConfig?.stateDetail || (granted != null && granted > 0 ? `${granted} granted so far` : 'waiting for Google'),
+            created: p.createTime, updated: p.updateTime,
           });
         }
         pageToken = res.data?.nextPageToken || '';

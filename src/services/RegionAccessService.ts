@@ -295,9 +295,23 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         if (metric === 'GPUS_ALL_REGIONS') return 'GPUs (all regions)';
         return `${metric.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}${gpuOfMetric(metric)}${metric.includes('_VWS_') ? ' vWS (big screen)' : ''} GPUs`;
       };
-      const pendingFor = (metric: string) => (gcpPending || [])
+      // The request (quota preference) for a quota here, in any state; one per quota and region.
+      const prefFor = (metric: string): any => (gcpPending || [])
         .filter((x: any) => x.metric === metric && (metric === 'GPUS_ALL_REGIONS' ? !x.region : x.region === region))
-        .map((x: any) => ({ requested: x.requested, status: x.status, created: x.created }));
+        .sort((a: any, b: any) => String(b.updated || b.created || '').localeCompare(String(a.updated || a.created || '')))[0] || null;
+      // Pending = asks for more than the quota is now (granted requests drop out).
+      const pendingFor = (metric: string, limit: number) => {
+        const p = prefFor(metric);
+        return p && (p.reconciling || p.requested > limit) ? [{ requested: p.requested, status: p.status, created: p.updated || p.created }] : [];
+      };
+      // One complete command: create a request, or change the one that already exists
+      // ("create" fails with "Quota Preference ... already exist" if there is one).
+      const requestCli = (metric: string, want: number) => {
+        const { quotaId, dims } = quotaRequestOf(metric, region);
+        const p = prefFor(metric);
+        const common = `--project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${dims} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`;
+        return p?.id ? `gcloud beta quotas preferences update ${p.id} ${common}` : `gcloud beta quotas preferences create ${common}`;
+      };
       const gcpCell = (s: Sh, m: RunMode): RunCell => {
         const k = metricFor(s, m);
         if (!k) return na(`Big screen isn’t offered on the ${s.gpuModel}`);
@@ -317,15 +331,17 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), (g) => !noBig.includes(g), gcpCell,
         usedKeys.map((k) => {
           const l = k === 'GPUS_ALL_REGIONS' ? { limit: globalLimit, used: globalUsage } : line(k);
-          const pend = pendingFor(k);
+          const pend = pendingFor(k, l.limit);
           const short = l.limit - l.used < 1;
-          const { quotaId, dims, consoleMetric } = quotaRequestOf(k, region);
+          const { consoleMetric } = quotaRequestOf(k, region);
           const want = Math.max(1, l.used + 1);
           const request = short ? {
             consoleUrl: `https://console.cloud.google.com/iam-admin/quotas?project=${pid}&metric=compute.googleapis.com%2F${consoleMetric}`,
             consoleLabel: `Request in the console`,
-            cli: `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=${want}${dims} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`,
-            note: `Asks for ${want}. Run in Cloud Shell (check the email is yours); if it says the preference already exists, use the console link instead.`,
+            cli: requestCli(k, want),
+            note: prefFor(k)?.id
+              ? `Asks for ${want} by updating your earlier request (${prefFor(k).requested}, ${prefFor(k).status}). Run in Cloud Shell (check the email is yours).`
+              : `Asks for ${want}. Run in Cloud Shell (check the email is yours).`,
           } : undefined;
           return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], short, ...(request ? { request } : {}), ...(pend.length ? { pending: pend } : {}) };
         }));
@@ -336,10 +352,9 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const bestSpot = spotLines.sort((a, b) => b.limit - a.limit)[0] || null;
       // Ready-to-paste requests (one complete command per line): the
       // project-wide cap and the cheapest GPU (T4) in this region.
-      const req1 = (quotaId: string, dims: string) => `gcloud beta quotas preferences create --project=${pid} --billing-project=${pid} --service=compute.googleapis.com --quota-id=${quotaId} --preferred-value=1${dims} --email=YOUR_EMAIL --justification="Personal cloud gaming VM"`;
       const cli = [
-        ...(globalLimit < 1 ? [req1('GPUS-ALL-REGIONS-per-project', '')] : []),
-        (() => { const r = quotaRequestOf(soldMetrics.includes('NVIDIA_T4_GPUS') ? 'NVIDIA_T4_GPUS' : soldMetrics[0] || 'NVIDIA_T4_GPUS', region); return req1(r.quotaId, r.dims); })(),
+        ...(globalLimit < 1 ? [requestCli('GPUS_ALL_REGIONS', 1)] : []),
+        requestCli(soldMetrics.includes('NVIDIA_T4_GPUS') ? 'NVIDIA_T4_GPUS' : soldMetrics[0] || 'NVIDIA_T4_GPUS', 1),
       ].join('\n');
       if (globalLimit - globalUsage < 1) {
         const globalFull = globalLimit > 0;
@@ -365,7 +380,16 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const missingGpus = soldMetrics.filter((m) => { const l = line(m); return l.limit - l.used < 1; })
         .map((m) => shapeOfMetric(m).gpuModel);
       return { region, status: 'ready', onDemandReady: true, summary: regional.map((l) => `${l.label.replace('NVIDIA ', '')}: ${l.limit - l.used} free`).join(' · '), quotas, ...extra, spot: bestSpot, spotReady: spotOk, missingGpus,
-        ...(missingGpus.length ? { fix: { steps: [`Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here. For ${missingGpus.join('/')} machines, request "${line(GCP_SHAPES.find((sh) => sh.gpuModel === missingGpus[0])!.gpuQuotaMetric).label}" = 1 in ${region}${missingGpus.includes('RTX PRO 6000') ? ' (the RTX PRO 6000 is listed as "GPUs per GPU family", gpu_family NVIDIA_RTX_PRO_6000)' : ''}.`], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', cli } } : {}) };
+        ...(missingGpus.length ? { fix: (() => {
+          const ms = missingGpus.map((g) => GCP_SHAPES.find((sh) => sh.gpuModel === g)!.gpuQuotaMetric);
+          const asked = ms.filter((m) => pendingFor(m, line(m).limit).length);
+          const toAsk = ms.filter((m) => !asked.includes(m));
+          return { steps: [
+            `Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here.`,
+            ...asked.map((m) => `${line(m).label}: ⏳ ${pendingFor(m, line(m).limit)[0].requested} requested (${pendingFor(m, line(m).limit)[0].status}) — nothing to do but wait.`),
+            ...toAsk.map((m) => `For ${gpuOfMetric(m)} machines, request "${line(m).label}" = 1 in ${region}${m.startsWith('GPU_FAMILY:') ? ' (listed as "GPUs per GPU family", gpu_family NVIDIA_RTX_PRO_6000)' : ''}.`),
+          ], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', ...(toAsk.length ? { cli: toAsk.map((m) => requestCli(m, 1)).join('\n') } : {}) };
+        })() } : {}) };
       })());
     } catch (error) {
       return unknown(region, error, 'gcp');
