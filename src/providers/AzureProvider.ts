@@ -1473,18 +1473,29 @@ export class AzureProvider extends CloudProvider {
    * quota name (e.g. standardNCASv3_T4Family, lowPriorityCores). null = can't read.
    */
   async getQuotaRequests(location: string): Promise<Array<{ quota: string; requested: number; status: string; created?: string }> | null> {
+    const all = await this.getQuotaRequestHistory(location);
+    return all && all.filter((q) => q.state === 'open').map(({ quota, requested, status, created }) => ({ quota, requested, status, created }));
+  }
+
+  /** Every compute quota request in a location, any outcome (Quota request status page). null = can't read. */
+  async getQuotaRequestHistory(location: string): Promise<Array<{ id: string; quota: string; quotaName: string; requested: number; state: 'open' | 'approved' | 'denied' | 'cancelled'; status: string; created?: string }> | null> {
     try {
       const token = await this.credential.getToken('https://management.azure.com/.default');
       const url = `https://management.azure.com/subscriptions/${this.subscriptionId}/providers/Microsoft.Compute/locations/${location}/providers/Microsoft.Quota/quotaRequests?api-version=2023-02-01`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token?.token}` } });
       if (!res.ok) return null;
       const data: any = await res.json();
-      const out: Array<{ quota: string; requested: number; status: string; created?: string }> = [];
+      const out: Array<{ id: string; quota: string; quotaName: string; requested: number; state: 'open' | 'approved' | 'denied' | 'cancelled'; status: string; created?: string }> = [];
       for (const r of data?.value || []) {
-        const state = String(r.properties?.provisioningState || '');
-        if (/^(Succeeded|Failed|Invalid|Canceled|Cancelled)$/i.test(state)) continue;
+        const st = String(r.properties?.provisioningState || '');
+        const state = /^succeeded$/i.test(st) ? 'approved' : /^(failed|invalid)$/i.test(st) ? 'denied' : /^cancell?ed$/i.test(st) ? 'cancelled' : 'open';
         for (const v of r.properties?.value || []) {
-          out.push({ quota: String(v.properties?.name?.value || v.name?.value || ''), requested: Number(v.properties?.limit?.value ?? v.limit?.value) || 0, status: state || 'in progress', created: r.properties?.requestSubmitTime });
+          const name = v.properties?.name || v.name || {};
+          out.push({
+            id: String(r.name || r.id || ''), quota: String(name.value || ''), quotaName: String(name.localizedValue || name.value || ''),
+            requested: Number(v.properties?.limit?.value ?? v.limit?.value) || 0,
+            state, status: (r.properties?.message || st || 'in progress').toString(), created: r.properties?.requestSubmitTime,
+          });
         }
       }
       return out;

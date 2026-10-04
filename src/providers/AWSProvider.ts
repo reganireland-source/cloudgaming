@@ -1421,6 +1421,12 @@ export class AWSProvider extends CloudProvider {
    * CASE_OPENED), from Service Quotas' request history. null = can't read.
    */
   async getQuotaRequests(region: string): Promise<Array<{ quota: string; requested: number; status: string; created?: string }> | null> {
+    const all = await this.getQuotaRequestHistory(region);
+    return all && all.filter((q) => q.state === 'open').map(({ quota, requested, status, created }) => ({ quota, requested, status, created }));
+  }
+
+  /** Every EC2 quota request in a region, any outcome (Quota request status page). null = can't read. */
+  async getQuotaRequestHistory(region: string): Promise<Array<{ id: string; quota: string; quotaName: string; requested: number; state: 'open' | 'approved' | 'denied' | 'cancelled'; status: string; created?: string; updated?: string }> | null> {
     try {
       const sq = new AWS.ServiceQuotas(this.clientConfig(region));
       // All pages (oldest requests can fill the first page and hide new ones).
@@ -1432,9 +1438,21 @@ export class AWSProvider extends CloudProvider {
         NextToken = r.NextToken;
         if (!NextToken) break;
       }
-      return all
-        .filter((q) => q.Status === 'PENDING' || q.Status === 'CASE_OPENED')
-        .map((q) => ({ quota: String(q.QuotaCode), requested: Number(q.DesiredValue) || 0, status: q.Status === 'CASE_OPENED' ? 'support case open' : 'pending', created: q.Created ? new Date(q.Created).toISOString() : undefined }));
+      const STATE: Record<string, 'open' | 'approved' | 'denied' | 'cancelled'> = {
+        PENDING: 'open', CASE_OPENED: 'open', APPROVED: 'approved', CASE_CLOSED: 'approved',
+        DENIED: 'denied', NOT_APPROVED: 'denied', INVALID_REQUEST: 'denied',
+      };
+      const WORDS: Record<string, string> = {
+        PENDING: 'pending', CASE_OPENED: 'support case open', APPROVED: 'approved', CASE_CLOSED: 'support case closed',
+        DENIED: 'denied', NOT_APPROVED: 'not approved', INVALID_REQUEST: 'invalid request',
+      };
+      return all.map((q) => ({
+        id: String(q.Id || ''), quota: String(q.QuotaCode), quotaName: String(q.QuotaName || q.QuotaCode),
+        requested: Number(q.DesiredValue) || 0,
+        state: STATE[String(q.Status)] || 'open', status: WORDS[String(q.Status)] || String(q.Status || '').toLowerCase(),
+        created: q.Created ? new Date(q.Created).toISOString() : undefined,
+        updated: q.LastUpdated ? new Date(q.LastUpdated).toISOString() : undefined,
+      }));
     } catch {
       return null;
     }

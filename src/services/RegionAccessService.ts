@@ -731,3 +731,80 @@ export function readRegionCheck(userId: string, id: string, after: number) {
   if (!c || c.userId !== userId) return null;
   return { done: c.done, lines: c.lines.filter((l) => l.i > after), result: c.done ? c.result : undefined, error: c.error };
 }
+
+// ---------------------------------------------------------------------------
+// Quota request history (Quota request status page): every request, any outcome
+// ---------------------------------------------------------------------------
+export type RequestState = 'open' | 'approved' | 'partial' | 'denied' | 'cancelled';
+export interface QuotaRequestRecord {
+  id: string;
+  region: string;          // '' = project-wide (Google "GPUs (all regions)")
+  key: string;             // the quota key the Regions grid uses (metric / quota code / family)
+  label: string;
+  requested: number;
+  granted: number | null;  // Google only
+  state: RequestState;
+  status: string;          // the cloud's own words
+  created?: string;
+  updated?: string;
+}
+
+const AWS_QUOTA_LABEL: Record<string, string> = {
+  [AWS_ON_DEMAND]: 'On-demand G and VT vCPUs', [AWS_SPOT]: 'Spot G and VT vCPUs',
+};
+
+/** Every quota request on one cloud. `readable: false` = the key can't read them (note says why). */
+export async function getQuotaRequestHistory(userId: string, cloud: ProviderName): Promise<{ provider: ProviderName; readable: boolean; note?: string; requests: QuotaRequestRecord[]; checkedAt: string }> {
+  const checkedAt = new Date().toISOString();
+  if (cloud === 'oracle') {
+    return { provider: cloud, readable: false, requests: [], checkedAt, note: 'Oracle limit increases are support requests, which the API doesn’t list — see Help → Support requests in the Oracle console.' };
+  }
+  const provider: any = await providerFor(userId, cloud);
+  const regions = CATALOGS[cloud].regions.map((r) => r.id);
+
+  if (cloud === 'gcp') {
+    const prefs: any[] | null = await provider.getQuotaRequests().catch(() => null);
+    if (!prefs) return { provider: cloud, readable: false, requests: [], checkedAt, note: 'Couldn’t read quota requests: the service account needs the Cloud Quotas API switched on and the “Cloud Quotas Viewer” role.' };
+    const label = (m: string) => (m === 'GPUS_ALL_REGIONS' ? 'GPUs (all regions)'
+      : /^NVIDIA_|^PREEMPTIBLE_NVIDIA_|^GPU_FAMILY:/.test(m) ? `${m.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}${gpuOfMetric(m)}${m.includes('_VWS_') ? ' vWS (big screen)' : ''} GPUs`
+      : m.replace(/_/g, ' ').toLowerCase());
+    return {
+      provider: cloud, readable: true, checkedAt,
+      requests: prefs.map((p) => {
+        const state: RequestState = p.reconciling ? 'open'
+          : p.granted != null && p.granted >= p.requested ? 'approved'
+          : /denied|reject|not approved|unable to approve/i.test(p.status) ? 'denied'
+          : p.granted != null && p.granted > 0 ? 'partial'
+          : 'open';
+        return { id: p.id, region: p.region, key: p.metric, label: label(p.metric), requested: p.requested, granted: p.granted, state, status: p.status, created: p.created, updated: p.updated };
+      }),
+    };
+  }
+
+  // AWS / Azure: requests are per region.
+  let skip = new Set<string>();
+  if (cloud === 'aws') {
+    const optIn: Record<string, string> = await provider.getRegionOptIn().catch(() => ({}));
+    skip = new Set(Object.entries(optIn).filter(([, v]) => v === 'not-opted-in').map(([k]) => k));
+  }
+  let unreadable = 0;
+  const lists = await mapLimit(regions.filter((r) => !skip.has(r)), 6, async (region) => {
+    const list: any[] | null = await provider.getQuotaRequestHistory(region).catch(() => null);
+    if (!list) { unreadable++; return []; }
+    return list
+      .filter((q) => cloud !== 'aws' || q.quota === AWS_ON_DEMAND || q.quota === AWS_SPOT || /G and VT|GPU/i.test(q.quotaName))
+      .map((q): QuotaRequestRecord => ({
+        id: q.id, region, key: q.quota, label: AWS_QUOTA_LABEL[q.quota] || q.quotaName,
+        requested: q.requested, granted: null, state: q.state, status: q.status, created: q.created, updated: q.updated,
+      }));
+  });
+  const requests = lists.flat();
+  const all = regions.length - skip.size;
+  const notes = [
+    unreadable >= all ? (cloud === 'aws' ? 'Couldn’t read quota requests (the key needs “ServiceQuotasReadOnlyAccess”).' : 'Couldn’t read quota requests (needs the Quota API: Reader on the subscription).')
+      : unreadable ? `Couldn’t read requests in ${unreadable} of ${all} regions.` : '',
+    cloud === 'azure' ? 'Requests made through a support ticket don’t show here — check Help + support → All support requests.' : '',
+    skip.size ? `${skip.size} opt-in region${skip.size === 1 ? '' : 's'} not switched on (no requests possible there).` : '',
+  ].filter(Boolean);
+  return { provider: cloud, readable: unreadable < all, checkedAt, requests, ...(notes.length ? { note: notes.join(' ') } : {}) };
+}

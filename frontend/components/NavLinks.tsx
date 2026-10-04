@@ -27,6 +27,7 @@ const LINKS = [
   { href: '/performance', label: 'Performance' },
   { href: '/recommendations', label: 'Recon' },
   { href: '/regions', label: 'Regions' },
+  { href: '/quotas', label: 'Quotas' },
   { href: '/costs', label: 'Costs' },
   { href: '/map', label: 'Map' },
   { href: '/settings', label: 'Config' },

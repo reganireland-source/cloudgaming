@@ -22,7 +22,9 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 import { RecommendationEngine } from '../../services/RecommendationEngine';
-import { getRegionAccess, startRegionCheck, readRegionCheck } from '../../services/RegionAccessService';
+import { getRegionAccess, startRegionCheck, readRegionCheck, getQuotaRequestHistory } from '../../services/RegionAccessService';
+import { isProviderName } from '../../providers/registry';
+import { toFriendlyError } from '../../providers/errors';
 
 const router = Router();
 
@@ -76,6 +78,23 @@ router.get('/access', async (req: Request, res: Response) => {
  * GET  /api/regions/access/check/:id?after=<line> → { done, lines, result? }
  * The same check with a live log of every cloud API call (Regions page).
  */
+/**
+ * GET /api/regions/quota-requests?provider=gcp|aws|azure|oracle
+ * Every quota increase request on that cloud, any outcome (open / approved /
+ * partly granted / denied), for the Quota request status page. Read-only.
+ */
+router.get('/quota-requests', async (req: Request, res: Response) => {
+  const provider = String(req.query.provider || '');
+  if (!isProviderName(provider)) return res.status(400).json({ error: 'Pick a cloud: gcp, aws, azure or oracle.' });
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getQuotaRequestHistory(req.userId!, provider));
+  } catch (error) {
+    console.error('Quota requests error:', error);
+    res.status(500).json({ error: toFriendlyError(error, provider).title });
+  }
+});
+
 router.post('/access/check', (req: Request, res: Response) => {
   res.json({ checkId: startRegionCheck(req.userId!, req.body?.refresh === true) });
 });

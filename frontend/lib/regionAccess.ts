@@ -116,3 +116,13 @@ export async function runRegionCheck(refresh: boolean, onLines: (lines: CheckLin
     await new Promise((res) => setTimeout(res, 350));
   }
 }
+
+/** Every quota request on one cloud, any outcome (GET /api/regions/quota-requests). */
+export type RequestState = 'open' | 'approved' | 'partial' | 'denied' | 'cancelled';
+export interface QuotaRequestRecord {
+  id: string; region: string; key: string; label: string; requested: number; granted: number | null;
+  state: RequestState; status: string; created?: string; updated?: string;
+}
+export interface QuotaRequestHistory { provider: string; readable: boolean; note?: string; requests: QuotaRequestRecord[]; checkedAt: string }
+export const fetchQuotaRequests = (provider: string) =>
+  apiFetch<QuotaRequestHistory>(`/regions/quota-requests?provider=${encodeURIComponent(provider)}`);
