@@ -534,7 +534,10 @@ export class GCPProvider extends CloudProvider {
     const [lro] = await this.instances.setScheduling({
       project: this.projectId, zone, instance: name,
       schedulingResource: spot
-        ? { onHostMaintenance: 'TERMINATE', automaticRestart: false, provisioningModel: 'SPOT', instanceTerminationAction: 'STOP' } // no 'preemptible' here: false + SPOT is rejected as contradictory (as at launch, leave it unset)
+        // Spot VMs are recorded as preemptible: true + provisioningModel SPOT. It must be set
+        // explicitly: a machine that was on-demand keeps preemptible: false otherwise, and
+        // Google rejects "preemptible=false and provisioning_model=SPOT is contradicting".
+        ? { onHostMaintenance: 'TERMINATE', automaticRestart: false, provisioningModel: 'SPOT', instanceTerminationAction: 'STOP', preemptible: true }
         : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD', preemptible: false },
     } as any);
     await this.waitZoneOp(lro, zone);
