@@ -638,7 +638,7 @@ toggle_hud=Shift_R+F12
 output_folder=/cloudy/fps
 autostart_log=1
 log_interval=1000
-blacklist=steam,steamwebhelper,lutris,heroic,google-chrome,chrome,Discord,discord,firefox,xfdashboard,kasmxproxy,Xkasmvnc,Battle.net.exe,Battle.net Launcher.exe,EpicGamesLauncher.exe
+blacklist=sunshine,Xorg,steam,steamwebhelper,lutris,heroic,google-chrome,chrome,Discord,discord,firefox,xfdashboard,kasmxproxy,Xkasmvnc,Battle.net.exe,Battle.net Launcher.exe,EpicGamesLauncher.exe
 MANGOHUD
 
 cat > "$SUN_DIR/project/Dockerfile" <<DOCKERFILE
