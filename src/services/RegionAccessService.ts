@@ -290,10 +290,16 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       // (spot: the PREEMPTIBLE_ one; big screen: the _VWS_ one), and the
       // project-wide "GPUs (all regions)" must have room too.
       const globalFree = globalLimit - globalUsage;
-      type Sh = { gpuModel: string; gpuQuotaMetric: string; spotQuotaMetric?: string; vwsQuotaMetric?: string };
+      type Sh = { gpuModel: string; gpuQuotaMetric: string; spotQuotaMetric?: string; vwsQuotaMetric?: string; vwsAlsoNeedsBase?: boolean };
       const metricFor = (s: Sh, m: RunMode): string | null =>
         isBigMode(m) ? (noBig.includes(s.gpuModel) ? null : (isSpotMode(m) ? 'PREEMPTIBLE_' : '') + vwsMetricOf(s))
         : isSpotMode(m) ? spotMetricOf(s) : s.gpuQuotaMetric;
+      // Every quota a launch in this mode must pass (G4 big screen: the vWS one AND the normal/spot one).
+      const metricsFor = (s: Sh, m: RunMode): string[] => {
+        const k = metricFor(s, m);
+        if (!k) return [];
+        return isBigMode(m) && s.vwsAlsoNeedsBase ? [isSpotMode(m) ? spotMetricOf(s) : s.gpuQuotaMetric, k] : [k];
+      };
       const gcpLabel = (metric: string) => {
         if (metric === 'GPUS_ALL_REGIONS') return 'GPUs (all regions)';
         return `${metric.startsWith('PREEMPTIBLE_') ? 'Spot ' : ''}${gpuOfMetric(metric)}${metric.includes('_VWS_') ? ' vWS (big screen)' : ''} GPUs`;
@@ -329,8 +335,14 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         return p?.id ? `gcloud beta quotas preferences update ${p.id} ${common}` : `gcloud beta quotas preferences create ${common}`;
       };
       const gcpCell = (s: Sh, m: RunMode): RunCell => {
-        const k = metricFor(s, m);
-        if (!k) return na(`Big screen isn’t offered on the ${s.gpuModel}`);
+        const keys = metricsFor(s, m);
+        if (!keys.length) return na(`Big screen isn’t offered on the ${s.gpuModel}`);
+        const cells = keys.map((k) => oneCell(k));
+        const bad = cells.find((c) => c.ok === false) || cells.find((c) => c.ok === null);
+        const uses = uniq([...keys, 'GPUS_ALL_REGIONS']);
+        return bad ? { ...bad, uses } : { ok: true, why: cells.map((c) => c.why).join(' + '), uses };
+      };
+      const oneCell = (k: string): RunCell => {
         const l = line(k);
         const free = l.limit - l.used;
         const uses = [k, 'GPUS_ALL_REGIONS'];
@@ -343,7 +355,7 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         if (free >= 1) return { ok: true, why: `${gcpLabel(k)}: ${free} free`, uses };
         return { ok: false, inUse: true, why: `${gcpLabel(k)}: all ${l.limit} in use by your running machine${l.used === 1 ? '' : 's'}`, uses };
       };
-      const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.map((m) => metricFor(s, m)).filter((k): k is string => !!k))]);
+      const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.flatMap((m) => metricsFor(s, m)))]);
       const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), (g) => !noBig.includes(g), gcpCell,
         usedKeys.map((k) => {
           const l = k === 'GPUS_ALL_REGIONS' ? { limit: globalLimit, used: globalUsage } : line(k);

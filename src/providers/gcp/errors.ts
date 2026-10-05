@@ -117,7 +117,7 @@ export const GCP_RULES: Rule[] = [
     build: (_raw, m) => ({
       code: 'GPU_QUOTA_REGION',
       title: `No RTX PRO 6000 quota${m[1] ? ` in ${m[1]}` : ''}`,
-      explanation: 'G4 machines use the "GPUs per GPU family" quota (gpu_family NVIDIA_RTX_PRO_6000), per region. Spot G4 uses "Preemptible NVIDIA RTX PRO 6000 GPUs" instead.',
+      explanation: 'G4 machines use the "GPUs per GPU family" quota (gpu_family NVIDIA_RTX_PRO_6000), per region — big screen ones too (they need it as well as the vWS quota). Spot G4 uses "Preemptible NVIDIA RTX PRO 6000 GPUs" instead, so if that one is granted, tick Spot and launch again.',
       fixes: [
         'Click the button below, filter "GPUs per GPU family", pick the row for NVIDIA_RTX_PRO_6000 in ' + (m[1] || 'your region') + ', click "Edit", request 1 and submit.',
         'The Regions page has a ready-to-paste gcloud command for it.',

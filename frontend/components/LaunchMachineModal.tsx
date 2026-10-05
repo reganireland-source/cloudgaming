@@ -25,7 +25,7 @@ import FriendlyErrorCard from './FriendlyErrorCard';
 import ThemedSelect from './ThemedSelect';
 import { defaultNickname, NICKNAME_RE } from '@/lib/nickname';
 import { byDistance, useMyPlace } from '@/lib/myPlace';
-import { ACCESS_STYLE, fetchRegionAccess, indexAccess, statusFor, type RegionAccess } from '@/lib/regionAccess';
+import { ACCESS_STYLE, RUN_MODES, fetchRegionAccess, indexAccess, statusFor, type RegionAccess, type RunMode } from '@/lib/regionAccess';
 
 interface Region { id: string; name: string; gpus: string[]; egressPerGb: number; lat?: number; lng?: number }
 interface Shape {
@@ -347,6 +347,27 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                       </span>
                     </label>
                   )}
+
+                  {/* This exact combination (tier × spot × big screen) against the region's quota. */}
+                  {(() => {
+                    const a = access[`${provider}:${region}`];
+                    if (!a?.run || !shape) return null;
+                    const row = a.run.find((r) => r.shape === `${shape.gpuModel} · ${shape.vcpus} vCPU`) || a.run.find((r) => r.shape.startsWith(`${shape.gpuModel} ·`));
+                    if (!row) return null;
+                    const mode: RunMode = (bigScreen && bigOk) ? (spot && current?.supportsSpot ? 'bigSpot' : 'big') : (spot && current?.supportsSpot ? 'spot' : 'normal');
+                    const cell = row.cells[mode];
+                    if (!cell || cell.na || cell.ok !== false) return null;
+                    const label = RUN_MODES.find((m) => m.id === mode)!.label.toLowerCase();
+                    const waiting = (cell.uses || []).some((k) => a.quotaDetail?.find((q) => q.key === k)?.pending?.length);
+                    const works = RUN_MODES.filter((m) => row.cells[m.id]?.ok === true).map((m) => m.label.toLowerCase());
+                    return (
+                      <div className="rounded border border-neon-amber/50 bg-neon-amber/[0.05] p-3 text-xs text-slate-300 space-y-1">
+                        <p className="text-neon-amber">▲ {row.label} {label} will probably fail here: {cell.why}{waiting ? ' (a request is waiting on the cloud)' : ''}.</p>
+                        <p>{works.length ? <>What your quota allows for {row.label} in this region: <strong className="text-slate-100">{works.join(', ')}</strong> — change the options above.</> : <>No {row.label} option has quota in this region yet.</>}{' '}
+                          <Link href="/regions" className="text-neon-cyan hover:underline whitespace-nowrap">Quota details</Link></p>
+                      </div>
+                    );
+                  })()}
 
                   </div>
                   <div className="space-y-4 sm:space-y-5">
