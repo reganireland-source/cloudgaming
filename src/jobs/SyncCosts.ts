@@ -34,84 +34,69 @@ import { CostService } from '../services/CostService';
  * costs for each pair. One pair failing doesn't stop the others (each has
  * its own try/catch).
  */
-export async function syncCostsJob() {
-  console.log('[Job] Starting hourly cost sync...');
-
-  try {
-    // Get all active machines
-    const machinesResult = await query(
-      `SELECT DISTINCT user_id, provider FROM machines WHERE status IN ('running', 'stopped', 'shelved')`
-    );
-
-    // A Map is a key -> value collection. Only the KEYS matter here (a
-    // de-duplicated set of "userId:provider" strings); the empty-array values
-    // are unused. (SELECT DISTINCT has already removed duplicates anyway.)
-    const activeProviders = new Map<string, string[]>();
-
-    // Group users by provider
-    for (const row of machinesResult.rows) {
-      const key = `${row.user_id}:${row.provider}`;
-      if (!activeProviders.has(key)) {
-        activeProviders.set(key, []);
-      }
-    }
-
-    // Sync costs for each user-provider combination.
-    // `[key, _]` unpacks each Map entry; `_` is a conventional name for a
-    // value we deliberately ignore. key.split(':') turns "abc:aws" back into
-    // ["abc", "aws"].
-    for (const [key, _] of activeProviders) {
-      const [userId, provider] = key.split(':');
-
-      try {
-        await syncCostsForUserProvider(userId, provider);
-      } catch (error) {
-        console.error(`Failed to sync costs for ${userId}/${provider}:`, error);
-      }
-    }
-
-    console.log('[Job] Cost sync completed');
-  } catch (error) {
-    console.error('[Job] Cost sync failed:', error);
-  }
-}
+/** Public IPv4 address, $/hour while the machine runs (AWS, Google, Azure charge for it; Oracle doesn't). */
+const PUBLIC_IP_PER_HOUR: Record<string, number> = { aws: 0.005, gcp: 0.005, azure: 0.004, oracle: 0 };
+/** States in which the cloud bills the machine's compute (it exists and is on, or booting/shutting down). */
+const COMPUTE_STATES = new Set(['running', 'starting', 'stopping', 'creating', 'restoring']);
+/** States in which its disk exists and is billed. */
+const DISK_STATES = new Set(['running', 'starting', 'stopping', 'creating', 'restoring', 'stopped']);
 
 /**
- * Record ESTIMATED costs for one user's running machines on one cloud, for
- * the last hour. Not exported — only used by syncCostsJob above.
- *
- * Real spend can only be read from each cloud's billing system (AWS Cost
- * Explorer, a GCP BigQuery billing export...), which isn't connected yet. So
- * instead of the old random numbers, we record honest estimates:
- *   compute = the machine's estimated $/hour (from the launch catalog)
- *   storage = its disk size × the catalog's $/GB/month ÷ 730 hours
- *   egress  = 0 (we don't yet know how many hours were actually streamed)
+ * Background job (every 5 minutes): bring each machine's ESTIMATED cost up
+ * to now. Replaces the old hourly snapshot, which only counted machines that
+ * happened to be running at :00 — a 40-minute session between two hours,
+ * the setup time and starting/stopping were never counted. For the time
+ * since the machine's last accrual (capped at 6 h, e.g. after server downtime):
+ *   compute = its $/hour × hours in a billed state (+ public IPv4 address)
+ *   disk    = disk GB × $/GB-month ÷ 730 per hour while it exists
+ *             (shelved: the snapshot's stored GB × snapshot price)
+ *   egress  = data it actually sent (telemetry "network out") × the region's
+ *             $/GB — that's mostly the game stream
+ * Still list prices, so still an estimate: no free tiers, credits, taxes or
+ * sustained-use discounts.
  */
-async function syncCostsForUserProvider(userId: string, provider: string) {
-  if (!isProviderName(provider)) return;
-  const catalog = CATALOGS[provider];
-
-  const machinesResult = await query(
-    // Stopped machines too: their disk is still billed. Shelved machines:
-    // their snapshot (actual stored GB when known, else the disk size).
-    `SELECT m.id, m.status, m.cost_per_hour, m.disk_size_gb, s.stored_gb FROM machines m
-     LEFT JOIN snapshots s ON s.id = m.snapshot_id
-     WHERE m.user_id = $1 AND m.provider = $2 AND m.status IN ('running', 'stopped', 'shelved')`,
-    [userId, provider]
-  );
-
-  for (const machine of machinesResult.rows) {
-    const diskGb = Number(machine.disk_size_gb) || catalog.defaultDiskGb;
-    const monthly = machine.status === 'shelved'
-      ? (Number(machine.stored_gb) || diskGb) * catalog.snapshotPerGbMonth
-      : diskGb * catalog.diskPerGbMonth;
-    await CostService.recordCosts(userId, {
-      machineId: machine.id,
-      provider,
-      computeCost: machine.status === 'running' ? Number(machine.cost_per_hour) || 0 : 0,
-      egressCost: 0,
-      storageCost: monthly / 730,
-    });
+export async function syncCostsJob() {
+  try {
+    const rows = (await query(
+      `SELECT m.id, m.user_id, m.provider, m.region, m.status, m.cost_per_hour, m.disk_size_gb, m.cost_accrued_at, s.stored_gb
+         FROM machines m LEFT JOIN snapshots s ON s.id = m.snapshot_id
+        WHERE m.status NOT IN ('terminated', 'deleted', 'failed', 'missing')`,
+    )).rows;
+    const now = new Date();
+    for (const m of rows) {
+      try {
+        const provider = String(m.provider);
+        if (!isProviderName(provider)) continue;
+        const catalog = CATALOGS[provider];
+        const since = m.cost_accrued_at ? new Date(m.cost_accrued_at) : now;
+        const hours = Math.min(6, Math.max(0, (now.getTime() - since.getTime()) / 3600_000));
+        await query('UPDATE machines SET cost_accrued_at = $2 WHERE id = $1', [m.id, now]);
+        if (hours <= 0) continue;
+        const diskGb = Number(m.disk_size_gb) || catalog.defaultDiskGb;
+        const storage = m.status === 'shelved'
+          ? (Number(m.stored_gb) || diskGb) * catalog.snapshotPerGbMonth * hours / 730
+          : DISK_STATES.has(m.status) ? diskGb * catalog.diskPerGbMonth * hours / 730 : 0;
+        const compute = COMPUTE_STATES.has(m.status)
+          ? ((Number(m.cost_per_hour) || 0) + (PUBLIC_IP_PER_HOUR[m.provider] ?? 0)) * hours : 0;
+        // Data sent: each telemetry sample is 15 s of "network out" (Mbit/s).
+        let egress = 0;
+        if (COMPUTE_STATES.has(m.status)) {
+          const r = await query(
+            `SELECT COALESCE(SUM((data->>'no')::float), 0) AS mbit FROM machine_telemetry WHERE machine_id = $1 AND t > $2 AND t <= $3`,
+            [m.id, since, now]);
+          const gb = (Number(r.rows[0]?.mbit) || 0) * 15 / 8 / 1000;
+          const perGb = catalog.regions.find((x: { id: string }) => x.id === m.region)?.egressPerGb ?? 0.1;
+          egress = gb * perGb;
+        }
+        if (compute + storage + egress > 0) {
+          await CostService.recordCosts(m.user_id, { machineId: m.id, provider: m.provider, computeCost: compute, egressCost: egress, storageCost: storage });
+        }
+      } catch (error) {
+        console.error(`[Job] Cost accrual failed for machine ${m.id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('[Job] Cost accrual failed:', error);
   }
 }
 

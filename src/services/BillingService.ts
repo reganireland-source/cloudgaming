@@ -65,6 +65,11 @@ async function refreshCloud(userId: string, provider: string, monthStart: string
     if (typeof cloud.getBillingActuals !== 'function') throw new FriendlyCloudError({ code: 'BILLING_UNSUPPORTED', title: 'Not supported for this cloud yet', explanation: '', fixes: [] });
     const settings = await getBillingSettings(userId, provider);
     const actual = await cloud.getBillingActuals(monthStart, tomorrow, settings);
+    // AWS bills USD 0.01 per Cost Explorer request, and this fetch makes two
+    // (whole account + this app's tag): part of what AWS charges, so count it.
+    if (provider === 'aws') {
+      await query(`INSERT INTO costs (user_id, machine_id, provider, compute_cost, egress_cost, storage_cost, date) VALUES ($1, NULL, 'aws', 0.02, 0, 0, CURRENT_DATE)`, [userId]).catch(() => undefined);
+    }
     const accountByDate = new Map((actual.accountDaily || []).map((d: any) => [d.date, d.amount]));
     const dates = new Set<string>([...actual.daily.map((d: any) => d.date), ...accountByDate.keys()] as string[]);
     for (const date of dates) {

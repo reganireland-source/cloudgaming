@@ -52,8 +52,9 @@ import { collectTelemetryJob } from '../services/TelemetryService';
 export function initializeJobs() {
   console.log('Initializing background jobs...');
 
-  // Record each machine's estimated cost every hour (compute + disk)
-  cron.schedule('0 * * * *', () => {
+  // Every 5 minutes: bring each machine's estimated cost up to now (compute, disk,
+  // public IP, streaming traffic from telemetry) — see syncCostsJob.
+  cron.schedule('*/5 * * * *', () => {
     syncCostsJob().catch(err => console.error('Sync costs job error:', err));
   });
 
