@@ -81,7 +81,8 @@ export function alertsFor(s: TelemetrySample | null, prev?: TelemetrySample | nu
   if (down.length) a.push({ level: 'warning', key: 'containers', text: `Not running: ${down.join(' · ')}` });
   // Health checks fail while the container is still starting: ignore the first 10 min after boot.
   if ((s.up ?? 0) > 600 && s.k?.some((k) => /unhealthy/i.test(k))) {
-    const why = s.sn?.e?.length ? ` — Sunshine says: ${s.sn.e[s.sn.e.length - 1]}` : '';
+    const why = s.sn?.e?.length ? ` — Sunshine says: ${s.sn.e[s.sn.e.length - 1]}`
+      : s.sn?.l?.length ? ` — Sunshine's last log line: ${s.sn.l[s.sn.l.length - 1]}` : '';
     const loop = (s.sn?.x ?? 0) > 1 ? ` (Sunshine has restarted ${s.sn!.x} times)` : '';
     a.push({ level: 'warning', key: 'unhealthy', text: `The streaming container reports itself unhealthy: Sunshine isn’t answering${loop}${why}` });
   }

@@ -11,8 +11,11 @@
  *   g: u gpu%, um peak gpu%, mu memory-controller%, vu/vt VRAM MiB, tp °C,
  *      pw/pl power W, cl/cx clock MHz, es/ef/el encoder sessions/fps/latency
  *      µs, ps P-state, eu encoder% and th throttle reasons where supported.
- *   sn: every minute, Sunshine's last error lines ("e") and how many times it
- *      exited recently ("x") — why the streaming container is unhealthy.
+ *   sn: every minute, Sunshine's last error lines ("e"), how many times it
+ *      exited recently ("x") and its last log lines ("l": where a crash hit).
+ * GPU (nvidia-smi) is only queried every 15 s, and not at all while the
+ * streaming container is starting/unhealthy (stays clear of Sunshine's
+ * encoder setup).
  *   gf: the game's own frame rate from MangoHud's log (null when no game
  *      is running): n game, f average fps, lo lowest 1-s fps, ft worst
  *      frame time (ms) over the last 15 s.
@@ -79,8 +82,9 @@ def fps():
  f=[a for a,_ in v]
  return{'n':re.sub(r'_[0-9]{4}-[0-9-]{5}_[0-9-]{8}\.csv$','',fs[-1][1]),'f':n(sum(f)/len(f)),'lo':n(min(f)),'ft':n(max(a for _,a in v))}
 def sun():
- o=sh("(docker exec cloudy sh -c 'cat /home/cloudy/.config/sunshine/sunshine.log /cloudy/conf/sunshine/sunshine.log 2>/dev/null | tail -n 400'; docker logs --tail 400 cloudy) 2>&1")
- return{'e':[x[-160:]for x in re.findall(r'(?:Error|Fatal): [^\n]*',o)][-3:],'x':len(re.findall("exited: sunshine",o))}
+ lg=sh("docker exec cloudy sh -c 'cat /home/cloudy/.config/sunshine/sunshine.log /cloudy/conf/sunshine/sunshine.log 2>/dev/null | tail -n 400'")
+ o=lg+sh('docker logs --tail 400 cloudy 2>&1')
+ return{'e':[x[-160:]for x in re.findall(r'(?:Error|Fatal): [^\n]*',o)][-3:],'x':len(re.findall("exited: sunshine",o)),'l':[x[-160:]for x in lg.split('\n')if x.strip()][-3:]}
 def grow():
  for p in sh('ls /sys/class/block/*/device/rescan 2>/dev/null').split():
   try:open(p,'w').write('1')
@@ -89,10 +93,11 @@ def grow():
  if k and q and sp.run('growpart /dev/'+k+' '+q,shell=True,capture_output=True).returncode==0:sh('resize2fs '+s+' || xfs_growfs /')
 c0,n0,d0,t0,i,gm,cm=cpu(),net(),dio(),time.time(),0,0,0
 while 1:
- time.sleep(3);i+=1;g=gpu();c=cpu()
- if g and g.get('u')is not None:gm=max(gm,g['u'])
+ time.sleep(3);i+=1;c=cpu()
  cm=max(cm,100*(1-(c[1]-c0[1])/max(1,c[0]-c0[0])))if i%5 else cm
  if i%5:continue
+ g=gpu()if'healthy'==sh("docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' cloudy 2>/dev/null")or not sh('docker ps -q -f name=cloudy')else None
+ if g and g.get('u')is not None:gm=max(gm,g['u'])
  if i%100==5:
   grow();s=os.statvfs('/');out('CLOUDGAMING_DISK %d %d %d'%((s.f_blocks-s.f_bfree)*s.f_frsize>>20,s.f_blocks*s.f_frsize>>20,time.time()))
  if i%200==5:

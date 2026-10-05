@@ -20,7 +20,7 @@ type G = Record<string, number | string | null>;
 interface Sample {
   t: number; c?: number | null; cm?: number | null; l?: number | null; m?: [number, number]; sw?: number | null;
   d?: [number, number]; dr?: number | null; dw?: number | null; ni?: number | null; no?: number | null;
-  g?: G | null; gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null; sn?: { e: string[]; x: number } | null; ct?: number | null; up?: number | null; x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
+  g?: G | null; gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null; sn?: { e: string[]; x: number; l?: string[] } | null; ct?: number | null; up?: number | null; x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
 }
 interface Alert { level: 'critical' | 'warning' | 'info'; key: string; text: string }
 interface Telemetry { samples: Sample[]; latest: Sample | null; alerts: Alert[]; readAt: string | null; note?: string }
@@ -204,6 +204,7 @@ export default function TelemetryPanel({ machineId, status, compact = false }: {
             {!!s.f?.length && <p className="text-neon-amber">▲ failed services: {s.f.join(', ')}</p>}
             {(s.sn?.x ?? 0) > 1 && <p className="text-neon-amber">▲ Sunshine restarted {s.sn!.x} times recently</p>}
             {s.sn?.e?.map((e, i) => <p key={i} className="text-slate-500 break-words">Sunshine: {e}</p>)}
+            {(s.sn?.x ?? 0) > 1 && s.sn?.l?.map((l, i) => <p key={`l${i}`} className="text-slate-600 break-words font-mono text-[0.64rem]">{l}</p>)}
           </div>
           <div className="rounded border border-white/10 px-2.5 py-2 space-y-0.5">
             <p className="label mb-1">Errors since boot</p>
