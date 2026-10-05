@@ -51,13 +51,13 @@ export default function DiskMeter({ machineId, status, compact = false, perGbMon
   const ago = u?.at ? Math.max(0, Math.round((Date.now() - new Date(u.at).getTime()) / 60000)) : null;
 
   const bar = (
-    <div className="flex items-center gap-2 min-w-0" title={u ? `${u.usedGb} GB used of ${u.totalGb} GB${ago != null ? ` · reported ${ago} min ago` : ''}` : info.note}>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0" title={u ? `${u.usedGb} GB used of ${u.totalGb} GB${ago != null ? ` · reported ${ago} min ago` : ''}` : info.note}>
       <span className="text-[0.66rem] uppercase tracking-label text-slate-500 shrink-0">Disk</span>
-      <span className="relative h-1.5 flex-1 min-w-[3rem] rounded-full bg-white/10 overflow-hidden" role="meter" aria-label="Disk used"
+      <span className="relative h-1.5 flex-1 min-w-[4rem] max-w-[14rem] rounded-full bg-white/10 overflow-hidden" role="meter" aria-label="Disk used"
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={u?.percent ?? undefined}>
         {u && <span className={`absolute inset-y-0 left-0 rounded-full ${lv!.bar}`} style={{ width: `${Math.min(100, u.percent)}%` }} />}
       </span>
-      <span className={`text-[0.7rem] tabular-nums shrink-0 ${lv ? lv.text : 'text-slate-500'}`}>
+      <span className={`text-[0.7rem] tabular-nums whitespace-nowrap ${lv ? lv.text : 'text-slate-500'}`}>
         {u ? <>{u.usedGb.toFixed(0)}/{u.totalGb.toFixed(0)} GB · {u.percent}%{lv!.word ? ` · ${lv!.word}` : ''}</> : `${size} GB · usage not reported`}
       </span>
     </div>
@@ -70,8 +70,8 @@ export default function DiskMeter({ machineId, status, compact = false, perGbMon
   const blocked = !info.resizeWhileRunning && status !== 'stopped';
   return (
     <div className="space-y-1.5 max-w-xl">
-      <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0">{bar}</div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="flex-1 min-w-[12rem]">{bar}</div>
         {info.canResize && onResize && (
           <button type="button" disabled={busy} onClick={() => { setOpen((v) => !v); setTarget(0); }}
             className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40 shrink-0">＋ Enlarge</button>
