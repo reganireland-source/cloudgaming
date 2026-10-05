@@ -444,12 +444,21 @@ function QuotaList({ r }: { r: RegionAccess }) {
   const offered = (r.run || []).reduce((n, row) => n + RUN_MODES.filter((m) => !row.cells[m.id].na).length, 0);
   const ago = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
   const pending = (r.quotaDetail || []).filter((q) => q.pending?.length);
+  const denied = (r.quotaDetail || []).filter((q) => q.denied?.length);
   return (
     <div className="space-y-1.5">
       {pending.length > 0 && (
         <div className="rounded border border-neon-cyan/30 bg-neon-cyan/[0.05] p-2 text-xs text-slate-300 space-y-0.5">
           {pending.flatMap((q) => q.pending!.map((p, i) => (
-            <p key={`${q.key}-${i}`}>⏳ <span className="text-neon-cyan">Request open:</span> {q.label} → {p.requested} <span className="text-slate-500">({p.status}{p.created ? `, since ${ago(p.created)}` : ''})</span></p>
+            <p key={`${q.key}-${i}`}>⏳ <span className="text-neon-cyan">Waiting on Google:</span> {q.label} → {p.requested} <span className="text-slate-500">({p.status}{p.created ? `, since ${ago(p.created)}` : ''})</span></p>
+          )))}
+        </div>
+      )}
+      {denied.length > 0 && (
+        <div className="rounded border border-neon-pink/30 bg-neon-pink/[0.04] p-2 text-xs text-slate-300 space-y-0.5">
+          {denied.flatMap((q) => q.denied!.map((p, i) => (
+            <p key={`${q.key}-d${i}`}>✗ <span className="text-neon-pink">Denied:</span> {q.label} → {p.requested} <span className="text-slate-500">({p.status}{p.created ? `, ${ago(p.created)}` : ''})</span>
+              {' '}— you keep {q.limit}. Ask again with a fuller reason, or a smaller number.</p>
           )))}
         </div>
       )}
@@ -463,6 +472,7 @@ function QuotaList({ r }: { r: RegionAccess }) {
               <span className="text-slate-200">{q.label}</span>{' '}
               <span className={enough ? 'text-neon-lime' : 'text-neon-amber'}>{q.used == null ? `limit ${q.limit}` : `${q.used} used of ${q.limit}`} {q.unit}</span>
               {q.pending?.length ? <span className="ml-1 text-neon-cyan">⏳ {q.pending[0].requested} requested</span> : null}
+              {q.denied?.length ? <span className="ml-1 text-neon-pink">✗ {q.denied[0].requested} denied</span> : null}
               <span className="block text-slate-500">
                 unlocks: {q.unlocks.length && q.unlocks.length >= offered ? 'every machine on this cloud (a project-wide cap)' : q.unlocks.join(', ') || 'nothing we launch here'}
               </span>

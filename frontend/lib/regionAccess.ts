@@ -56,6 +56,8 @@ export interface RunRow { tier: 'good' | 'better' | 'best' | 'super'; label: str
 export interface PendingRequest { requested: number; status: string; created?: string }
 export interface QuotaDetail {
   key: string; label: string; used: number | null; limit: number; unit: 'GPUs' | 'vCPUs'; unlocks: string[]; pending?: PendingRequest[];
+  /** Requests the cloud refused (Google): not waiting any more. */
+  denied?: PendingRequest[];
   /** Not enough left for even the smallest machine that uses it. */
   short?: boolean;
   /** How to ask for more: console page + one-line command. */

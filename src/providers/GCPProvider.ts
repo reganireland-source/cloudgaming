@@ -55,6 +55,9 @@ import {
   findRegion,
   findShape,
   isG4,
+  quotaRequestOf,
+  spotMetricOf,
+  vwsMetricOf,
   type GcpShape,
 } from './gcp/catalog';
 
@@ -81,7 +84,7 @@ function isNotFound(error: any): boolean {
 const VWS_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4-vws', L4: 'nvidia-l4-vws', 'RTX PRO 6000': 'nvidia-rtx-pro-6000-vws' };
 
 /** Live GPU zones per project (see getGpuZones). */
-const GPU_FAMILY_CACHE = new Map<string, { at: number; value: Array<{ region: string; family: string; limit: number }> }>();
+const QUOTA_INFO_CACHE = new Map<string, { at: number; value: any[] | null }>();
 const GPU_ZONES_CACHE = new Map<string, { at: number; value: Record<string, Partial<Record<GpuModel, string[]>>> }>();
 
 export class GCPProvider extends CloudProvider {
@@ -995,7 +998,8 @@ export class GCPProvider extends CloudProvider {
             region: String(p.dimensions?.region || ''),
             requested, granted, reconciling: p.reconciling === true,
             status: p.reconciling ? 'being processed'
-              : p.quotaConfig?.stateDetail || (granted != null && granted > 0 ? `${granted} granted so far` : 'waiting for Google'),
+              : p.quotaConfig?.stateDetail || (granted != null && granted >= requested ? 'approved'
+                : granted != null && granted > 0 ? `${granted} of ${requested} granted so far` : 'waiting for Google'),
             created: p.createTime, updated: p.updateTime,
           });
         }
@@ -1008,31 +1012,50 @@ export class GCPProvider extends CloudProvider {
     }
   }
 
-  async getRegionQuotas(region: string = DEFAULT_REGION): Promise<Array<{ metric: string; limit: number; usage: number }>> {
+  /**
+   * A region's quotas (e.g. NVIDIA_T4_GPUS). The Compute API's region list
+   * leaves out newer GPU quotas — the big-screen vWS ones and the RTX PRO
+   * 6000 (per-family) — and a missing metric would read as "0". Every GPU
+   * quota our machines use that it doesn't list is filled in from the Cloud
+   * Quotas API (the limit Google actually enforces; it has no usage figure,
+   * so usage counts as 0 there).
+   */
+  async getRegionQuotas(region: string = DEFAULT_REGION): Promise<Array<{ metric: string; limit: number; usage: number; source?: 'cloudquotas' }>> {
     const [info] = await this.regions.get({ project: this.projectId, region });
-    const out = (info.quotas || []).map((q: any) => ({ metric: String(q.metric), limit: Number(q.limit) || 0, usage: Number(q.usage) || 0 }));
-    // Newer GPUs (G4's RTX PRO 6000) use the per-family quota
-    // GPUS-PER-GPU-FAMILY; if the region list doesn't carry it, read the
-    // limits from the Cloud Quotas API (usage unknown there → 0).
-    if (!out.some((q: { metric: string }) => q.metric.startsWith('GPU_FAMILY:'))) {
-      for (const f of (await this.getGpuFamilyLimits().catch(() => [])).filter((x) => x.region === region)) {
-        out.push({ metric: `GPU_FAMILY:${f.family}`, limit: f.limit, usage: 0 });
-      }
-    }
+    const out: Array<{ metric: string; limit: number; usage: number; source?: 'cloudquotas' }> =
+      (info.quotas || []).map((q: any) => ({ metric: String(q.metric), limit: Number(q.limit) || 0, usage: Number(q.usage) || 0 }));
+    const wanted = Array.from(new Set(GCP_SHAPES.flatMap((s) => [s.gpuQuotaMetric, spotMetricOf(s), vwsMetricOf(s), `PREEMPTIBLE_${vwsMetricOf(s)}`])));
+    const missing = wanted.filter((m) => !out.some((q) => q.metric === m));
+    await Promise.all(missing.map(async (metric) => {
+      const limit = await this.getCloudQuotaLimit(metric, region).catch(() => null);
+      if (limit != null) out.push({ metric, limit, usage: 0, source: 'cloudquotas' });
+    }));
     return out;
   }
 
-  /** GPUS-PER-GPU-FAMILY limits per region and family (Cloud Quotas API). Cached 10 min. */
-  private async getGpuFamilyLimits(): Promise<Array<{ region: string; family: string; limit: number }>> {
-    const hit = GPU_FAMILY_CACHE.get(this.projectId);
-    if (hit && Date.now() - hit.at < 600_000) return hit.value;
-    const jwt = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-    const res: any = await jwt.request({ url: `https://cloudquotas.googleapis.com/v1/projects/${this.projectId}/locations/global/services/compute.googleapis.com/quotaInfos/GPUS-PER-GPU-FAMILY-per-project-region` });
-    const value = (res.data?.dimensionsInfos || [])
-      .filter((d: any) => d.dimensions?.region && d.dimensions?.gpu_family)
-      .map((d: any) => ({ region: String(d.dimensions.region), family: String(d.dimensions.gpu_family), limit: Number(d.details?.value) || 0 }));
-    GPU_FAMILY_CACHE.set(this.projectId, { at: Date.now(), value });
-    return value;
+  /**
+   * One quota's enforced limit in a region, from the Cloud Quotas API
+   * (quotaInfos/<quota id>: a per-region value, else the default for all
+   * regions). null = not found / not readable. Cached 10 min per project.
+   */
+  private async getCloudQuotaLimit(metric: string, region: string): Promise<number | null> {
+    const { quotaId } = quotaRequestOf(metric, region);
+    const family = metric.startsWith('GPU_FAMILY:') ? metric.slice(11) : null;
+    const key = `${this.projectId}:${quotaId}`;
+    let hit = QUOTA_INFO_CACHE.get(key);
+    if (!hit || Date.now() - hit.at > 600_000) {
+      const jwt = new JWT({ email: this.clientEmail, key: this.privateKey, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const res: any = await jwt.request({ url: `https://cloudquotas.googleapis.com/v1/projects/${this.projectId}/locations/global/services/compute.googleapis.com/quotaInfos/${quotaId}` }).catch(() => null);
+      hit = { at: Date.now(), value: res?.data?.dimensionsInfos || null };
+      QUOTA_INFO_CACHE.set(key, hit);
+    }
+    const infos: any[] | null = hit.value;
+    if (!infos) return null;
+    const fits = (d: any) => (!family || d.dimensions?.gpu_family === family);
+    const exact = infos.find((d) => d.dimensions?.region === region && fits(d));
+    const fallback = infos.find((d) => !d.dimensions?.region && fits(d));
+    const pick = exact || fallback;
+    return pick ? Number(pick.details?.value) || 0 : null;
   }
 
   /** Does our own network ("cloudgaming-net") exist yet? (Created on first launch.) */

@@ -93,6 +93,8 @@ export interface RunCell {
 }
 export interface RunRow { tier: TierId; label: string; shape: string; cells: Record<RunMode, RunCell> }
 export interface PendingRequest { requested: number; status: string; created?: string }
+/** A quota request the cloud refused (Google). */
+export type DeniedRequest = PendingRequest;
 export interface QuotaDetail {
   key: string;
   label: string;
@@ -101,6 +103,7 @@ export interface QuotaDetail {
   unit: 'GPUs' | 'vCPUs';
   unlocks: string[];    // "Good · Normal", …
   pending?: PendingRequest[];
+  denied?: DeniedRequest[];
   /** Not enough left for even the smallest machine that uses it. */
   short?: boolean;
   /** How to ask for more: a console page and a one-line command (works in bash and PowerShell). */
@@ -299,10 +302,23 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
       const prefFor = (metric: string): any => (gcpPending || [])
         .filter((x: any) => x.metric === metric && (metric === 'GPUS_ALL_REGIONS' ? !x.region : x.region === region))
         .sort((a: any, b: any) => String(b.updated || b.created || '').localeCompare(String(a.updated || a.created || '')))[0] || null;
-      // Pending = asks for more than the quota is now (granted requests drop out).
+      // A request's state against the quota now: approved (the limit or
+      // Google's grant reached it) drops out; one Google refused is "denied",
+      // not waiting; anything else asking for more than the limit is open.
+      const DENIED = /denied|reject|not approved|unable to approve/i;
+      const requestState = (metric: string, limit: number): 'open' | 'denied' | null => {
+        const p = prefFor(metric);
+        if (!p || limit >= p.requested || (p.granted != null && p.granted >= p.requested)) return null;
+        if (p.reconciling) return 'open';
+        return DENIED.test(p.status) ? 'denied' : 'open';
+      };
       const pendingFor = (metric: string, limit: number) => {
         const p = prefFor(metric);
-        return p && (p.reconciling || p.requested > limit) ? [{ requested: p.requested, status: p.status, created: p.updated || p.created }] : [];
+        return requestState(metric, limit) === 'open' ? [{ requested: p.requested, status: p.status, created: p.updated || p.created }] : [];
+      };
+      const deniedFor = (metric: string, limit: number) => {
+        const p = prefFor(metric);
+        return requestState(metric, limit) === 'denied' ? [{ requested: p.requested, status: p.status, created: p.updated || p.created }] : [];
       };
       // One complete command: create a request, or change the one that already exists
       // ("create" fails with "Quota Preference ... already exist" if there is one).
@@ -343,7 +359,8 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
               ? `Asks for ${want} by updating your earlier request (${prefFor(k).requested}, ${prefFor(k).status}). Run in Cloud Shell (check the email is yours).`
               : `Asks for ${want}. Run in Cloud Shell (check the email is yours).`,
           } : undefined;
-          return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], short, ...(request ? { request } : {}), ...(pend.length ? { pending: pend } : {}) };
+          const den = deniedFor(k, l.limit);
+          return { key: k, label: gcpLabel(k), used: l.used, limit: l.limit, unit: 'GPUs' as const, unlocks: [], short, ...(request ? { request } : {}), ...(pend.length ? { pending: pend } : {}), ...(den.length ? { denied: den } : {}) };
         }));
       const extra = { ...detail, ...(gcpPending ? {} : { pendingNote: 'Couldn’t read open quota requests (needs the Cloud Quotas API and “Cloud Quotas Viewer” on the service account).' }) };
       const regional = soldMetrics.map(line).filter((l) => l.limit - l.used >= 1);
@@ -383,11 +400,13 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         ...(missingGpus.length ? { fix: (() => {
           const ms = missingGpus.map((g) => GCP_SHAPES.find((sh) => sh.gpuModel === g)!.gpuQuotaMetric);
           const asked = ms.filter((m) => pendingFor(m, line(m).limit).length);
+          const refused = ms.filter((m) => deniedFor(m, line(m).limit).length);
           const toAsk = ms.filter((m) => !asked.includes(m));
           return { steps: [
             `Only ${regional.map((l) => l.label.replace('NVIDIA ', '')).join(' and ')} can launch here.`,
             ...asked.map((m) => `${line(m).label}: ⏳ ${pendingFor(m, line(m).limit)[0].requested} requested (${pendingFor(m, line(m).limit)[0].status}) — nothing to do but wait.`),
-            ...toAsk.map((m) => `For ${gpuOfMetric(m)} machines, request "${line(m).label}" = 1 in ${region}${m.startsWith('GPU_FAMILY:') ? ' (listed as "GPUs per GPU family", gpu_family NVIDIA_RTX_PRO_6000)' : ''}.`),
+            ...refused.map((m) => `${line(m).label}: ✗ Google denied your request for ${deniedFor(m, line(m).limit)[0].requested}. Ask again with a fuller reason (e.g. "single personal cloud gaming VM, 1 GPU, a few hours a week") — a project with some billing history gets approved more easily — or try another region.`),
+            ...toAsk.filter((m) => !refused.includes(m)).map((m) => `For ${gpuOfMetric(m)} machines, request "${line(m).label}" = 1 in ${region}${m.startsWith('GPU_FAMILY:') ? ' (listed as "GPUs per GPU family", gpu_family NVIDIA_RTX_PRO_6000)' : ''}.`),
           ], consoleUrl: quotasUrl, consoleLabel: 'Request GPU quota', ...(toAsk.length ? { cli: toAsk.map((m) => requestCli(m, 1)).join('\n') } : {}) };
         })() } : {}) };
       })());
