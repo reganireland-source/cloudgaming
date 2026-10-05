@@ -1237,15 +1237,18 @@ for i in $(seq 1 120); do
   # Every minute, show what the container is doing (its newest log line) in
   # the app's progress panel, so a slow or stuck start isn't a black box.
   if [ $((i % 6)) -eq 0 ]; then
-    LAST=$(docker logs --tail 40 cloudy 2>&1 | tr -d '\r' | grep -v -i -E 'pass|secret|token|credential' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-160)
-    say "CLOUDGAMING_DETAIL $((i / 6)) min, container $HEALTH: $LAST"
+    LAST=$(docker logs --tail 40 cloudy 2>&1 | tr -d '\r' | grep -v -i -E 'pass|secret|token|credential' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
+    # Why the health check fails (its own output), when it says so.
+    WHY=$(docker inspect -f '{{if .State.Health}}{{range .State.Health.Log}}{{.Output}}{{end}}{{end}}' cloudy 2>/dev/null | tr -d '\r' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
+    say "CLOUDGAMING_DETAIL $((i / 6)) min, container $HEALTH: $LAST$([ -n "$WHY" ] && [ "$HEALTH" != "healthy" ] && echo " | health check: $WHY")"
   fi
   sleep 10
 done
 if [ "$HEALTH" != "healthy" ]; then
   docker logs --tail 40 cloudy 2>&1 | while read -r line; do say "  container: $line"; done
   LASTERR=$(docker logs --tail 200 cloudy 2>&1 | tr -d '\r' | grep -i -E 'error|fail|fatal|cannot|unable' | grep -v -i -E 'pass|secret|token|credential' | tail -1 | cut -c1-160)
-  fail 85 "Sunshine container is '$HEALTH' after 20 minutes. Last error: $LASTERR (full log: docker logs cloudy)"
+  WHY=$(docker inspect -f '{{if .State.Health}}{{range .State.Health.Log}}{{.Output}}{{end}}{{end}}' cloudy 2>/dev/null | tr -d '\r' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
+  fail 85 "Sunshine container is '$HEALTH' after 20 minutes. Health check: $WHY. Last error: $LASTERR (full log: docker logs cloudy)"
 fi
 
 # Browser play: pair Moonlight Web with Sunshine (no-op once paired).
