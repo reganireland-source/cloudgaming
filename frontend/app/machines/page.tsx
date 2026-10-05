@@ -44,6 +44,7 @@ import LaunchMachineModal from '@/components/LaunchMachineModal';
 import OperationConsole from '@/components/OperationConsole';
 import DiskMeter from '@/components/DiskMeter';
 import TelemetryPanel from '@/components/TelemetryPanel';
+import { byMachineOrder, isDeadStatus } from '@/lib/machineOrder';
 import FriendlyErrorCard from '@/components/FriendlyErrorCard';
 import MachineConnectionPanel, { type ConnectionInfo } from '@/components/MachineConnectionPanel';
 import ArchitectureDiagram from '@/components/ArchitectureDiagram';
@@ -707,10 +708,8 @@ function MachinesPageInner() {
   const running = (machines || []).filter((m) => m.status === 'running');
   // Status first, then newest first. A failed launch with an active
   // operation (e.g. being retried or deleted) stays with the live ones.
-  const RANK: Record<string, number> = { running: 0, creating: 1, starting: 1, stopping: 1, deleting: 1, shelving: 1, restoring: 1, stopped: 2, shelved: 3 };
-  const isDead = (m: Machine) => ['failed', 'missing'].includes(m.status) && !activeOps[m.id];
-  const byRank = (a: Machine, b: Machine) =>
-    (RANK[a.status] ?? 3) - (RANK[b.status] ?? 3) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  const isDead = (m: Machine) => isDeadStatus(m.status) && !activeOps[m.id];
+  const byRank = byMachineOrder;
   const sorted = {
     live: (machines || []).filter((m) => !isDead(m)).sort(byRank),
     failed: (machines || []).filter(isDead).sort(byRank),

@@ -22,6 +22,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/auth';
 import { useAuth } from '@/components/AuthProvider';
 import TelemetryPanel from '@/components/TelemetryPanel';
+import { byMachineOrder, isDeadStatus } from '@/lib/machineOrder';
 
 interface Machine {
   id: string; nickname?: string | null; provider: string; region: string; instance_type: string; status: string;
@@ -103,7 +104,10 @@ export default function PerformancePage() {
     );
   }
 
-  const running = machines?.filter((m) => m.status === 'running') || [];
+  // Same order as the Machines page; failed launches (never a real machine) are left out.
+  const shown = (machines || []).filter((m) => !isDeadStatus(m.status)).sort(byMachineOrder);
+  const hidden = (machines?.length || 0) - shown.length;
+  const running = shown.filter((m) => m.status === 'running');
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -119,18 +123,19 @@ export default function PerformancePage() {
 
       {!machines ? (
         <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; READING_MACHINES…</p>
-      ) : machines.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="rounded-lg border border-dashed border-white/15 p-6 text-sm text-slate-400">
           No machines yet. <Link href="/recommendations" className="text-neon-cyan hover:underline">Find the best region</Link> or <Link href="/machines" className="text-neon-cyan hover:underline">launch one</Link>.
         </div>
       ) : (
         <>
           <p className="text-xs text-slate-400 tabular-nums">
-            {machines.length} machine{machines.length === 1 ? '' : 's'} · {running.length} running · ≈USD {running.reduce((s, m) => s + (Number(m.cost_per_hour) || 0), 0).toFixed(2)}/hour right now
+            {shown.length} machine{shown.length === 1 ? '' : 's'} · {running.length} running · ≈USD {running.reduce((s, m) => s + (Number(m.cost_per_hour) || 0), 0).toFixed(2)}/hour right now
             {me && <> · pings estimated from {me.label}</>}
+            {hidden > 0 && <> · <Link href="/machines" className="text-slate-500 hover:text-neon-cyan">{hidden} failed launch{hidden === 1 ? '' : 'es'} not shown</Link></>}
           </p>
           <ul className="grid gap-3 grid-cols-[minmax(0,1fr)]">
-            {machines.map((m) => {
+            {shown.map((m) => {
               const r = regions[`${m.provider}:${m.region}`];
               const metric = metrics[m.id];
               return (

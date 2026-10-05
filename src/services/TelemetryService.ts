@@ -79,7 +79,8 @@ export function alertsFor(s: TelemetrySample | null, prev?: TelemetrySample | nu
   if (s.f?.length) a.push({ level: 'warning', key: 'failed', text: `Failed service${s.f.length === 1 ? '' : 's'}: ${s.f.join(', ')}` });
   const down = (s.k || []).filter((k) => !/:\s*Up\b/.test(k));
   if (down.length) a.push({ level: 'warning', key: 'containers', text: `Not running: ${down.join(' · ')}` });
-  if (s.k?.some((k) => /unhealthy/i.test(k))) a.push({ level: 'warning', key: 'unhealthy', text: 'The streaming container reports itself unhealthy' });
+  // Health checks fail while the container is still starting: ignore the first 10 min after boot.
+  if ((s.up ?? 0) > 600 && s.k?.some((k) => /unhealthy/i.test(k))) a.push({ level: 'warning', key: 'unhealthy', text: 'The streaming container reports itself unhealthy' });
   if (prev && s.up != null && prev.up != null && s.up < prev.up) a.push({ level: 'info', key: 'reboot', text: 'The machine restarted recently' });
   return a;
 }
