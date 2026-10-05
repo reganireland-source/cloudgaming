@@ -1053,7 +1053,9 @@ export class GCPProvider extends CloudProvider {
     if (!infos) return null;
     const fits = (d: any) => (!family || d.dimensions?.gpu_family === family);
     const exact = infos.find((d) => d.dimensions?.region === region && fits(d));
-    const fallback = infos.find((d) => !d.dimensions?.region && fits(d));
+    // The default entry (no region) only covers the regions it lists in applicableLocations.
+    const fallback = infos.find((d) => !d.dimensions?.region && fits(d)
+      && (!Array.isArray(d.applicableLocations) || d.applicableLocations.includes(region)));
     const pick = exact || fallback;
     return pick ? Number(pick.details?.value) || 0 : null;
   }
