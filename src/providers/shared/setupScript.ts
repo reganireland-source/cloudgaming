@@ -1240,7 +1240,8 @@ for i in $(seq 1 120); do
     LAST=$(docker logs --tail 40 cloudy 2>&1 | tr -d '\r' | grep -v -i -E 'pass|secret|token|credential' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
     # Why the health check fails (its own output), when it says so.
     WHY=$(docker inspect -f '{{if .State.Health}}{{range .State.Health.Log}}{{.Output}}{{end}}{{end}}' cloudy 2>/dev/null | tr -d '\r' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
-    say "CLOUDGAMING_DETAIL $((i / 6)) min, container $HEALTH: $LAST$([ -n "$WHY" ] && [ "$HEALTH" != "healthy" ] && echo " | health check: $WHY")"
+    SERR=$(docker exec cloudy sh -c 'cat /home/cloudy/.config/sunshine/sunshine.log /cloudy/conf/sunshine/sunshine.log 2>/dev/null' 2>/dev/null | grep -E '(Error|Fatal):' | tail -1 | cut -c1-140)
+    say "CLOUDGAMING_DETAIL $((i / 6)) min, container $HEALTH: $LAST$([ -n "$WHY" ] && [ "$HEALTH" != "healthy" ] && echo " | health check: $WHY")$([ -n "$SERR" ] && [ "$HEALTH" != "healthy" ] && echo " | Sunshine: $SERR")"
   fi
   sleep 10
 done
@@ -1327,6 +1328,8 @@ export interface TelemetrySample {
   g?: Record<string, number | string | null> | null; ct?: number | null; up?: number | null;
   /** The game's own frame rate (MangoHud log): game, avg fps, lowest 1-s fps, worst frame time ms. */
   gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null;
+  /** Once a minute: Sunshine's last error lines and recent exits (crash loop). */
+  sn?: { e: string[]; x: number } | null;
   x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
 }
 

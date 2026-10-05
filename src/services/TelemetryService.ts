@@ -80,7 +80,11 @@ export function alertsFor(s: TelemetrySample | null, prev?: TelemetrySample | nu
   const down = (s.k || []).filter((k) => !/:\s*Up\b/.test(k));
   if (down.length) a.push({ level: 'warning', key: 'containers', text: `Not running: ${down.join(' · ')}` });
   // Health checks fail while the container is still starting: ignore the first 10 min after boot.
-  if ((s.up ?? 0) > 600 && s.k?.some((k) => /unhealthy/i.test(k))) a.push({ level: 'warning', key: 'unhealthy', text: 'The streaming container reports itself unhealthy' });
+  if ((s.up ?? 0) > 600 && s.k?.some((k) => /unhealthy/i.test(k))) {
+    const why = s.sn?.e?.length ? ` — Sunshine says: ${s.sn.e[s.sn.e.length - 1]}` : '';
+    const loop = (s.sn?.x ?? 0) > 1 ? ` (Sunshine has restarted ${s.sn!.x} times)` : '';
+    a.push({ level: 'warning', key: 'unhealthy', text: `The streaming container reports itself unhealthy: Sunshine isn’t answering${loop}${why}` });
+  }
   if (prev && s.up != null && prev.up != null && s.up < prev.up) a.push({ level: 'info', key: 'reboot', text: 'The machine restarted recently' });
   return a;
 }
@@ -107,6 +111,11 @@ export async function live(userId: string, machine: any, minutes = 30): Promise<
   )).rows.map((r: any) => r.data as TelemetrySample);
   const latestRow = (await query('SELECT data FROM machine_telemetry WHERE machine_id = $1 ORDER BY t DESC LIMIT 2', [machine.id])).rows;
   const latest = (latestRow[0]?.data as TelemetrySample) || null;
+  // Sunshine's errors come once a minute: carry the newest report onto the latest sample.
+  if (latest && !latest.sn) {
+    const sn = (await query(`SELECT data->'sn' AS sn FROM machine_telemetry WHERE machine_id = $1 AND data ? 'sn' AND data->'sn' <> 'null'::jsonb ORDER BY t DESC LIMIT 1`, [machine.id])).rows[0]?.sn;
+    if (sn) latest.sn = sn;
+  }
   if (!latest && !note) {
     note = machine.status === 'running'
       ? 'No telemetry yet. Machines report every 15 seconds once their setup has started; machines launched before this feature need the newest on-machine script (Google: the “Update script” button next to Stop; other clouds: Shelve, then Restore).'
