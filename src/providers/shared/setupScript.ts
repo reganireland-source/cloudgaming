@@ -447,7 +447,12 @@ P_FN=$(echo "$RAW_BUS" | awk -F'[:.]' '{print $NF}')
 PCI_ID="$((16#$P_BUS))@$((16#$P_DOMAIN)):$((16#$P_DEV)):$((16#$P_FN))"
 HOST_DRIVER=$(cat /sys/module/nvidia/version)
 CONTAINER_DRIVER_TYPE=datacenter; SCREEN_MAX_W=2560; SCREEN_MAX_H=1600
+SUN_EXTRA=""
 if [ "$DISPLAY_DRIVER" = "grid" ]; then
+  # GRID drivers enable NvFBC, which Sunshine then picks for capture and
+  # crashes in ("Couldn't release NvFBC context from current thread", exit
+  # 139, restart loop). Use X11 capture, as on the datacenter driver.
+  SUN_EXTRA="capture = x11"
   # The container installs the driver's user-space part matching the host.
   # CloudyPad only downloads datacenter/display builds, so hand it the GRID
   # installer we already have, under the name and marker it looks for.
@@ -588,7 +593,7 @@ services:
       SUNSHINE_SERVER_NAME: "$SUN_NAME"
       SUNSHINE_WEB_USERNAME: "$SUN_USER"
       SUNSHINE_WEB_PASSWORD_BASE64: "$SUN_PASS_B64"
-      CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG: ""
+      CLOUDYPAD_SUNSHINE_ADDITIONAL_CONFIG: "$SUN_EXTRA"
       CLOUDYPAD_SUNSHINE_MAX_BITRATE: ""
       KASMVNC_PORT: "$KASMVNC_PORT"
     deploy:
