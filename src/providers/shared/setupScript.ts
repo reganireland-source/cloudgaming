@@ -558,6 +558,8 @@ services:
       - $SUN_DIR/conf/discord:/cloudy/conf/discord
       - $SUN_DIR/conf/lutris:/cloudy/conf/lutris
       - $SUN_DIR/home:/home/cloudy
+      - $SUN_DIR/project/mangohud.conf:/etc/mangohud.conf:ro
+      - $SUN_DIR/fps:/cloudy/fps
       - $SUN_DIR/project/sunshine.conf.template:/cloudy/conf/sunshine/sunshine.conf.template:ro
       - $SUN_DIR/tls:/cloudy/conf/tls:ro
     ports:
@@ -616,10 +618,10 @@ COMPOSE
 # number, small and translucent, top-right. Right Shift + F12 hides/shows it.
 # Separate from Moonlight's own stats overlay (which shows what arrives at
 # your device): this one is what the game renders on the machine.
-# (Game-fps logging was tried here — autostart_log into a shared folder —
-# and made Sunshine segfault (exit 139) in a restart loop, since MANGOHUD=1
-# applies to every process in the container. Reverted to this known-good
-# config; the agent's fps() simply reports nothing.)
+# It also logs the game's fps once a second (CSV in $SUN_DIR/fps, shared)
+# for the app's telemetry (the agent reads the newest log, deletes logs
+# older than 2 days). The file is mounted over the image's copy, so changing
+# it needs no image rebuild.
 cat > "$SUN_DIR/project/mangohud.conf" <<'MANGOHUD'
 fps_only
 cpu_stats=0
@@ -633,6 +635,9 @@ background_alpha=0.25
 alpha=0.85
 round_corners=4
 toggle_hud=Shift_R+F12
+output_folder=/cloudy/fps
+autostart_log=1
+log_interval=1000
 blacklist=sunshine,Xorg,steam,steamwebhelper,lutris,heroic,google-chrome,chrome,Discord,discord,firefox,xfdashboard,kasmxproxy,Xkasmvnc,Battle.net.exe,Battle.net Launcher.exe,EpicGamesLauncher.exe
 MANGOHUD
 
