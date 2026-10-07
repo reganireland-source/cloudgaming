@@ -903,6 +903,18 @@ export class GCPProvider extends CloudProvider {
 
   async restoreFromSnapshot(snapshotId: string, config: ProviderConfig, opts: RestoreOptions = {}): Promise<{ instanceId: string; ipAddress: string }> {
     await this.report('info', `Creating a new machine from snapshot ${snapshotId}…`);
+    // A snapshot stored outside the target region (older ones are multi-regional,
+    // e.g. "asia") is billed as a download for every disk made from it — once per
+    // zone tried. Say so up front.
+    try {
+      const [snap] = await this.snapshots.get({ project: this.projectId, snapshot: snapshotId });
+      const where: string[] = (snap.storageLocations || []).map(String);
+      if (where.length && !where.includes(config.region)) {
+        const gb = Number(snap.storageBytes) ? Number(snap.storageBytes) / 2 ** 30 : Number(snap.diskSizeGb) || 0;
+        await this.report('warn', `This snapshot is stored in "${where.join(', ')}", not ${config.region}: Google bills about USD ${(gb * 0.08).toFixed(2)} ` +
+          `to copy it in (≈ ${gb.toFixed(0)} GB × 0.08), again for each zone tried. Snapshots taken from now on stay in the machine's region and restore there for free.`);
+      }
+    } catch { /* informational only */ }
     // Google snapshots are global, so this works in any region of the project (a region
     // other than the snapshot's own is billed as data transfer, ~USD 0.08/GB).
     const { instanceId, ipAddress } = await this.createMachine(config, {
