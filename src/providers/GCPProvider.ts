@@ -868,7 +868,10 @@ export class GCPProvider extends CloudProvider {
       project: this.projectId,
       zone,
       disk: name,
-      snapshotResource: { name: snapshotName, labels: { app: 'cloudgaming-hub' } },
+      // Keep the snapshot in the disk's own region. Without this Google stores it
+      // multi-regionally and bills every GB as a "Multi-regional Snapshot upload"
+      // (~USD 0.08/GB, more than a month of storing it).
+      snapshotResource: { name: snapshotName, labels: { app: 'cloudgaming-hub' }, storageLocations: [zone.replace(/-[a-z]$/, '')] },
     });
     await this.waitZoneOp(lro, zone);
     const [disk] = await this.disks.get({ project: this.projectId, zone, disk: name });
@@ -900,7 +903,8 @@ export class GCPProvider extends CloudProvider {
 
   async restoreFromSnapshot(snapshotId: string, config: ProviderConfig, opts: RestoreOptions = {}): Promise<{ instanceId: string; ipAddress: string }> {
     await this.report('info', `Creating a new machine from snapshot ${snapshotId}…`);
-    // Google snapshots are global, so this works in any region of the project.
+    // Google snapshots are global, so this works in any region of the project (a region
+    // other than the snapshot's own is billed as data transfer, ~USD 0.08/GB).
     const { instanceId, ipAddress } = await this.createMachine(config, {
       spot: !!opts.spot,
       diskSizeGb: opts.diskSizeGb || 150,

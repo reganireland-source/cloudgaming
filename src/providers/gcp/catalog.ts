@@ -200,7 +200,9 @@ export const DEFAULT_REGION = 'asia-southeast1';
 
 /** Disk prices, $/GB/month (approximate). */
 export const BALANCED_DISK_PER_GB_MONTH = 0.11;
-export const SNAPSHOT_PER_GB_MONTH = 0.029;
+// Snapshot storage as Google actually billed it in Asia (~USD 0.08/GB-month),
+// not the old 0.029 list figure. Regional storage is at most this.
+export const SNAPSHOT_PER_GB_MONTH = 0.08;
 
 /** Rough spot discount: spot ≈ 40% of on-demand. */
 export const SPOT_FACTOR = 0.4;
