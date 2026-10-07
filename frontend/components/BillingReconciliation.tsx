@@ -36,6 +36,10 @@ export interface CloudRecon {
   differenceUsd: number | null;
   differencePct: number | null;
   daily: Array<{ date: string; estimateUsd: number; actual: number | null; actualUsd: number | null }>;
+  /** The cloud's own line items this month (billing currency), biggest first. */
+  breakdown?: Array<{ service: string; item: string; amount: number; usage?: number | null; unit?: string | null; category: string }>;
+  /** The app's estimate for the same days, split the same way (USD). */
+  estimateParts?: { computeUsd: number; egressUsd: number; storageUsd: number };
 }
 export interface Reconciliation {
   generatedAt: string; month: string; estimateCurrency: 'USD';
@@ -129,7 +133,77 @@ function CloudCard({ c, alsoIn, rates, onChanged }: { c: CloudRecon; alsoIn: str
           </p>
           {c.scope === 'account' && <p className="text-[0.72rem] text-neon-amber">Billed covers the whole account, so it includes anything else you run there.</p>}
           {(c.notes || []).map((n, i) => <p key={i} className="text-[0.72rem] text-slate-400">ℹ {n}</p>)}
+          {!!c.breakdown?.length && <Breakdown c={c} rates={rates} />}
         </>
+      )}
+    </div>
+  );
+}
+
+const CAT_LABEL: Record<string, string> = {
+  compute: 'Machine (CPU + RAM)', gpu: 'GPU', licence: 'GPU licence (vWS / GRID)', storage: 'Disks & snapshots', network: 'Data out & IP addresses', other: 'Other',
+};
+const CAT_ORDER = ['compute', 'gpu', 'licence', 'storage', 'network', 'other'];
+
+/** What the cloud billed, line by line, next to the app's estimate for the same buckets. */
+function Breakdown({ c, rates }: { c: CloudRecon; rates?: Record<string, number> | null }) {
+  const [open, setOpen] = useState(false);
+  const cur = c.actual?.currency || c.currency || 'USD';
+  const rate = cur === 'USD' ? 1 : rates?.[cur] || null;
+  const toUsd = (v: number) => (rate ? v / rate : null);
+  const items = c.breakdown || [];
+  const sums: Record<string, number> = {};
+  for (const it of items) sums[it.category] = (sums[it.category] || 0) + it.amount;
+  const est = c.estimateParts;
+  // The app prices machine + GPU + licence as one hourly rate.
+  const groups = [
+    { label: 'Machines (CPU, RAM, GPU, licence)', cats: ['compute', 'gpu', 'licence'], estUsd: est?.computeUsd },
+    { label: 'Disks & snapshots', cats: ['storage'], estUsd: est?.storageUsd },
+    { label: 'Data out & IP addresses', cats: ['network'], estUsd: est?.egressUsd },
+    { label: 'Other', cats: ['other'], estUsd: undefined as number | undefined },
+  ].map((g) => ({ ...g, billed: g.cats.reduce((a, k) => a + (sums[k] || 0), 0) }))
+    .filter((g) => Math.abs(g.billed) >= 0.005 || (g.estUsd ?? 0) >= 0.005);
+  return (
+    <div className="border-t border-white/10 pt-2 space-y-1.5">
+      <p className="text-[0.66rem] uppercase tracking-label text-slate-500">Where the bill went (this month)</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[0.72rem] tabular-nums">
+          <thead><tr className="text-slate-500 text-left"><th className="font-normal py-0.5">Bucket</th><th className="font-normal text-right">Billed</th><th className="font-normal text-right">App est.</th><th className="font-normal text-right">Gap</th></tr></thead>
+          <tbody>
+            {groups.map((g) => {
+              const bu = toUsd(g.billed);
+              const gap = bu != null && g.estUsd != null ? bu - g.estUsd : null;
+              return (
+                <tr key={g.label} className="border-t border-white/5">
+                  <td className="py-0.5 pr-2 text-slate-300">{g.label}</td>
+                  <td className="text-right text-slate-100 whitespace-nowrap">{money(g.billed, cur)}{cur !== 'USD' && bu != null && <span className="text-slate-500"> ≈ {usd(bu)}</span>}</td>
+                  <td className="text-right text-slate-300 whitespace-nowrap pl-2">{g.estUsd != null ? usd(g.estUsd) : '—'}</td>
+                  <td className={`text-right whitespace-nowrap pl-2 ${gap == null ? 'text-slate-500' : Math.abs(gap) < 0.5 ? 'text-neon-lime' : 'text-neon-amber'}`}>{gap == null ? '—' : `${gap >= 0 ? '+' : '−'}${usd(Math.abs(gap))}`}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="text-[0.72rem] text-neon-cyan hover:underline">
+        {open ? 'Hide' : 'Show'} the {items.length} line items {c.label} billed
+      </button>
+      {open && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[0.7rem] tabular-nums">
+            <thead><tr className="text-slate-500 text-left"><th className="font-normal py-0.5">Item</th><th className="font-normal">Kind</th><th className="font-normal text-right">Usage</th><th className="font-normal text-right">Billed</th></tr></thead>
+            <tbody>
+              {[...items].sort((a, b) => CAT_ORDER.indexOf(a.category) - CAT_ORDER.indexOf(b.category) || b.amount - a.amount).map((it, i) => (
+                <tr key={i} className="border-t border-white/5 align-top">
+                  <td className="py-0.5 pr-2 min-w-[12rem]"><span className="text-slate-200">{it.item}</span><br /><span className="text-slate-500">{it.service}</span></td>
+                  <td className="pr-2 text-slate-400 whitespace-nowrap">{CAT_LABEL[it.category] || it.category}</td>
+                  <td className="text-right text-slate-400 whitespace-nowrap pr-2">{it.usage != null ? `${+it.usage.toFixed(2)} ${it.unit || ''}` : ''}</td>
+                  <td className="text-right text-slate-100 whitespace-nowrap">{money(it.amount, cur)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

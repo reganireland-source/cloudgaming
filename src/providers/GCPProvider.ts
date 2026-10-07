@@ -63,6 +63,18 @@ import {
 
 type GpuModel = GcpShape['gpuModel'];
 import { buildSetupScript } from './shared/setupScript';
+import type { BillingItem } from './shared/types';
+
+/** Sort a Google SKU into the buckets the app estimates. */
+function categorize(service: string, sku: string): BillingItem['category'] {
+  const t = `${service} ${sku}`;
+  if (/licen[cs]e|vws|virtual workstation|grid/i.test(t)) return 'licence';
+  if (/gpu|nvidia|accelerator/i.test(t)) return 'gpu';
+  if (/egress|network|internet|ip address|external ip|load balanc|interconnect/i.test(t)) return 'network';
+  if (/pd |persistent disk|hyperdisk|storage|snapshot|image|ssd|capacity/i.test(t)) return 'storage';
+  if (/core|ram|instance|cpu|memory|vm|spot|preemptible/i.test(t)) return 'compute';
+  return 'other';
+}
 
 /** The parsed, checked credentials. */
 export interface GcpCredentials {
@@ -801,6 +813,36 @@ export class GCPProvider extends CloudProvider {
       }
       throw error;
     }
+    // Line items for the same period: what each charge was (service × SKU).
+    let breakdown: BillingItem[] | undefined;
+    try {
+      const bsql = `SELECT service.description AS service, sku.description AS sku,
+          SUM(cost) + SUM(${credits}) AS amount, SUM(usage.amount_in_pricing_units) AS usage, ANY_VALUE(usage.pricing_unit) AS unit
+        FROM \`${table}\`
+        WHERE usage_start_time >= TIMESTAMP(@from) AND usage_start_time < TIMESTAMP(@to) AND project.id = @project
+        GROUP BY service, sku HAVING ABS(amount) >= 0.005 ORDER BY amount DESC LIMIT 40`;
+      let b: any = (await client.request({
+        url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/queries`, method: 'POST',
+        data: {
+          query: bsql, useLegacySql: false, parameterMode: 'NAMED', timeoutMs: 30000,
+          queryParameters: [
+            { name: 'from', parameterType: { type: 'STRING' }, parameterValue: { value: from } },
+            { name: 'to', parameterType: { type: 'STRING' }, parameterValue: { value: to } },
+            { name: 'project', parameterType: { type: 'STRING' }, parameterValue: { value: this.projectId } },
+          ],
+        },
+      })).data;
+      for (let i = 0; b && b.jobComplete === false && i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const loc = b.jobReference?.location ? `?location=${encodeURIComponent(b.jobReference.location)}` : '';
+        b = (await client.request({ url: `https://bigquery.googleapis.com/bigquery/v2/projects/${this.projectId}/queries/${b.jobReference.jobId}${loc}` })).data;
+      }
+      breakdown = (b?.rows || []).map((r: any) => {
+        const [service, sku, amount, usage, unit] = r.f.map((c: any) => c.v);
+        return { service: String(service || ''), item: String(sku || ''), amount: Math.round((Number(amount) || 0) * 100) / 100,
+          usage: usage == null ? null : Math.round(Number(usage) * 100) / 100, unit: unit || null, category: categorize(String(service), String(sku)) };
+      });
+    } catch { /* the totals still stand without the breakdown */ }
     const app: BillingDay[] = [];
     const account: BillingDay[] = [];
     let currency = 'USD';
@@ -812,7 +854,7 @@ export class GCPProvider extends CloudProvider {
     }
     return {
       currency, scope: 'app', scopeNote: `Resources labelled ${RESOURCE_TAG.key}=${RESOURCE_TAG.value} in ${this.projectId} (credits included)`,
-      daily: app, accountDaily: account,
+      daily: app, accountDaily: account, breakdown,
       notes: ['Google\'s export runs a few hours behind, and has no data from before it was switched on.'],
     };
   }

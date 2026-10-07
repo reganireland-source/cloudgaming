@@ -81,9 +81,9 @@ async function refreshCloud(userId: string, provider: string, monthStart: string
       );
     }
     await query(
-      `INSERT INTO billing_fetches (user_id, provider, fetched_at, ok, currency, scope, scope_note, notes, error) VALUES ($1, $2, NOW(), true, $3, $4, $5, $6, NULL)
-       ON CONFLICT (user_id, provider) DO UPDATE SET fetched_at = NOW(), ok = true, currency = EXCLUDED.currency, scope = EXCLUDED.scope, scope_note = EXCLUDED.scope_note, notes = EXCLUDED.notes, error = NULL`,
-      [userId, provider, actual.currency, actual.scope, actual.scopeNote, JSON.stringify(actual.notes || [])]
+      `INSERT INTO billing_fetches (user_id, provider, fetched_at, ok, currency, scope, scope_note, notes, error, breakdown) VALUES ($1, $2, NOW(), true, $3, $4, $5, $6, NULL, $7)
+       ON CONFLICT (user_id, provider) DO UPDATE SET fetched_at = NOW(), ok = true, currency = EXCLUDED.currency, scope = EXCLUDED.scope, scope_note = EXCLUDED.scope_note, notes = EXCLUDED.notes, error = NULL, breakdown = EXCLUDED.breakdown`,
+      [userId, provider, actual.currency, actual.scope, actual.scopeNote, JSON.stringify(actual.notes || []), actual.breakdown ? JSON.stringify(actual.breakdown) : null]
     );
   } catch (error) {
     const friendly: FriendlyError = toFriendlyError(error, provider);
@@ -113,6 +113,10 @@ export interface CloudReconciliation {
   differenceUsd: number | null;      // actual − estimate (same days)
   differencePct: number | null;
   daily: Array<{ date: string; estimateUsd: number; actual: number | null; actualUsd: number | null }>;
+  /** The cloud's own line items (billing currency), when it reports them. */
+  breakdown?: Array<{ service: string; item: string; amount: number; usage?: number | null; unit?: string | null; category: string }>;
+  /** The app's estimate for the same days, by what it covers (USD). */
+  estimateParts?: { computeUsd: number; egressUsd: number; storageUsd: number };
 }
 
 export async function getReconciliation(userId: string, refresh = false) {
@@ -130,8 +134,10 @@ export async function getReconciliation(userId: string, refresh = false) {
 
   // The app's estimates (USD) per cloud and day, this month.
   const est = await query(
-    `SELECT provider, to_char(date, 'YYYY-MM-DD') AS d, SUM(compute_cost + egress_cost + storage_cost) AS usd
+    `SELECT provider, to_char(date, 'YYYY-MM-DD') AS d, SUM(compute_cost + egress_cost + storage_cost) AS usd,
+            SUM(compute_cost) AS compute, SUM(egress_cost) AS egress, SUM(storage_cost) AS storage
      FROM costs WHERE user_id = $1 AND date >= $2 GROUP BY provider, d`, [userId, monthStart]);
+  const estRows = est.rows as Array<{ provider: string; d: string; compute: string; egress: string; storage: string }>;
   const estimate = new Map<string, number>(est.rows.map((r: any) => [`${r.provider}:${r.d}`, Number(r.usd) || 0]));
   const acts = await query(
     `SELECT provider, to_char(date, 'YYYY-MM-DD') AS d, currency, amount, account_amount FROM billing_actuals
@@ -175,6 +181,12 @@ export async function getReconciliation(userId: string, refresh = false) {
       actual: { amount, currency, usd: usd === null ? null : r2(usd) },
       accountActual: accountAmount === null ? undefined : { amount: accountAmount, currency, usd: toUsd(accountAmount, currency, fx) === null ? null : r2(toUsd(accountAmount, currency, fx)!) },
       estimateSameDaysUsd: estimateSame,
+      breakdown: f?.breakdown || undefined,
+      estimateParts: (() => {
+        const rows = estRows.filter((x) => x.provider === p && x.d <= dataThrough);
+        const add = (k: 'compute' | 'egress' | 'storage') => r2(rows.reduce((s, x) => s + (Number(x[k]) || 0), 0));
+        return { computeUsd: add('compute'), egressUsd: add('egress'), storageUsd: add('storage') };
+      })(),
       differenceUsd: usd === null ? null : r2(usd - estimateSame),
       differencePct: usd === null || estimateSame === 0 ? null : Math.round(((usd - estimateSame) / estimateSame) * 100),
       daily: base.daily.map((row) => {

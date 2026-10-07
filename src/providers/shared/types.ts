@@ -205,4 +205,15 @@ export interface BillingActuals {
   /** The whole account's daily totals, when `daily` is narrower than the account. */
   accountDaily?: BillingDay[];
   notes?: string[];
+  /** The cloud's own line items for the period, biggest first (service × SKU), in `currency`. */
+  breakdown?: BillingItem[];
+}
+
+export interface BillingItem {
+  service: string;
+  item: string;            // SKU / usage type, as the cloud names it
+  amount: number;          // after credits, in the billing currency
+  usage?: number | null;   // e.g. 41.2
+  unit?: string | null;    // e.g. "hour", "gibibyte"
+  category: 'compute' | 'gpu' | 'licence' | 'storage' | 'network' | 'other';
 }
