@@ -241,6 +241,15 @@ router.post('/:id/pricing', async (req: Request, res: Response) => {
   }
 });
 
+// Change size in place (Google, within a GPU family): { shapeId, start?: boolean }.
+router.post('/:id/size', async (req: Request, res: Response) => {
+  try {
+    res.status(202).json(await MachineService.resize(req.userId!, req.params.id, req.body?.shapeId, req.body?.start === true));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to change the machine’s size');
+  }
+});
+
 // Live telemetry from the machine's agent: ?minutes=30 (5 min – 7 days).
 router.get('/:id/telemetry', async (req: Request, res: Response) => {
   try {
@@ -307,7 +316,8 @@ router.post('/:id/shelve', async (req: Request, res: Response) => {
 router.post('/:id/restore', async (req: Request, res: Response) => {
   try {
     const region = typeof req.body?.region === 'string' ? req.body.region : undefined;
-    res.status(202).json(await MachineService.restore(req.userId!, req.params.id, { region, keepSnapshot: req.body?.keepSnapshot === true }));
+    const shapeId = typeof req.body?.shapeId === 'string' ? req.body.shapeId : undefined;
+    res.status(202).json(await MachineService.restore(req.userId!, req.params.id, { region, keepSnapshot: req.body?.keepSnapshot === true, shapeId }));
   } catch (error) {
     sendRouteError(res, error, 'Failed to restore the machine');
   }

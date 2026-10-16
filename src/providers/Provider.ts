@@ -209,6 +209,18 @@ export abstract class CloudProvider {
     return false;
   }
 
+  /**
+   * Change a STOPPED machine's size in place (same disk, games and IP
+   * settings). Only between sizes the cloud can swap directly — see
+   * canResizeInPlace. Other clouds: shelve, then restore as the new size.
+   */
+  canResizeInPlace(_fromShapeId: string, _toShapeId: string): boolean {
+    return false;
+  }
+  async setMachineSize(_instanceId: string, _shapeId: string): Promise<void> {
+    throw new Error('This cloud can’t change an existing machine’s size. Shelve it, then Restore it as the new size.');
+  }
+
   /** Switch a stopped machine between spot (true) and on-demand (false). */
   async setSpot(_instanceId: string, _spot: boolean): Promise<void> {
     throw new Error('This cloud can’t switch an existing machine between spot and on-demand. Shelve it, change the pricing, then Restore.');

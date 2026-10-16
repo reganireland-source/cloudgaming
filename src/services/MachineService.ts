@@ -149,11 +149,11 @@ function mergeStages<T extends { percent: number; key: string; message: string; 
  * the change (GOOGLE-SINGAPORE-…-S loses its -S when switched to on-demand);
  * a name the user chose is kept as is.
  */
-async function nicknameAfter(userId: string, machine: any, next: { region?: string; spot?: boolean }): Promise<string> {
+async function nicknameAfter(userId: string, machine: any, next: { region?: string; spot?: boolean; instanceType?: string }): Promise<string> {
   const now = { provider: machine.provider, region: machine.region, instanceType: machine.instance_type, spot: !!machine.spot, bigScreen: machine.display_driver === 'grid' };
   const wasDefault = !machine.nickname || String(machine.nickname).replace(/-\d+$/, '') === defaultNickname(now);
   if (!wasDefault) return machine.nickname;
-  return uniqueNickname(userId, defaultNickname({ ...now, region: next.region ?? now.region, spot: next.spot ?? now.spot }), machine.id);
+  return uniqueNickname(userId, defaultNickname({ ...now, region: next.region ?? now.region, spot: next.spot ?? now.spot, instanceType: next.instanceType ?? now.instanceType }), machine.id);
 }
 
 /** A cloud error's own message, trimmed for display (they name the problem, never secrets). */
@@ -465,6 +465,67 @@ export class MachineService {
       }
     }, `Switched to ${spot ? 'spot' : 'on-demand'}.`);
     return { operationId: op.id, spot };
+  }
+
+  /**
+   * CHANGE SIZE in place (e.g. a gaming L4 machine → a DEV one): same disk,
+   * games and settings; only where the cloud can swap sizes directly
+   * (Google, within a GPU family). A running machine is stopped first.
+   * Elsewhere: shelve, then restore as the new size.
+   */
+  static async resize(userId: string, machineId: string, shapeId: unknown, startAfter = false): Promise<{ operationId: string | null }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+    const shape = catalog.shapes.find((s) => s.id === shapeId);
+    if (!shape) throw new MachineRequestError(400, `"${String(shapeId).slice(0, 40)}" isn't a ${catalog.label} size we launch.`);
+    if (shape.id === machine.instance_type) return { operationId: null };
+    const from = catalog.shapes.find((s) => s.id === machine.instance_type);
+    if (neverCreated(machine) || !['stopped', 'running'].includes(machine.status)) {
+      throw new MachineRequestError(409, 'Only a stopped or running machine can change size.', machine.status === 'shelved' ? 'Choose the new size when you Restore it.' : 'Wait for the current change to finish, or press Sync.');
+    }
+    const provider0 = await providerFor(userId, machine.provider);
+    if (!provider0.canResizeInPlace(machine.instance_type, shape.id)) {
+      throw new MachineRequestError(409, `${catalog.label} can’t change this machine to ${shape.label} in place${from ? ` (it’s ${from.gpuModel}; that size is ${shape.gpuModel === from.gpuModel ? 'a different machine family' : shape.gpuModel})` : ''}.`,
+        'Shelve it (games and settings are kept in a snapshot), then Restore it as the new size.');
+    }
+    const cost = (catalog.estimateHourly(shape.id, machine.region, !!machine.spot) + (machine.display_driver === 'grid' ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
+    const wasRunning = machine.status === 'running';
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'resize', machineId, title: `Change ${machine.instance_type} to ${shape.label}` });
+    await setStatus(machineId, wasRunning ? 'stopping' : 'stopped');
+    op.runInBackground(async () => {
+      try {
+        const provider = await providerFor(userId, machine.provider, op.reporter);
+        if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+        if (wasRunning) {
+          await op.info('The cloud only changes the size of a stopped machine: stopping it first…');
+          await provider.stopInstance(machine.instance_id);
+          await setStatus(machineId, 'stopped', { stopped_at: new Date() });
+        }
+        await provider.setMachineSize(machine.instance_id, shape.id);
+        const renamed = await nicknameAfter(userId, machine, { instanceType: shape.id });
+        await query('UPDATE machines SET instance_type = $2, cost_per_hour = $3, nickname = $4 WHERE id = $1', [machineId, shape.id, cost, renamed]);
+        if (renamed !== machine.nickname) await provider.setNickname(machine.instance_id, renamed).catch(() => false);
+        await op.info(`Now ${shape.label}: about USD ${cost.toFixed(2)}/hour while running. Disk, games and settings are unchanged.`);
+        if (shape.defaultDiskGb && (Number(machine.disk_size_gb) || 0) < shape.defaultDiskGb) {
+          await op.info(`Tip: this size suggests a ${shape.defaultDiskGb} GB disk — use “Enlarge” under the disk bar (the disk is ${machine.disk_size_gb || '?'} GB).`);
+        }
+        if (wasRunning || startAfter) {
+          await op.info('Starting it…');
+          await setStatus(machineId, 'starting');
+          await provider.startInstance(machine.instance_id);
+          const status = await provider.getInstanceStatus(machine.instance_id);
+          await setStatus(machineId, status.status === 'terminated' ? 'failed' : status.status, {
+            ip_address: status.ipAddress || null, last_started: new Date(), last_synced_at: new Date(), stopped_at: null,
+          });
+        }
+        return { instanceType: shape.id, costPerHour: cost };
+      } catch (error) {
+        await MachineService.resyncQuietly(userId, machine);
+        throw error;
+      }
+    }, `Changed to ${shape.label}.`);
+    return { operationId: op.id };
   }
 
   /** Live telemetry (Monitor tab): samples for the last `minutes`, the latest one, alerts. */
@@ -810,7 +871,7 @@ export class MachineService {
    * Moonlight stays paired), same auto-stop. Optionally in another region
    * (clouds with restoreAnyRegion) or another size with the same GPU family.
    */
-  static async restore(userId: string, machineId: string, opts: { region?: string; keepSnapshot?: boolean } = {}): Promise<{ operationId: string }> {
+  static async restore(userId: string, machineId: string, opts: { region?: string; keepSnapshot?: boolean; shapeId?: string } = {}): Promise<{ operationId: string }> {
     const machine = await loadOwnedMachine(machineId, userId);
     await assertNotBusy(machine);
     if (machine.status !== 'shelved') throw new MachineRequestError(409, 'Only shelved machines can be restored.', 'Use Start for a stopped machine.');
@@ -821,8 +882,9 @@ export class MachineService {
     if (regionId !== machine.region && !catalog.restoreAnyRegion) {
       throw new MachineRequestError(400, `${catalog.label} can only restore a snapshot in the region it was taken (${machine.region}).`, 'Restore it there, or launch a fresh machine in the new region.');
     }
-    const shape = catalog.shapes.find((sh) => sh.id === machine.instance_type);
-    if (!shape) throw new MachineRequestError(409, `This machine's size (${machine.instance_type}) is no longer offered.`);
+    // Restore as another size (e.g. a DEV machine): the snapshot is just the disk.
+    const shape = catalog.shapes.find((sh) => sh.id === (opts.shapeId || machine.instance_type));
+    if (!shape) throw new MachineRequestError(opts.shapeId ? 400 : 409, opts.shapeId ? `"${opts.shapeId.slice(0, 40)}" isn't a ${catalog.label} size we launch.` : `This machine's size (${machine.instance_type}) is no longer offered.`);
     if (!region.gpus.includes(shape.gpuModel)) {
       throw new MachineRequestError(400, `${shape.gpuModel} GPUs aren't offered in ${region.name}.`, `In ${region.name} you can use: ${region.gpus.join(', ')}.`);
     }
@@ -839,17 +901,21 @@ export class MachineService {
         const provider = await providerFor(userId, machine.provider, op.reporter);
         if ((provider as any).projectId) op.projectId = (provider as any).projectId;
         if (regionId !== machine.region) await op.info(`Restoring in ${region.name} instead of ${machine.region} — your games come with it.`);
-        const restoredName = await nicknameAfter(userId, machine, { region: regionId });
+        if (shape.id !== machine.instance_type) await op.info(`Restoring as ${shape.label} instead of ${machine.instance_type} — same disk, games and settings.`);
+        const restoredName = await nicknameAfter(userId, machine, { region: regionId, instanceType: shape.id });
         await query('UPDATE machines SET nickname = $2 WHERE id = $1', [machineId, restoredName]);
         const result = await provider.restoreFromSnapshot(cloudSnapId, { region: regionId, instanceType: shape.id }, {
           sunshineUsername: login.username, sunshinePassword: login.password,
-          autoStopMinutes: machine.auto_stop_minutes ?? 15, diskSizeGb: Number(machine.disk_size_gb) || undefined, spot: !!machine.spot,
+          autoStopMinutes: machine.auto_stop_minutes ?? 15, spot: !!machine.spot,
+          // A bigger size may suggest a bigger disk (DEV: 300 GB); a disk made from a snapshot can grow, never shrink.
+          diskSizeGb: Math.max(Number(machine.disk_size_gb) || 0, shape.defaultDiskGb || 0) || undefined,
           displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard',
           nickname: restoredName,
         });
         const costPerHour = (catalog.estimateHourly(shape.id, regionId, !!machine.spot) + (machine.display_driver === 'grid' ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
         await setStatus(machineId, 'running', {
           instance_id: result.instanceId, ip_address: result.ipAddress || null, region: regionId, cost_per_hour: costPerHour,
+          instance_type: shape.id, ...(shape.defaultDiskGb && shape.defaultDiskGb > (Number(machine.disk_size_gb) || 0) ? { disk_size_gb: shape.defaultDiskGb } : {}),
           shelved_at: null, stopped_at: null, last_started: new Date(), last_error: null, last_synced_at: new Date(),
         });
         await op.success(`Machine is back${result.ipAddress ? ` at ${result.ipAddress}` : ''}. It runs its quick start-up check (a few minutes) before streaming.`);

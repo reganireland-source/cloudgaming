@@ -89,9 +89,13 @@ interface Standing {
   restoreAnyRegion: boolean;
 }
 type Region = { id: string; name: string; gpus: string[]; lat?: number; lng?: number };
-type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing' | 'disk' | 'update-script';
+type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing' | 'disk' | 'update-script' | 'size';
 /** Clouds that switch an existing (stopped) machine between spot and on-demand in place; others do it via Shelve → Restore. */
 const PRICING_IN_PLACE = new Set(['gcp']);
+// Clouds that change a stopped machine's size in place (same disk) — within a
+// GPU family: Google G2 (g2-standard-4…32, one L4) or N1 + T4.
+const RESIZE_IN_PLACE = new Set(['gcp']);
+const sizeFamily = (id: string) => id.split('-')[0];
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
 const money = (n: number) => usd(n);
 const daysSince = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null);
@@ -164,7 +168,7 @@ function AutoShelvePicker({ value, saving, onChange, inline }: { value: number |
   );
 }
 
-interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string; dev?: boolean; prices?: Record<string, { onDemand: number; spot: number | null }> }
+interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string; dev?: boolean; defaultDiskGb?: number; prices?: Record<string, { onDemand: number; spot: number | null }> }
 type TierId = 'good' | 'better' | 'best' | 'super' | 'dev';
 
 /** Recon's hardware tiers (same rule as tierOf in src/services/ReconService.ts). */
@@ -245,10 +249,14 @@ function Nickname({ machine, onRenamed }: { machine: Machine; onRenamed: () => v
 }
 
 function MachineCard({
-  machine, activeOp, onAction, onOpFinished, regions, shape, bigExtra = 0,
+  machine, activeOp, onAction, onOpFinished, regions, shape, bigExtra = 0, sizes = [], allRegions,
 }: {
   machine: Machine;
   shape?: ShapeInfo;
+  /** Every size this cloud offers (to change size, or restore as another size). */
+  sizes?: ShapeInfo[];
+  /** All this cloud's regions (restoring as another size may change which GPUs fit). */
+  allRegions?: Region[];
   /** Big-screen surcharge per hour on this cloud (added to grid machines' prices). */
   bigExtra?: number;
   activeOp: string | null;
@@ -264,8 +272,22 @@ function MachineCard({
     return v != null ? v + (machine.display_driver === 'grid' ? bigExtra : 0) : null;
   };
   const canSwitchNow = machine.status === 'shelved' || (PRICING_IN_PLACE.has(machine.provider) && ['stopped', 'running'].includes(machine.status));
+  // Change size in place: same GPU, same machine family, sold in this region.
+  const sizePrice = (sh: ShapeInfo | undefined, spot: boolean, region: string) => {
+    const p = sh?.prices?.[region];
+    const v = p ? (spot ? p.spot : p.onDemand) : null;
+    return v != null ? v + (machine.display_driver === 'grid' ? bigExtra : 0) : null;
+  };
+  const inPlaceSizes = sizes.filter((s) => s.id !== machine.instance_type && !!shape && s.gpuModel === shape.gpuModel
+    && sizeFamily(s.id) === sizeFamily(machine.instance_type) && s.prices?.[machine.region] != null);
+  const canResizeNow = RESIZE_IN_PLACE.has(machine.provider) && ['stopped', 'running'].includes(machine.status) && inPlaceSizes.length > 0;
+  const [newSize, setNewSize] = useState('');
+  const [restoreSize, setRestoreSize] = useState(machine.instance_type);
+  const restoreShape = sizes.find((s) => s.id === restoreSize) || shape;
+  const restoreRegions = restoreSize === machine.instance_type || !allRegions
+    ? regions : allRegions.filter((r) => !restoreShape || r.gpus.includes(restoreShape.gpuModel));
   const [tab, setTab] = useState<'connect' | 'monitor' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
-  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | 'update-script' | null>(null);
+  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | 'update-script' | 'size' | null>(null);
   const [restoreRegion, setRestoreRegion] = useState(machine.region);
   const [restoreSpot, setRestoreSpot] = useState(!!machine.spot);
   const [keepSnapshot, setKeepSnapshot] = useState(false);
@@ -304,6 +326,10 @@ function MachineCard({
             <Nickname machine={machine} onRenamed={onOpFinished} />
             <span className="text-xs text-slate-400 font-mono">{machine.instance_type}</span>
             {shape && <TierBadge shape={shape} />}
+            {canResizeNow && (
+              <button type="button" disabled={busy} onClick={() => { setNewSize(inPlaceSizes.find((s) => s.dev)?.id || inPlaceSizes[0].id); setConfirm('size'); }}
+                className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40" title="Bigger or smaller machine, same disk, games and settings">⇅ change size</button>
+            )}
             {machine.display_driver === 'grid' && (
               <span className="text-[0.66rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"
                 title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">▣ big screen · experimental</span>
@@ -495,14 +521,57 @@ function MachineCard({
           </div>
         );
       })()}
+      {confirm === 'size' && (() => {
+        const to = inPlaceSizes.find((s) => s.id === newSize);
+        const now = sizePrice(shape, !!machine.spot, machine.region);
+        return (
+          <div className="mt-3 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
+            <p><strong className="text-slate-100">Change size</strong> — the same disk, games, dev tools and settings; only the CPU, memory and price change.</p>
+            <div role="radiogroup" aria-label="New size" className="grid sm:grid-cols-2 gap-2">
+              {[...inPlaceSizes].sort((a, b) => a.vcpus - b.vcpus).map((s) => {
+                const p = sizePrice(s, !!machine.spot, machine.region);
+                const t = TIER_STYLE[tierOf(s)];
+                return (
+                  <button key={s.id} type="button" role="radio" aria-checked={newSize === s.id} onClick={() => setNewSize(s.id)}
+                    className={`rounded border px-2.5 py-1.5 text-left ${newSize === s.id ? 'border-neon-cyan bg-neon-cyan/[0.06]' : 'border-white/10 hover:border-white/30'}`}>
+                    <span className="flex justify-between gap-2"><span className="text-slate-100">{s.label}</span><span className={`text-[0.66rem] uppercase tracking-label ${t.cls.split(' ')[0]}`}>{t.label}</span></span>
+                    <span className="block text-slate-500 tabular-nums">{s.vcpus / 2} physical cores{p != null ? ` · ≈${money(p)}/h` : ''}{shape && s.vcpus < shape.vcpus ? ' · smaller' : ''}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-slate-400">
+              {to && now != null && sizePrice(to, !!machine.spot, machine.region) != null && <>≈{money(sizePrice(to, !!machine.spot, machine.region)!)}/hour while running (now ≈{money(now)}). </>}
+              {machine.status === 'running' ? 'It is stopped, changed and started again (a couple of minutes).' : 'Changed in place; start it when you’re ready.'}
+              {to?.defaultDiskGb && (machine.disk_size_gb || 0) < to.defaultDiskGb ? ` This size suggests a ${to.defaultDiskGb} GB disk — use Enlarge under the disk bar afterwards.` : ''}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!to}
+                onClick={() => { setConfirm(null); onAction(machine, 'size', { shapeId: newSize }); }}>Change to {to?.label || '…'}</button>
+              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
       {confirm === 'restore' && (
         <div className="mt-3 rounded border border-neon-lime/30 p-3 text-xs text-slate-300 space-y-2">
-          <p><strong className="text-slate-100">Restore this machine?</strong> A new machine is built from the snapshot (typically 5–15 minutes, then its quick start-up check). Billing then resumes at ≈{money(machine.cost_per_hour)}/hour while running, plus the disk.</p>
+          <p><strong className="text-slate-100">Restore this machine?</strong> A new machine is built from the snapshot (typically 5–15 minutes, then its quick start-up check). Billing then resumes at ≈{money(sizePrice(restoreShape, restoreSpot, restoreRegion) ?? machine.cost_per_hour)}/hour while running, plus the disk.</p>
+          {sizes.length > 1 && (
+            <label className="block">
+              <span className="text-slate-400">Size — restore it bigger (e.g. a DEV machine) or smaller; same games and settings:</span>
+              <ThemedSelect className="mt-1" value={restoreSize} ariaLabel="Restore size"
+                onChange={(id) => { setRestoreSize(id); const sh = sizes.find((s) => s.id === id); if (sh && !(allRegions || regions).some((r) => r.id === restoreRegion && r.gpus.includes(sh.gpuModel))) setRestoreRegion(machine.region); }}
+                options={[...sizes].sort((a, b) => a.vcpus - b.vcpus).map((s) => ({
+                  value: s.id, label: s.label, hint: s.id === machine.instance_type ? 'its size now' : TIER_STYLE[tierOf(s)].label,
+                  aside: sizePrice(s, restoreSpot, restoreRegion) != null ? `${money(sizePrice(s, restoreSpot, restoreRegion)!)}/h` : 'not here',
+                }))} />
+            </label>
+          )}
           {sd?.restoreAnyRegion && regions.length > 0 ? (
             <label className="block">
               <span className="text-slate-400">Region — this cloud can restore your games anywhere, handy when you travel:</span>
               <ThemedSelect className="mt-1" value={restoreRegion} onChange={setRestoreRegion} ariaLabel="Restore region"
-                options={byDistance(regions, place).map((r) => ({
+                options={byDistance(restoreRegions, place).map((r) => ({
                   value: r.id, label: `${r.name} (${r.id})`, hint: r.id === machine.region ? 'where it was' : undefined,
                   aside: r.pingMs != null ? `~${r.pingMs} ms` : undefined,
                 }))} />
@@ -530,7 +599,7 @@ function MachineCard({
             <button type="button" className="btn-neon-lime text-xs" onClick={async () => {
               setConfirm(null);
               if (restoreSpot !== !!machine.spot) await onAction(machine, 'pricing', { spot: restoreSpot }); // shelved: recorded instantly
-              await onAction(machine, 'restore', { region: restoreRegion, keepSnapshot });
+              await onAction(machine, 'restore', { region: restoreRegion, keepSnapshot, ...(restoreSize !== machine.instance_type ? { shapeId: restoreSize } : {}) });
             }}>Restore</button>
             <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
           </div>
@@ -633,6 +702,7 @@ function MachinesPageInner() {
   // Regions per cloud, for "restore in another region" (clouds that allow it).
   const [regionsBy, setRegionsBy] = useState<Record<string, Region[]>>({});
   const [gpuOf, setGpuOf] = useState<Record<string, string>>({});
+  const [sizesBy, setSizesBy] = useState<Record<string, ShapeInfo[]>>({});
   const [shapeOf, setShapeOf] = useState<Record<string, ShapeInfo>>({});
   const [bigExtraOf, setBigExtraOf] = useState<Record<string, number>>({});
   // Regions this machine's GPU is offered in.
@@ -643,6 +713,7 @@ function MachinesPageInner() {
         setRegionsBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.regions])));
         setGpuOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh.gpuModel]))));
         setShapeOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh]))));
+        setSizesBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.shapes])));
         setBigExtraOf(Object.fromEntries(o.providers.map((p) => [p.provider, p.bigScreen?.extraPerHour || 0])));
       })
       .catch(() => undefined);
@@ -787,6 +858,7 @@ function MachinesPageInner() {
             onOpFinished={() => finished(m.id)}
             regions={regionsFor(m)}
             shape={shapeOf[`${m.provider}:${m.instance_type}`]} bigExtra={bigExtraOf[m.provider]}
+            sizes={sizesBy[m.provider]} allRegions={regionsBy[m.provider]}
           />
         ))}
       </div>

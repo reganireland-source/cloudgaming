@@ -629,6 +629,30 @@ export class GCPProvider extends CloudProvider {
   }
 
   /**
+   * Google changes a stopped VM's machine type within a family that keeps
+   * the same GPU: G2 sizes with one L4 (g2-standard-4…32), or N1 sizes with
+   * the attached T4. Not across families (T4 → L4) or GPU counts.
+   */
+  canResizeInPlace(fromShapeId: string, toShapeId: string): boolean {
+    const a = findShape(fromShapeId), b = findShape(toShapeId);
+    if (!a || !b || a.id === b.id) return false;
+    return a.gpuModel === b.gpuModel && a.machineType.split('-')[0] === b.machineType.split('-')[0] && a.gpuType === b.gpuType;
+  }
+
+  async setMachineSize(instanceId: string, shapeId: string): Promise<void> {
+    const shape = findShape(shapeId);
+    if (!shape) throw new Error(`Unknown machine size ${shapeId}`);
+    const { zone, name } = this.splitId(instanceId);
+    await this.report('info', `Changing ${name} to ${shape.machineType} (${shape.label}) — same disk, games and settings…`);
+    const [lro] = await this.instances.setMachineType({
+      project: this.projectId, zone, instance: name,
+      instancesSetMachineTypeRequestResource: { machineType: `zones/${zone}/machineTypes/${shape.machineType}` },
+    });
+    await this.waitZoneOp(lro, zone);
+    await this.report('success', `${name} is now ${shape.machineType}.`);
+  }
+
+  /**
    * Spot <-> on-demand on a stopped VM (Google allows changing the
    * provisioning model while TERMINATED). Same scheduling as at launch.
    */
