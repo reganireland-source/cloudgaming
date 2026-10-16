@@ -529,7 +529,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=11
+APPS_VERSION=12
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -730,6 +730,7 @@ RUN apt-get update \
 # "All apps" launcher (Launchpad-style grid). Best-effort.
 RUN apt-get update \
  && ( apt-get install -y --no-install-recommends xdotool || echo "WARNING: xdotool skipped (Battle.net pre-install can't click prompts)" ) \
+ && ( apt-get install -y --no-install-recommends xfce4-terminal || echo "WARNING: xfce4-terminal skipped (the dock keeps xterm)" ) \
  && ( apt-get install -y --no-install-recommends xfdashboard xfdashboard-plugins || apt-get install -y --no-install-recommends xfdashboard \
       || echo "WARNING: xfdashboard skipped (All apps uses the XFCE app finder)" ) \
  ; apt-get clean; rm -rf /var/lib/apt/lists/*
@@ -757,6 +758,7 @@ RUN chmod 755 /cloudy/bin/lutris-runtime-update.py \
 COPY desktop-scale.sh /cloudy/bin/setup-xfce4-desktop-icon-size.sh
 RUN chmod 755 /cloudy/bin/setup-xfce4-desktop-icon-size.sh \
  && printf '[Desktop Entry]\nName=Display scale\nExec=/cloudy/bin/setup-xfce4-desktop-icon-size.sh pick\nIcon=preferences-desktop-display\nType=Application\nCategories=Settings;\n' > /usr/share/applications/display-scale.desktop \
+ && printf '[Desktop Entry]\nName=Keyboard: Mac or PC\nExec=/cloudy/bin/setup-xfce4-desktop-icon-size.sh keys\nIcon=preferences-desktop-keyboard\nType=Application\nCategories=Settings;\n' > /usr/share/applications/keyboard-mode.desktop \
  && printf '\n[program:desktop-scale]\nautorestart=false\nstartsecs=0\nuser=%%(ENV_CLOUDYPAD_USER)s\ncommand=bash -c "sleep 25; . /cloudy/bin/export-dbus-address.sh; /cloudy/bin/setup-xfce4-desktop-icon-size.sh"\nenvironment=DISPLAY="%%(ENV_DISPLAY)s",HOME="%%(ENV_CLOUDYPAD_USER_HOME)s",XDG_RUNTIME_DIR="%%(ENV_XDG_RUNTIME_DIR)s"\n' >> /cloudy/conf/supervisor/supervisord.conf
 COPY add-apps.py /tmp/add-apps.py
 RUN chmod 755 /cloudy/bin/battlenet-start.sh /cloudy/bin/all-apps.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
@@ -1132,7 +1134,11 @@ PY
 # script (run when Moonlight connects, after the resolution is set; and once
 # at desktop start): text DPI, top bar, dock, desktop icons, cursor and
 # xterm all follow the resolution (1080p 100%, 1440p 125%, 1600p 150%, 4K
-# 200%), or the choice saved by "Display scale" in the app menu.
+# 200%), or the choice saved by "Display scale" in the app menu. Also: Mac
+# keyboard mode (Command works as Ctrl; "Keyboard: Mac or PC" in the menu;
+# only for Moonlight's Desktop app, never when a game app is launched),
+# the dock's terminal -> xfce4-terminal, xterm copies on select and pastes
+# with Ctrl+Shift+V.
 cat > "$SUN_DIR/project/desktop-scale.sh" <<'DSCALE'
 #!/usr/bin/env bash
 F=$HOME/.config/cloudgaming-scale
@@ -1141,6 +1147,16 @@ if [ "$1" = pick ]; then
     TRUE auto FALSE 100 FALSE 125 FALSE 150 FALSE 175 FALSE 200) || exit 0
   mkdir -p "$HOME/.config"; echo "$C" > "$F"
 fi
+K=$HOME/.config/cloudgaming-keys
+if [ "$1" = keys ]; then
+  C=$(zenity --list --radiolist --title=Keyboard --text="Mac: Command works as Ctrl (Cmd+C, Cmd+V, Cmd+T; terminal Cmd+Shift+C/V)" --column=" " --column=Keys TRUE mac FALSE pc) || exit 0
+  mkdir -p "$HOME/.config"; echo "$C" > "$K"
+fi
+A=$(printenv SUNSHINE_APP_NAME)
+if [ "$(cat "$K" 2>/dev/null)" = pc ] || { [ -n "$A" ] && [ "$A" != Desktop ]; }; then setxkbmap -option ''; else setxkbmap -option '' -option altwin:ctrl_win; fi
+for L in /cloudy/conf/xfce4/panel/launcher-*/terminal.desktop "$HOME"/.config/xfce4/panel/launcher-*/terminal.desktop; do
+  [ -f "$L" ] && command -v xfce4-terminal >/dev/null && sed -i 's/^Exec=xterm$/Exec=xfce4-terminal/' "$L"
+done
 R=$(xrandr -q 2>/dev/null | grep -w connected | grep -oP '\d+x\d+' | head -n1)
 H=$(echo "$R" | cut -dx -f2)
 [ -n "$H" ] || exit 0
@@ -1154,7 +1170,7 @@ x xfce4-panel /panels/panel-1/size uint "$(s 26)"
 x xfce4-panel /panels/panel-1/icon-size uint "$(s 16)"
 x xfce4-panel /panels/panel-2/size uint "$(s 60)"
 x xfce4-desktop /desktop-icons/icon-size uint "$(s 48)"
-printf 'Xft.dpi: %s\nXTerm*faceName: Monospace\nXTerm*faceSize: 11\nXTerm*geometry: 110x32\nXTerm*background: #1d1f21\nXTerm*foreground: #e6e6e6\n' "$(s 96)" | xrdb -merge
+printf 'Xft.dpi: %s\nXTerm*faceName: Monospace\nXTerm*faceSize: 11\nXTerm*geometry: 110x32\nXTerm*background: #1d1f21\nXTerm*foreground: #e6e6e6\nXTerm*selectToClipboard: true\nXTerm*VT100.translations: #override Shift Ctrl <Key>V: insert-selection(CLIPBOARD) \\n Shift Ctrl <Key>C: copy-selection(CLIPBOARD)\n' "$(s 96)" | xrdb -merge
 echo "Desktop scaled to $P% for $R"
 DSCALE
 

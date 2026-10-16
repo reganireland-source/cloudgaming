@@ -97,6 +97,7 @@ import { authMiddleware } from './api/middleware/auth';
 import { AGENT_SOURCE } from './providers/shared/agent';
 import { DEV_TOOLS_SCRIPT } from './providers/shared/devTools';
 import { MLWEB_PAIR_SOURCE } from './providers/shared/mlwebPair';
+import { MAC_CLIPBOARD_SCRIPT } from './providers/shared/macClipboard';
 
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
@@ -188,6 +189,7 @@ app.use('/api/auth', authRoutes);
 // PUBLIC: the telemetry agent AWS machines download at boot (no secrets in it; the
 // machine checks its sha256 against the one built into its setup script).
 app.get('/api/agent/cgtel.py', (_req, res) => { res.type('text/x-python').send(AGENT_SOURCE); });
+app.get('/api/agent/cloud-clipboard.sh', (_req, res) => { res.type('text/x-shellscript').send(MAC_CLIPBOARD_SCRIPT); });   // PUBLIC: runs on the user's Mac
 app.get('/api/agent/mlweb-pair.py', (_req, res) => { res.type('text/x-python').send(MLWEB_PAIR_SOURCE); });   // PUBLIC: nothing secret in it
 app.get('/api/agent/dev-tools.sh', (_req, res) => { res.type('text/x-shellscript').send(DEV_TOOLS_SCRIPT); });   // PUBLIC: nothing secret in it              // PUBLIC: you can't require login on the login page
 app.use('/api/machines', authMiddleware, machineRoutes);

@@ -52,7 +52,7 @@ $APT install --no-install-recommends \
   xvfb xauth x11-utils libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 \
   libfontconfig1 libdbus-1-3 libudev1 "$ASOUND" libpulse0 libegl1 libgl1-mesa-dri libglx-mesa0 \
   libvulkan1 vulkan-tools mesa-vulkan-drivers fonts-dejavu \
-  winbind cabextract winetricks zstd
+  winbind cabextract winetricks zstd xclip
 # Vulkan: NVIDIA's driver (installed by the gaming setup, with its Vulkan ICD)
 # drives the GPU; mesa's lavapipe stays as a software fallback only.
 

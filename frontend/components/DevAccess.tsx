@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, type ApiError } from '@/lib/auth';
+import { API_BASE_URL } from '@/lib/api';
 import CloudLogo from '@/components/CloudLogo';
 
 interface Access {
@@ -161,6 +162,25 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
             <p className="text-slate-500">Updates by itself as machines start and stop. The IP changes each time a machine starts, and a relaunched machine has a new host key (ssh will warn once).</p>
           </div>
         )}
+
+        {running.length > 0 && (() => {
+          // Moonlight has no clipboard back to the Mac: this keeps both in step over SSH.
+          const m = running[0];
+          const cmd = `bash <(curl -fsSL ${API_BASE_URL}/agent/cloud-clipboard.sh) ${data.user}@${m.ip} -i ~/.ssh/YOUR_KEY`;
+          return (
+            <div className="space-y-1">
+              <p className="text-[0.66rem] uppercase tracking-label text-slate-500">Clipboard both ways (Mac)</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="font-mono text-slate-100 break-all">{cmd}</code>
+                <button type="button" className="text-neon-cyan hover:underline" onClick={() => copy(cmd)}>{copied === cmd ? 'Copied' : 'Copy'}</button>
+              </div>
+              <p className="text-slate-500">
+                Run it in the Mac’s Terminal while you work (Ctrl+C stops it): copy on either side, paste on the other — text, about once a second.
+                Uses your SSH key (the one you added above). Moonlight alone only types the Mac’s clipboard in, with Ctrl+Option+Shift+V.
+              </p>
+            </div>
+          );
+        })()}
 
         {note && <p role="status" className={note.startsWith('⚠') ? 'text-neon-amber' : 'text-neon-lime'}>{note}</p>}
       </div>
