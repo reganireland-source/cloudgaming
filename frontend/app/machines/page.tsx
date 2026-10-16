@@ -884,7 +884,10 @@ function MachinesPageInner() {
       )}
 
       {/* ---- SSH for the developer tools ---- */}
-      <DevAccess />
+      <DevAccess machines={(machines || []).map((m) => ({
+        id: m.id, provider: m.provider, region: m.region, status: m.status, ip: m.ip_address, name: m.nickname,
+        instanceType: m.instance_type, dev: !!shapeOf[`${m.provider}:${m.instance_type}`]?.dev,
+      }))} />
 
       {/* ---- Recent activity across all machines ---- */}
       {recent.length > 0 && (

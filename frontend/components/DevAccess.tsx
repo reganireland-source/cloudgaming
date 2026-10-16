@@ -24,7 +24,12 @@ interface Access {
   machines: Array<{ id: string; provider: string; region: string; status: string; ip: string | null; name: string | null }>;
 }
 
-export default function DevAccess() {
+/** A machine as the Machines page knows it right now (it refreshes every 30 s, 8 s while something changes). */
+export interface LiveMachine { id: string; provider: string; region: string; status: string; ip: string | null; name: string | null; instanceType?: string; dev?: boolean }
+
+const NO_SSH = new Set(['stopped', 'stopping', 'shelved', 'shelving', 'terminated', 'deleting', 'deleted', 'failed', 'missing']);
+
+export default function DevAccess({ machines: live }: { machines?: LiveMachine[] } = {}) {
   const [data, setData] = useState<Access | null>(null);
   const [keysText, setKeysText] = useState('');
   const [ipDraft, setIpDraft] = useState<Record<string, string>>({});
@@ -63,7 +68,12 @@ export default function DevAccess() {
     );
   }
   const open = data.clouds.filter((c) => c.cidrs.length);
-  const running = data.machines.filter((m) => m.status === 'running' && m.ip);
+  // The page's live list (falls back to what this panel loaded): every machine
+  // that's up or coming up with an address, DEV machines first.
+  const list: LiveMachine[] = live || data.machines.map((m) => ({ ...m }));
+  const running = list.filter((m) => m.ip && !NO_SSH.has(m.status))
+    .sort((a, b) => Number(!!b.dev) - Number(!!a.dev) || Number(b.status === 'running') - Number(a.status === 'running'));
+  const sshOpen = (provider: string) => !!data.clouds.find((c) => c.provider === provider)?.cidrs.length;
   const keysChanged = keysText.trim() !== data.keys.join('\n').trim();
 
   return (
@@ -135,14 +145,19 @@ export default function DevAccess() {
             {running.map((m) => {
               const cmd = `ssh ${data.user}@${m.ip}`;
               return (
-                <div key={m.id} className="flex flex-wrap items-center gap-2">
-                  <span className="w-40 shrink-0 truncate text-slate-400">{m.name || m.region}</span>
+                <div key={m.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="inline-flex items-center gap-1.5 min-w-0 sm:w-72 shrink-0">
+                    {m.dev && <span className="text-[0.64rem] tracking-label text-neon-purple border border-neon-purple/50 rounded px-1">DEV</span>}
+                    <span className="truncate text-slate-300" title={`${m.name || m.region}${m.instanceType ? ` · ${m.instanceType}` : ''}`}>{m.name || m.region}</span>
+                  </span>
                   <code className="font-mono text-slate-100">{cmd}</code>
                   <button type="button" className="text-neon-cyan hover:underline" onClick={() => copy(cmd)}>{copied === cmd ? 'Copied' : 'Copy'}</button>
+                  {m.status !== 'running' && <span className="text-neon-amber">{m.status} — SSH answers once it’s up</span>}
+                  {!sshOpen(m.provider) && <span className="text-neon-amber">SSH is closed on this cloud — allow your IP above</span>}
                 </div>
               );
             })}
-            <p className="text-slate-500">The IP changes each time a machine starts, and a relaunched machine has a new host key (ssh will warn once).</p>
+            <p className="text-slate-500">Updates by itself as machines start and stop. The IP changes each time a machine starts, and a relaunched machine has a new host key (ssh will warn once).</p>
           </div>
         )}
 
