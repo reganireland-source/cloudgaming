@@ -1135,6 +1135,12 @@ PY
 # at desktop start): text DPI, top bar, dock, desktop icons, cursor and
 # xterm all follow the resolution (1080p 100%, 1440p 125%, 1600p 150%, 4K
 # 200%), or the choice saved by "Display scale" in the app menu. Also: Mac
+# Odd shapes (ultrawide 21:9, MacBook full-notch...): NVIDIA's driver
+# ignores the custom mode CloudyPad's script adds with xrandr, so the
+# desktop stayed e.g. 2560x1600 (bars). When the size Moonlight asked for
+# (fitted into the GPU's max, as CloudyPad does) isn't the current one, set
+# it as an NVIDIA viewport inside the smallest standard mode that holds it.
+# Standard sizes are untouched. Mac
 # keyboard mode (Command works as Ctrl; "Keyboard: Mac or PC" in the menu;
 # only for Moonlight's Desktop app, never when a game app is launched),
 # the dock's terminal -> xfce4-terminal, xterm copies on select and pastes
@@ -1146,6 +1152,18 @@ if [ "$1" = pick ]; then
   C=$(zenity --list --radiolist --title="Display scale" --text="Text, bars and icons" --height=360 --column=" " --column=Scale \
     TRUE auto FALSE 100 FALSE 125 FALSE 150 FALSE 175 FALSE 200) || exit 0
   mkdir -p "$HOME/.config"; echo "$C" > "$F"
+fi
+W=$(printenv SUNSHINE_CLIENT_WIDTH); V=$(printenv SUNSHINE_CLIENT_HEIGHT); MW=$(printenv CLOUDYPAD_SCREEN_MAX_WIDTH); MH=$(printenv CLOUDYPAD_SCREEN_MAX_HEIGHT)
+if [ -n "$W" ] && [ -n "$V" ] && [ -n "$MW" ] && [ -n "$MH" ] && command -v nvidia-settings >/dev/null; then
+  if [ "$W" -gt "$MW" ] || [ "$V" -gt "$MH" ]; then
+    if [ $((W * MH)) -gt $((V * MW)) ]; then V=$((V * MW / W)); W=$MW; else W=$((W * MH / V)); V=$MH; fi
+  fi
+  W=$((W / 8 * 8)); V=$((V / 2 * 2))
+  if ! xrandr -q | grep -q " connected.* $W"x"$V"+; then
+    O=$(xrandr -q | awk '/ connected/{print $1; exit}')
+    B=$(xrandr -q | awk -v w="$W" -v h="$V" '/^ +[0-9]+x[0-9]+/{split($1,a,"x"); if (a[1]+0>=w && a[2]+0>=h) print a[1]*a[2], $1}' | sort -n | head -1 | cut -d' ' -f2)
+    [ -n "$B" ] && nvidia-settings -a CurrentMetaMode="$O: $B +0+0 {ViewPortIn=$W"x"$V, ViewPortOut=$W"x"$V+0+0, ForceFullCompositionPipeline=On}" && echo "Desktop $W"x"$V (viewport in $B)"
+  fi
 fi
 K=$HOME/.config/cloudgaming-keys
 if [ "$1" = keys ]; then
