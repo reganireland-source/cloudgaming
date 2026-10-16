@@ -38,7 +38,7 @@ import { FriendlyCloudError } from '../../providers/errors';
 import { CATALOGS } from '../../providers/registry';
 import { listCredentialSummaries } from '../../services/CredentialService';
 import { getSpotInfo, ON_RECLAIM } from '../../services/SpotPriceService';
-import { getSshAccess, setSshAccess, setSshKeys } from '../../services/SshAccessService';
+import { getSshAccess, setSshAccess, setSshKeys, createClipboardToken } from '../../services/SshAccessService';
 
 const router = Router();
 
@@ -175,6 +175,15 @@ router.put('/ssh-keys', async (req: Request, res: Response) => {
     res.json({ keys: await setSshKeys(req.userId!, req.body?.keys) });
   } catch (error) {
     sendRouteError(res, error, 'Failed to save the SSH keys');
+  }
+});
+// A new token for the Mac clipboard helper (shown once; replaces the old one).
+router.post('/clipboard-token', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json({ token: await createClipboardToken(req.userId!) });
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to create the clipboard token');
   }
 });
 // { cidrs: ["203.0.113.7", ...] } — [] closes it again.

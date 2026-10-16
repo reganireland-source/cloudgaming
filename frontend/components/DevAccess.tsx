@@ -9,7 +9,8 @@
  *     machine at launch and every boot);
  *   - open SSH (TCP 22) per cloud to specific IPv4 addresses only — closed
  *     by default, never the whole internet;
- *   - copy the ssh command for each running machine.
+ *   - copy the ssh command for each running machine;
+ *   - set up the Mac clipboard helper once (POST /clipboard-token).
  * Reads GET /api/machines/ssh-access; writes PUT /ssh-keys, PUT /ssh-access/:provider.
  */
 
@@ -38,6 +39,7 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [clipToken, setClipToken] = useState<string | null>(null);
 
   const load = useCallback(() => {
     apiFetch<Access>('/machines/ssh-access')
@@ -52,6 +54,9 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
   };
   const setCidrs = (provider: string, cidrs: string[], done: string) =>
     run(provider, () => apiFetch(`/machines/ssh-access/${provider}`, { method: 'PUT', body: { cidrs } }), done);
+  const setUpClipboard = () => run('clip', async () => {
+    setClipToken((await apiFetch<{ token: string }>('/machines/clipboard-token', { method: 'POST' })).token);
+  }, 'Copy the command below into your Mac’s Terminal.');
   const copy = (text: string) => {
     navigator.clipboard?.writeText(text).then(() => { setCopied(text); setTimeout(() => setCopied(null), 1500); }, () => undefined);
   };
@@ -163,20 +168,37 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
           </div>
         )}
 
-        {running.length > 0 && (() => {
-          // Moonlight has no clipboard back to the Mac: this keeps both in step over SSH.
-          const m = running[0];
-          const cmd = `bash <(curl -fsSL ${API_BASE_URL}/agent/cloud-clipboard.sh) ${data.user}@${m.ip} -i ~/.ssh/YOUR_KEY`;
+        {(() => {
+          // Moonlight has no clipboard back to the Mac. The helper, set up once on
+          // the Mac, keeps both in step over SSH with whichever machine is running.
+          const cmd = clipToken ? `bash <(curl -fsSL ${API_BASE_URL}/agent/cloud-clipboard.sh) install ${clipToken} ${API_BASE_URL}` : '';
           return (
             <div className="space-y-1">
-              <p className="text-[0.66rem] uppercase tracking-label text-slate-500">Clipboard both ways (Mac)</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <code className="font-mono text-slate-100 break-all">{cmd}</code>
-                <button type="button" className="text-neon-cyan hover:underline" onClick={() => copy(cmd)}>{copied === cmd ? 'Copied' : 'Copy'}</button>
-              </div>
+              <p className="text-[0.66rem] uppercase tracking-label text-slate-500">Copy and paste with your Mac</p>
+              {cmd ? (
+                <>
+                  <p className="text-slate-300">Paste this once into the Mac’s Terminal app and press Return:</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="font-mono text-slate-100 break-all">{cmd}</code>
+                    <button type="button" className="text-neon-cyan hover:underline" onClick={() => copy(cmd)}>{copied === cmd ? 'Copied' : 'Copy'}</button>
+                  </div>
+                  <p className="text-slate-500">This command is shown only now — it holds a private link to your account. Click Set up again any time for a new one (the old one stops working).</p>
+                </>
+              ) : (
+                <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={busy === 'clip'} onClick={setUpClipboard}>
+                  {busy === 'clip' ? 'Setting up…' : 'Set up clipboard sharing'}
+                </button>
+              )}
               <p className="text-slate-500">
-                Run it in the Mac’s Terminal while you work (Ctrl+C stops it): copy on either side, paste on the other — text, about once a second.
-                Uses your SSH key (the one you added above). Moonlight alone only types the Mac’s clipboard in, with Ctrl+Option+Shift+V.
+                One-time setup. From then on it runs quietly in the background on the Mac (also after restarts): whenever a machine is running
+                (DEV first) it connects by itself and a Mac notification says “Clipboard shared”. Then just copy on one side and paste on the other —
+                text, within about a second. In the Linux terminal use Ctrl+Shift+C / Ctrl+Shift+V (or Cmd with Keyboard: Mac).
+              </p>
+              <p className="text-slate-500">
+                It needs what SSH needs: your Mac’s IP allowed above and the Mac’s public key saved above, and a machine set up with the
+                current script (Update script, then restart). If something blocks it, the notification says what. Check it with{' '}
+                <code className="text-slate-300">bash ~/.cloud-clipboard/cloud-clipboard.sh status</code>, remove it with{' '}
+                <code className="text-slate-300">… uninstall</code>.
               </p>
             </div>
           );

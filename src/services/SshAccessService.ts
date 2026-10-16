@@ -13,6 +13,7 @@
  * ============================================================================
  */
 
+import crypto from 'crypto';
 import { query } from '../config/database';
 import { providerFor, listCredentialSummaries } from './CredentialService';
 import { MachineRequestError } from './MachineService';
@@ -117,3 +118,40 @@ export async function setSshAccess(userId: string, provider: string, cidrsIn: un
   await (await providerFor(userId, provider)).setSshAccess(cidrs, regions);
   return { provider, cidrs };
 }
+
+// ---------------------------------------------------------------------------
+// Mac clipboard helper (providers/shared/macClipboard.ts): set up once with a
+// token, it asks which machine to sync with whenever it isn't connected.
+// ---------------------------------------------------------------------------
+const hashToken = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
+
+/** A new token for this user (replaces the old one). Shown once; only its hash is kept. */
+export async function createClipboardToken(userId: string): Promise<string> {
+  const token = `cgc_${crypto.randomBytes(24).toString('base64url')}`;
+  await query(
+    `INSERT INTO clipboard_tokens (user_id, token_hash, created_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, created_at = NOW(), last_used_at = NULL`,
+    [userId, hashToken(token)],
+  );
+  return token;
+}
+
+/**
+ * The machine the helper should sync with: a running one with an address,
+ * DEV machines first, then the most recently started. null = token unknown.
+ */
+export async function clipboardTarget(token: string): Promise<{ ip: string | null; name?: string; user: string; note?: string } | null> {
+  if (!/^cgc_[A-Za-z0-9_-]{20,}$/.test(token)) return null;
+  const row = (await query('UPDATE clipboard_tokens SET last_used_at = NOW() WHERE token_hash = $1 RETURNING user_id', [hashToken(token)])).rows[0];
+  if (!row) return null;
+  const machines = (await query(
+    `SELECT provider, instance_type, ip_address, nickname, last_started FROM machines
+      WHERE user_id = $1 AND status = 'running' AND ip_address IS NOT NULL ORDER BY last_started DESC NULLS LAST`,
+    [row.user_id],
+  )).rows;
+  const isDev = (m: any) => !!(CATALOGS as any)[m.provider]?.shapes.find((s: any) => s.id === m.instance_type)?.dev;
+  const m = machines.find(isDev) || machines[0];
+  if (!m) return { ip: null, user: 'dev', note: 'No machine is running.' };
+  return { ip: m.ip_address, name: m.nickname || m.instance_type, user: 'dev' };
+}
+

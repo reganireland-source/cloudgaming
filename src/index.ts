@@ -99,6 +99,7 @@ import { DEV_TOOLS_SCRIPT } from './providers/shared/devTools';
 import { MLWEB_PAIR_SOURCE } from './providers/shared/mlwebPair';
 import { ADD_APPS_SOURCE } from './providers/shared/addApps';
 import { MAC_CLIPBOARD_SCRIPT } from './providers/shared/macClipboard';
+import { clipboardTarget } from './services/SshAccessService';
 
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
@@ -190,6 +191,18 @@ app.use('/api/auth', authRoutes);
 // PUBLIC: the telemetry agent AWS machines download at boot (no secrets in it; the
 // machine checks its sha256 against the one built into its setup script).
 app.get('/api/agent/cgtel.py', (_req, res) => { res.type('text/x-python').send(AGENT_SOURCE); });
+// PUBLIC but token-checked (Authorization: Bearer cgc_…): which machine the Mac clipboard helper should sync with.
+app.get('/api/agent/clipboard-target', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const target = await clipboardTarget(token);
+    if (!target) return res.status(401).json({ error: 'Unknown clipboard token — set it up again from Developer access.' });
+    res.json(target);
+  } catch {
+    res.status(500).json({ error: 'Couldn’t look up the machine.' });
+  }
+});
 app.get('/api/agent/cloud-clipboard.sh', (_req, res) => { res.type('text/x-shellscript').send(MAC_CLIPBOARD_SCRIPT); });   // PUBLIC: runs on the user's Mac
 app.get('/api/agent/add-apps.py', (_req, res) => { res.type('text/x-python').send(ADD_APPS_SOURCE); });   // PUBLIC: nothing secret in it
 app.get('/api/agent/mlweb-pair.py', (_req, res) => { res.type('text/x-python').send(MLWEB_PAIR_SOURCE); });   // PUBLIC: nothing secret in it
