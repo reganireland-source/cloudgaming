@@ -56,7 +56,8 @@ async function machineRegions(userId: string, provider: string): Promise<string[
 
 /** The "dev" user's public keys (normalized "type base64 comment" lines). */
 export async function getSshKeys(userId: string): Promise<string[]> {
-  const r = await query('SELECT keys FROM dev_ssh_keys WHERE user_id = $1', [userId]);
+  // Table missing (migration 020 not run yet): no keys rather than an error.
+  const r = await query('SELECT keys FROM dev_ssh_keys WHERE user_id = $1', [userId]).catch(() => ({ rows: [] as any[] }));
   return (r.rows[0]?.keys as string[]) || [];
 }
 

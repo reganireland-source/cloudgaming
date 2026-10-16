@@ -31,9 +31,12 @@ export default function DevAccess() {
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    apiFetch<Access>('/machines/ssh-access').then((d) => { setData(d); setKeysText(d.keys.join('\n')); }).catch(() => setData(null));
+    apiFetch<Access>('/machines/ssh-access')
+      .then((d) => { setData(d); setLoadError(null); setKeysText((t) => t || d.keys.join('\n')); })
+      .catch((e) => setLoadError((e as ApiError)?.message || 'Couldn’t load it.'));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -47,7 +50,18 @@ export default function DevAccess() {
     navigator.clipboard?.writeText(text).then(() => { setCopied(text); setTimeout(() => setCopied(null), 1500); }, () => undefined);
   };
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <section className="neon-card rounded-lg border border-white/10 p-5">
+        <h2 className="label">Developer access (SSH)</h2>
+        <p className="mt-2 text-xs text-slate-400">
+          {loadError
+            ? <>Couldn’t load it: {loadError}. If the app was just updated, the backend probably hasn’t been redeployed yet — redeploy it, then reload this page.</>
+            : 'Loading…'}
+        </p>
+      </section>
+    );
+  }
   const open = data.clouds.filter((c) => c.cidrs.length);
   const running = data.machines.filter((m) => m.status === 'running' && m.ip);
   const keysChanged = keysText.trim() !== data.keys.join('\n').trim();
