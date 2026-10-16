@@ -48,6 +48,8 @@ export interface OracleShape {
   memoryGb: number;
   onDemand: number;         // $/hour, list price (includes CPU + memory)
   bestFor: string;
+  /** Also listed under the DEV tier (see CatalogShape.alsoDev). */
+  alsoDev?: boolean;
 }
 
 export const ORACLE_SHAPES: OracleShape[] = [
@@ -60,7 +62,10 @@ export const ORACLE_SHAPES: OracleShape[] = [
     vcpus: 30,
     memoryGb: 240,
     onDemand: 2.0,
-    bestFor: 'Modern AAA games at 1440p–4K60. Roughly RTX 3070-class, with a modern NVENC encoder. Oracle\'s smallest current GPU VM.',
+    bestFor: 'Modern AAA games at 1440p–4K60. Roughly RTX 3070-class, with a modern NVENC encoder. Oracle\'s smallest current GPU VM — and with 15 physical cores and 240 GB, a strong game-development machine too.',
+    // Big enough to count as DEV as well (Best for gaming): Oracle limits
+    // GPUs, not CPUs, so it needs no more than the one A10 of quota.
+    alsoDev: true,
   },
   // VM.GPU2.1 (P100, Pascal) was removed: the NVIDIA datacenter driver we
   // install (590 branch, the one CloudyPad pins) no longer supports Pascal

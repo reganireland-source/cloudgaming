@@ -390,6 +390,7 @@ az vm list-usage --location $LOC -o table | grep -Ei "NCASv3_T4|Low-priority|Tot
         'Governance → Limits, Quotas and Usage → Service: Compute → your region.',
         'Subscribe to the region first if it isn\'t your home region: region menu → Manage regions → Subscribe (takes a few minutes; can\'t be undone).',
         'Search "GPU.A10" ("GPUs for GPU.A10 based VM and BM instances") → Request a service limit increase → 1.',
+        'The same A10 machine also counts as the DEV tier (15 physical cores, 240 GB): no extra limit needed — Oracle limits GPUs, not CPUs.',
         'Limits are per region and per availability domain; the app tries every domain, so 1 in any domain is enough.',
         'Approval takes hours to a couple of days.',
       ],
