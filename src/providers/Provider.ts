@@ -221,6 +221,21 @@ export abstract class CloudProvider {
     throw new Error('This cloud can’t change an existing machine’s size. Shelve it, then Restore it as the new size.');
   }
 
+  /**
+   * BIG SCREEN (GRID driver) on/off for a STOPPED machine in place. Google:
+   * swaps the GPU for its virtual-workstation (vWS) version; the setup
+   * script then installs the matching driver at the next start. Elsewhere:
+   * shelve, switch, restore.
+   */
+  readonly canSwitchBigScreenInPlace: boolean = false;
+  async setBigScreen(_instanceId: string, _shapeId: string, _on: boolean): Promise<void> {
+    throw new Error('This cloud can’t switch an existing machine to big screen. Shelve it, switch, then Restore.');
+  }
+  /** Why big screen can't start here (e.g. no vWS quota), or null if it looks fine / can't tell. */
+  async bigScreenQuotaProblem(_region: string, _shapeId: string, _spot: boolean): Promise<string | null> {
+    return null;
+  }
+
   /** Switch a stopped machine between spot (true) and on-demand (false). */
   async setSpot(_instanceId: string, _spot: boolean): Promise<void> {
     throw new Error('This cloud can’t switch an existing machine between spot and on-demand. Shelve it, change the pricing, then Restore.');

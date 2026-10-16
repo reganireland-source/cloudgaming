@@ -149,11 +149,11 @@ function mergeStages<T extends { percent: number; key: string; message: string; 
  * the change (GOOGLE-SINGAPORE-…-S loses its -S when switched to on-demand);
  * a name the user chose is kept as is.
  */
-async function nicknameAfter(userId: string, machine: any, next: { region?: string; spot?: boolean; instanceType?: string }): Promise<string> {
+async function nicknameAfter(userId: string, machine: any, next: { region?: string; spot?: boolean; instanceType?: string; bigScreen?: boolean }): Promise<string> {
   const now = { provider: machine.provider, region: machine.region, instanceType: machine.instance_type, spot: !!machine.spot, bigScreen: machine.display_driver === 'grid' };
   const wasDefault = !machine.nickname || String(machine.nickname).replace(/-\d+$/, '') === defaultNickname(now);
   if (!wasDefault) return machine.nickname;
-  return uniqueNickname(userId, defaultNickname({ ...now, region: next.region ?? now.region, spot: next.spot ?? now.spot, instanceType: next.instanceType ?? now.instanceType }), machine.id);
+  return uniqueNickname(userId, defaultNickname({ ...now, region: next.region ?? now.region, spot: next.spot ?? now.spot, instanceType: next.instanceType ?? now.instanceType, bigScreen: next.bigScreen ?? now.bigScreen }), machine.id);
 }
 
 /** A cloud error's own message, trimmed for display (they name the problem, never secrets). */
@@ -526,6 +526,84 @@ export class MachineService {
       }
     }, `Changed to ${shape.label}.`);
     return { operationId: op.id };
+  }
+
+  /**
+   * BIG SCREEN on/off (NVIDIA GRID driver: screens up to 4096x2160), like
+   * the spot switch:
+   * - Shelved (any cloud with big screen): recorded now, applied at Restore.
+   * - Google, stopped or running: in place - stopped if running, GPU swapped
+   *   for its vWS version (or back), script rewritten; the next start
+   *   installs the matching driver (5-10 min, one extra reboot).
+   * - AWS / Azure with a machine: shelve, switch, restore.
+   */
+  static async setBigScreen(userId: string, machineId: string, on: boolean, startAfter = false): Promise<{ operationId: string | null; bigScreen: boolean }> {
+    const machine = await loadOwnedMachine(machineId, userId);
+    await assertNotBusy(machine);
+    const catalog = CATALOGS[machine.provider as keyof typeof CATALOGS];
+    const shape = catalog.shapes.find((s) => s.id === machine.instance_type);
+    if ((machine.display_driver === 'grid') === on) return { operationId: null, bigScreen: on };
+    if (on && (!catalog.bigScreen?.available || (shape && catalog.bigScreen.notOnGpus?.includes(shape.gpuModel)))) {
+      throw new MachineRequestError(409, `Big screen isn’t available ${catalog.bigScreen?.available ? `on the ${shape?.gpuModel} GPU` : `on ${catalog.label}`}.`, catalog.bigScreen?.note);
+    }
+    const driver = on ? 'grid' : 'standard';
+    const cost = (catalog.estimateHourly(machine.instance_type, machine.region, !!machine.spot) + (on ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
+    if (machine.status === 'shelved' || neverCreated(machine)) {
+      await query('UPDATE machines SET display_driver = $2, cost_per_hour = $3, nickname = $4 WHERE id = $1', [machineId, driver, cost, await nicknameAfter(userId, machine, { bigScreen: on })]);
+      return { operationId: null, bigScreen: on };
+    }
+    const provider0 = await providerFor(userId, machine.provider);
+    if (!provider0.canSwitchBigScreenInPlace) {
+      throw new MachineRequestError(409, `${catalog.label} can’t switch an existing machine ${on ? 'to' : 'off'} big screen.`,
+        'Shelve it (games and settings are kept in a snapshot), switch, then Restore — it comes back with the new screen setting.');
+    }
+    if (!['stopped', 'running'].includes(machine.status)) {
+      throw new MachineRequestError(409, 'The machine must be stopped or running to switch big screen.', 'Wait for the current change to finish, or press Sync.');
+    }
+    if (on) {
+      const problem = await provider0.bigScreenQuotaProblem(machine.region, machine.instance_type, !!machine.spot);
+      if (problem) throw new MachineRequestError(409, problem, 'Request it on the Regions page (Google usually answers within a day), then switch.');
+    }
+    let login: { username?: string; password?: string } = {};
+    try { login = decryptCredentials(userId, `sunshine:${machineId}`, machine.connection_secret); } catch { /* read from the machine's metadata instead */ }
+    const wasRunning = machine.status === 'running';
+    const op = await Operation.start({ userId, provider: machine.provider, action: 'big-screen', machineId,
+      title: `${on ? 'Switch on' : 'Switch off'} big screen for ${machine.nickname || machine.instance_type}` });
+    await setStatus(machineId, wasRunning ? 'stopping' : 'stopped');
+    op.runInBackground(async () => {
+      try {
+        const provider = await providerFor(userId, machine.provider, op.reporter);
+        if ((provider as any).projectId) op.projectId = (provider as any).projectId;
+        if (wasRunning) {
+          await op.info('The cloud only switches a stopped machine: stopping it first (games and settings are kept)…');
+          await provider.stopInstance(machine.instance_id);
+          await setStatus(machineId, 'stopped', { stopped_at: new Date() });
+        }
+        await provider.setBigScreen(machine.instance_id, machine.instance_type, on);
+        const renamed = await nicknameAfter(userId, machine, { bigScreen: on });
+        await provider.refreshSetupScript(machine.instance_id, {
+          sunshineUsername: login.username, sunshinePassword: login.password,
+          autoStopMinutes: machine.auto_stop_minutes ?? 15, displayDriver: driver, nickname: renamed,
+        });
+        await query('UPDATE machines SET display_driver = $2, cost_per_hour = $3, nickname = $4 WHERE id = $1', [machineId, driver, cost, renamed]);
+        if (renamed !== machine.nickname) await provider.setNickname(machine.instance_id, renamed).catch(() => false);
+        await op.info(`Big screen ${on ? 'on' : 'off'}: about USD ${cost.toFixed(2)}/hour while running. The next start installs the ${on ? 'GRID' : 'standard'} NVIDIA driver (5–10 minutes, one extra restart) — then Moonlight can ask for ${on ? 'up to 4096×2160' : 'up to 2560×1600'}.`);
+        if (wasRunning || startAfter) {
+          await op.info('Starting it — the driver installs now…');
+          await setStatus(machineId, 'starting');
+          await provider.startInstance(machine.instance_id);
+          const status = await provider.getInstanceStatus(machine.instance_id);
+          await setStatus(machineId, status.status === 'terminated' ? 'failed' : status.status, {
+            ip_address: status.ipAddress || null, last_started: new Date(), last_synced_at: new Date(), stopped_at: null,
+          });
+        }
+        return { bigScreen: on, costPerHour: cost };
+      } catch (error) {
+        await MachineService.resyncQuietly(userId, machine);
+        throw error;
+      }
+    }, `Big screen ${on ? 'on' : 'off'}.`);
+    return { operationId: op.id, bigScreen: on };
   }
 
   /** Live telemetry (Monitor tab): samples for the last `minutes`, the latest one, alerts. */

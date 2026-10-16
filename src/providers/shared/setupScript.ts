@@ -150,6 +150,8 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__CG_DEVTOOLS_SHA__').join(DEV_TOOLS_SHA256)
     .split('__CG_MLPAIR__').join(opts.agentUrl ? '' : MLWEB_PAIR_SOURCE.replace(/\n$/, ''))
     .split('__CG_MLPAIR_SHA__').join(MLWEB_PAIR_SHA256)
+    .split('__CG_ADDAPPS__').join(opts.agentUrl ? '' : ADD_APPS_SOURCE.replace(/\n$/, ''))
+    .split('__CG_ADDAPPS_SHA__').join(ADD_APPS_SHA256)
     .split('__DEV_SSH_KEYS__').join(devSshKeyLines(opts.devSshKeys || []));
 }
 
@@ -342,6 +344,14 @@ fi
 # 2. NVIDIA datacenter driver (once), then reboot
 # ============================================================================
 CURRENT_DRIVER=$(cat /sys/module/nvidia/version 2>/dev/null || echo none)
+# Big screen switched on/off since the last boot: install the other driver.
+LAST_DD=$(cat "$STATE/display-driver" 2>/dev/null || echo "$DISPLAY_DRIVER")
+if [ "$LAST_DD" != "$DISPLAY_DRIVER" ]; then
+  say "Big screen switched ($LAST_DD -> $DISPLAY_DRIVER): installing the matching NVIDIA driver"
+  rm -f "$STATE/driver.done" "$STATE/driver-grid.done"
+  [ "$DISPLAY_DRIVER" = grid ] || sed -i '/NVreg_EnableGpuFirmware/d' /etc/modprobe.d/nvidia.conf
+fi
+echo "$DISPLAY_DRIVER" > "$STATE/display-driver"
 if [ "$DISPLAY_DRIVER" = "grid" ] && ! is_done driver-grid; then
   # EXPERIMENTAL big screen: NVIDIA's GRID (virtual workstation) driver, in
   # the cloud's own licensed build. Lifts the 2560x1600 headless limit.
@@ -1034,99 +1044,12 @@ SUPV
 # Add Chrome, Discord and Battle.net to the apps Moonlight shows, to the
 # desktop's dock (next to Lutris) and to the app menu. Runs once, while
 # the image is built.
-cat > "$SUN_DIR/project/add-apps.py" <<'PY'
-import json, os
-BNET_ICON = "/usr/share/pixmaps/battlenet.png" if os.path.exists("/usr/share/pixmaps/battlenet.png") else "/usr/share/icons/hicolor/128x128/apps/net.lutris.Lutris.png"
-installed = {
-    "Google Chrome": os.path.exists("/usr/bin/google-chrome"),
-    "Discord": os.path.exists("/opt/Discord/Discord"),
-    "Battle.net": True,
-    "All apps": True,
-}
-ALL_APPS_ICON = "org.xfce.xfdashboard" if os.path.exists("/usr/share/icons/hicolor/scalable/apps/org.xfce.xfdashboard.svg") else "system-search"
-
-# ---- 1. Moonlight's app list (Sunshine apps.json)
-path = "/cloudy/conf/sunshine/apps.json"
-with open(path) as f:
-    cfg = json.load(f)
-start = {"do": "sh -c \"sunshine-app-startup.sh > /tmp/sunshine-session-start.log 2>&1\""}
-def app(name, image, cmd, undo=None):
-    prep = dict(start)
-    if undo:
-        prep["undo"] = undo
-    return {"name": name, "image-path": image, "prep-cmd": [prep], "detached": [cmd],
-            "exclude-global-prep-cmd": "false", "auto-detach": "true", "wait-all": "true", "exit-timeout": "5", "cmd": ""}
-extra = [
-    app("Google Chrome", "/opt/google/chrome/product_logo_256.png",
-        "sh -c \"google-chrome --start-maximized > /tmp/chrome-start.log 2>&1\""),
-    app("Discord", "/opt/Discord/discord.png",
-        "sh -c \"discord > /tmp/discord-start.log 2>&1\""),
-    app("Battle.net", BNET_ICON,
-        "sh -c \"battlenet-start.sh > /tmp/battlenet-start.log 2>&1\"",
-        undo="sh -c \"lutris-stop.sh > /tmp/lutris-stop.log 2>&1\""),
-]
-extra = [a for a in extra if installed[a["name"]]]
-names = set(installed)
-cfg["apps"] = [a for a in cfg["apps"] if a.get("name") not in names] + extra
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-
-# ---- 2. Desktop entries (app menu) and dock launchers
-entries = {
-    # plugin id: (name, desktop file name, Exec, Icon, categories)
-    19: ("All apps", "all-apps.desktop", "all-apps.sh", ALL_APPS_ICON, "Utility;"),
-    20: ("Battle.net", "battlenet.desktop", "battlenet-start.sh", BNET_ICON, "Game;"),
-    21: ("Discord", "discord.desktop", "discord", "/opt/Discord/discord.png", "Network;InstantMessaging;"),
-    22: ("Google Chrome", "google-chrome.desktop", "google-chrome", "google-chrome", "Network;WebBrowser;"),
-}
-entries = {pid: e for pid, e in entries.items() if installed[e[0]]}
-DEFAULT = "/cloudy/conf/xfce4-default"
-for pid, (name, fname, exe, icon, cats) in entries.items():
-    body = ("[Desktop Entry]\nName=%s\nExec=%s\nIcon=%s\nTerminal=false\nType=Application\nCategories=%s\nStartupNotify=false\n"
-            % (name, exe, icon, cats))
-    if fname != "google-chrome.desktop":          # Chrome's package installs its own menu entry
-        with open("/usr/share/applications/" + fname, "w") as f:
-            f.write(body)
-    d = "%s/panel/launcher-%d" % (DEFAULT, pid)
-    os.makedirs(d, exist_ok=True)
-    with open(d + "/" + fname, "w") as f:
-        f.write(body)
-
-# xfdashboard: open on the grid of ALL apps (not the window overview or
-# menu folders) every time, with the search box cleared.
-os.makedirs(DEFAULT + "/xfconf/xfce-perchannel-xml", exist_ok=True)
-with open(DEFAULT + "/xfconf/xfce-perchannel-xml/xfdashboard.xml", "w") as f:
-    f.write('<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfdashboard" version="1.0">\n'
-            '  <property name="switch-to-view-on-resume" type="string" value="builtin.applications"/>\n'
-            '  <property name="reset-search-on-resume" type="bool" value="true"/>\n'
-            '  <property name="components" type="empty">\n'
-            '    <property name="applications-view" type="empty">\n'
-            '      <property name="show-all-apps" type="bool" value="true"/>\n'
-            '    </property>\n  </property>\n</channel>\n')
-
-panel = DEFAULT + "/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
-with open(panel) as f:
-    xml = f.read()
-anchor_ids = '<value type="int" value="12"/>'                    # Lutris, in the dock order
-anchor_plugins = '<property name="plugin-98" type="string" value="separator"/>'
-if entries and anchor_ids in xml and anchor_plugins in xml and 'name="plugin-19"' not in xml and 'name="plugin-20"' not in xml:
-    ids = "".join('\n        <value type="int" value="%d"/>' % pid for pid in entries)
-    xml = xml.replace(anchor_ids, anchor_ids + ids, 1)
-    plugins = "".join(
-        '<property name="plugin-%d" type="string" value="launcher">\n'
-        '      <property name="items" type="array">\n'
-        '        <value type="string" value="%s"/>\n'
-        '      </property>\n'
-        '    </property>\n    ' % (pid, e[1]) for pid, e in entries.items())
-    xml = xml.replace(anchor_plugins, plugins + anchor_plugins, 1)
-    with open(panel, "w") as f:
-        f.write(xml)
-    print("Dock: added " + ", ".join(e[0] for e in entries.values()))
-elif 'name="plugin-19"' in xml or 'name="plugin-20"' in xml:
-    print("Dock: launchers already present")
-else:
-    print("WARNING: dock layout not recognised - apps are still in Moonlight and the app menu")
+AA="$SUN_DIR/project/add-apps.py"
+cat > "$AA.new" <<'PY'
+__CG_ADDAPPS__
 PY
+grep -q import "$AA.new" || curl -fsSL --retry 3 -m 60 "$(dirname '__CG_AGENT_URL__')/add-apps.py" -o "$AA.new" 2>/dev/null
+if [ "$(sha256sum < "$AA.new" | cut -c1-64)" = '__CG_ADDAPPS_SHA__' ]; then mv "$AA.new" "$AA"; else rm -f "$AA.new"; : > "$AA"; fi
 
 # Desktop scale: CloudyPad sizes only the dock (10% of the screen height) and
 # leaves text at 96 DPI and xterm on a bitmap font, so on a 1440p+/Retina
@@ -1144,7 +1067,8 @@ PY
 # keyboard mode (Command works as Ctrl; "Keyboard: Mac or PC" in the menu;
 # only for Moonlight's Desktop app, never when a game app is launched),
 # the dock's terminal -> xfce4-terminal, xterm copies on select and pastes
-# with Ctrl+Shift+V.
+# with Ctrl+Shift+V. A "Display" button in the top bar (once, if missing):
+# Display scale, Keyboard Mac/PC and XFCE's display settings.
 cat > "$SUN_DIR/project/desktop-scale.sh" <<'DSCALE'
 #!/usr/bin/env bash
 F=$HOME/.config/cloudgaming-scale
@@ -1175,6 +1099,15 @@ if [ "$(cat "$K" 2>/dev/null)" = pc ] || { [ -n "$A" ] && [ "$A" != Desktop ]; }
 for L in /cloudy/conf/xfce4/panel/launcher-*/terminal.desktop "$HOME"/.config/xfce4/panel/launcher-*/terminal.desktop; do
   [ -f "$L" ] && command -v xfce4-terminal >/dev/null && sed -i 's/^Exec=xterm$/Exec=xfce4-terminal/' "$L"
 done
+D=$(dirname "$(ls -d /cloudy/conf/xfce4/panel/launcher-16 "$HOME"/.config/xfce4/panel/launcher-16 2>/dev/null | head -1)")
+if [ -d "$D" ] && ! xfconf-query -c xfce4-panel -p /plugins/plugin-23 >/dev/null 2>&1; then
+  mkdir -p "$D/launcher-23"
+  for f in display-scale keyboard-mode xfce-display-settings; do [ -f "/usr/share/applications/$f.desktop" ] && cp "/usr/share/applications/$f.desktop" "$D/launcher-23/"; done
+  xfconf-query -c xfce4-panel -p /plugins/plugin-23 -n -t string -s launcher
+  xfconf-query -c xfce4-panel -p /plugins/plugin-23/items -n -a -t string -s display-scale.desktop -t string -s keyboard-mode.desktop -t string -s xfce-display-settings.desktop
+  I=$(xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids | grep -E '^[0-9]+$' | sed 's/^/-t int -s /' | tr '\n' ' ')
+  [ -n "$I" ] && xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -a $I -t int -s 23 && (xfce4-panel -r >/dev/null 2>&1 &)
+fi
 R=$(xrandr -q 2>/dev/null | grep -w connected | grep -oP '\d+x\d+' | head -n1)
 H=$(echo "$R" | cut -dx -f2)
 [ -n "$H" ] || exit 0
@@ -1371,6 +1304,7 @@ import type { SetupStage } from './types';
 import { AGENT_SOURCE, AGENT_SHA256 } from './agent';
 import { DEV_TOOLS_SCRIPT, DEV_TOOLS_SHA256 } from './devTools';
 import { MLWEB_PAIR_SOURCE, MLWEB_PAIR_SHA256 } from './mlwebPair';
+import { ADD_APPS_SOURCE, ADD_APPS_SHA256 } from './addApps';
 export type { SetupStage };
 
 /** One 15-second telemetry sample from the on-machine agent (fields: see shared/agent.ts). */

@@ -56,6 +56,7 @@ import {
   findRegion,
   findShape,
   isG4,
+  gpuOfMetric,
   quotaRequestOf,
   spotMetricOf,
   vwsMetricOf,
@@ -95,6 +96,8 @@ function isNotFound(error: any): boolean {
 
 /** Google's licensed "virtual workstation" GPU types (GRID driver allowed), per our GPU model. */
 const VWS_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4-vws', L4: 'nvidia-l4-vws', 'RTX PRO 6000': 'nvidia-rtx-pro-6000-vws' };
+/** The normal (non-vWS) accelerator of each GPU (G2/G4 have it built in). */
+const STANDARD_ACCELERATOR: Record<string, string> = { T4: 'nvidia-tesla-t4', L4: 'nvidia-l4', 'RTX PRO 6000': 'nvidia-rtx-pro-6000' };
 
 /** Live GPU zones per project (see getGpuZones). */
 const QUOTA_INFO_CACHE = new Map<string, { at: number; value: any[] | null }>();
@@ -650,6 +653,43 @@ export class GCPProvider extends CloudProvider {
     });
     await this.waitZoneOp(lro, zone);
     await this.report('success', `${name} is now ${shape.machineType}.`);
+  }
+
+  /**
+   * Big screen on/off on a STOPPED VM: the GPU becomes its vWS version (or
+   * back), via setMachineResources. Google may refuse this for a machine
+   * family; then shelve and restore with big screen instead.
+   */
+  readonly canSwitchBigScreenInPlace = true;
+  async setBigScreen(instanceId: string, shapeId: string, on: boolean): Promise<void> {
+    const shape = findShape(shapeId);
+    const type = shape && (on ? VWS_ACCELERATOR[shape.gpuModel] : shape.gpuType || STANDARD_ACCELERATOR[shape.gpuModel]);
+    if (!shape || !type) {
+      throw new FriendlyCloudError({ code: 'NO_BIG_SCREEN', title: 'Big screen isn’t available on this machine', explanation: `Google has no virtual-workstation version of the ${shape?.gpuModel || 'this'} GPU.`, fixes: [] });
+    }
+    const { zone, name } = this.splitId(instanceId);
+    await this.report('info', `Switching ${name}'s GPU to ${on ? 'its virtual-workstation version for big screen' : 'the standard version'} (${type})…`);
+    const [lro] = await this.instances.setMachineResources({
+      project: this.projectId, zone, instance: name,
+      instancesSetMachineResourcesRequestResource: { guestAccelerators: [{ acceleratorCount: 1, acceleratorType: `zones/${zone}/acceleratorTypes/${type}` }] },
+    });
+    await this.waitZoneOp(lro, zone);
+    await this.report('success', `${name} now has ${type}.`);
+  }
+
+  async bigScreenQuotaProblem(region: string, shapeId: string, spot: boolean): Promise<string | null> {
+    const shape = findShape(shapeId);
+    if (!shape) return null;
+    const q = await this.getRegionQuotas(region).catch(() => null);
+    if (!q) return null;
+    const needed = [(spot ? 'PREEMPTIBLE_' : '') + vwsMetricOf(shape), ...(shape.vwsAlsoNeedsBase ? [spot ? spotMetricOf(shape) : shape.gpuQuotaMetric] : [])];
+    for (const metric of needed) {
+      const m = q.find((x) => x.metric === metric);
+      if (m && m.limit - m.usage < 1) {
+        return `Big screen needs 1 free "${gpuOfMetric(metric)}${metric.includes('_VWS_') ? ' Virtual Workstation' : ''}${metric.startsWith('PREEMPTIBLE_') ? ' (preemptible)' : ''}" GPU of quota in ${region}; you have ${m.limit} (${m.usage} in use).`;
+      }
+    }
+    return null;
   }
 
   /**

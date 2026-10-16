@@ -89,12 +89,14 @@ interface Standing {
   restoreAnyRegion: boolean;
 }
 type Region = { id: string; name: string; gpus: string[]; lat?: number; lng?: number };
-type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing' | 'disk' | 'update-script' | 'size';
+type Action = 'start' | 'stop' | 'stop-shelve' | 'shelve' | 'restore' | 'sync' | 'delete' | 'resume-setup' | 'pricing' | 'disk' | 'update-script' | 'size' | 'big-screen';
 /** Clouds that switch an existing (stopped) machine between spot and on-demand in place; others do it via Shelve → Restore. */
 const PRICING_IN_PLACE = new Set(['gcp']);
 // Clouds that change a stopped machine's size in place (same disk) — within a
 // GPU family: Google G2 (g2-standard-4…32, one L4) or N1 + T4.
 const RESIZE_IN_PLACE = new Set(['gcp']);
+// Clouds that switch big screen (GRID driver) on a stopped machine in place; elsewhere it's applied at Restore.
+const BIG_IN_PLACE = new Set(['gcp']);
 const sizeFamily = (id: string) => id.split('-')[0];
 const AUTO_SHELVE = [1, 3, 7, 14, 30];
 const money = (n: number) => usd(n);
@@ -249,8 +251,10 @@ function Nickname({ machine, onRenamed }: { machine: Machine; onRenamed: () => v
 }
 
 function MachineCard({
-  machine, activeOp, onAction, onOpFinished, regions, shape, bigExtra = 0, sizes = [], allRegions,
+  machine, activeOp, onAction, onOpFinished, regions, shape, bigExtra = 0, sizes = [], allRegions, bigScreen,
 }: {
+  /** This cloud's big-screen option (GRID driver), if any. */
+  bigScreen?: { available: boolean; extraPerHour: number; notOnGpus?: string[] };
   machine: Machine;
   shape?: ShapeInfo;
   /** Every size this cloud offers (to change size, or restore as another size). */
@@ -287,9 +291,13 @@ function MachineCard({
   const restoreRegions = restoreSize === machine.instance_type || !allRegions
     ? regions : allRegions.filter((r) => !restoreShape || r.gpus.includes(restoreShape.gpuModel));
   const [tab, setTab] = useState<'connect' | 'monitor' | 'architecture' | 'activity' | null>(machine.status === 'running' ? 'connect' : null);
-  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | 'update-script' | 'size' | null>(null);
+  const [confirm, setConfirm] = useState<'stop' | 'delete' | 'shelve' | 'restore' | 'pricing' | 'update-script' | 'size' | 'big-screen' | null>(null);
   const [restoreRegion, setRestoreRegion] = useState(machine.region);
   const [restoreSpot, setRestoreSpot] = useState(!!machine.spot);
+  const isBig = machine.display_driver === 'grid';
+  const bigPossible = !!bigScreen?.available && !!shape && !(bigScreen.notOnGpus || []).includes(shape.gpuModel);
+  const canSwitchBig = (bigPossible || isBig) && (machine.status === 'shelved' || (BIG_IN_PLACE.has(machine.provider) && ['stopped', 'running'].includes(machine.status)));
+  const [restoreBig, setRestoreBig] = useState(isBig);
   const [keepSnapshot, setKeepSnapshot] = useState(false);
   const [autoShelve, setAutoShelve] = useState<number | null>(machine.auto_shelve_days);
   const [autoSaving, setAutoSaving] = useState(false);
@@ -338,6 +346,12 @@ function MachineCard({
             {machine.spot
               ? <span className="text-[0.66rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>
               : <span className="text-[0.66rem] uppercase tracking-label text-slate-400 border border-white/15 rounded px-1.5">on-demand</span>}
+            {canSwitchBig && (
+              <button type="button" disabled={busy} onClick={() => setConfirm('big-screen')} className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40"
+                title={isBig ? 'Back to the standard driver (up to 2560×1600)' : 'NVIDIA GRID driver: screens up to 4096×2160 (ultrawide, 4K)'}>
+                ▣ {isBig ? 'switch off big screen' : 'switch to big screen'}
+              </button>
+            )}
             {canSwitchNow && (
               <button type="button" disabled={busy} onClick={() => setConfirm('pricing')} className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40"
                 title={machine.spot ? 'Full price, never reclaimed (e.g. for the first setup)' : 'Cheaper, but the cloud can reclaim it'}>
@@ -521,6 +535,32 @@ function MachineCard({
           </div>
         );
       })()}
+      {confirm === 'big-screen' && (() => {
+        const to = !isBig;
+        const base = sizePrice(shape, !!machine.spot, machine.region);
+        const now = base != null ? base : null;
+        const next = base != null ? base - (isBig ? bigExtra : 0) + (to ? (bigScreen?.extraPerHour || 0) : 0) : null;
+        return (
+          <div className="mt-3 rounded border border-neon-magenta/40 p-3 text-xs text-slate-300 space-y-2">
+            <p>
+              <strong className="text-slate-100">{to ? 'Switch to big screen?' : 'Switch off big screen?'}</strong>{' '}
+              {to
+                ? 'NVIDIA’s GRID driver lifts the screen limit from 2560×1600 to 4096×2160 — native ultrawide (3440×1440) and 4K. Experimental.'
+                : 'Back to the standard driver: screens up to 2560×1600 (ultrawide still fills the screen, at 2560 wide).'}
+              {next != null && <> ≈{money(next)}/hour while running{now != null && <> (now ≈{money(now)})</>}.</>}
+            </p>
+            <p className="text-slate-400">
+              {machine.status === 'shelved' ? 'Applied when you restore it.'
+                : <>{machine.status === 'running' ? 'It is stopped, switched and started again. ' : 'Switched in place; '}the next start installs the {to ? 'GRID' : 'standard'} driver (5–10 minutes, one extra restart). Games and settings are kept.
+                  {to && machine.provider === 'gcp' && ' Google needs the "Virtual Workstation" GPU quota for this GPU in this region (the Regions page shows it). If Google refuses the switch on this machine, Shelve and Restore with big screen instead.'}</>}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'big-screen', { on: to }); }}>{to ? 'Switch to big screen' : 'Switch off big screen'}</button>
+              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
       {confirm === 'size' && (() => {
         const to = inPlaceSizes.find((s) => s.id === newSize);
         const now = sizePrice(shape, !!machine.spot, machine.region);
@@ -591,6 +631,12 @@ function MachineCard({
               })}
             </div>
           </div>
+          {(bigPossible || isBig) && (
+            <label className="flex items-start gap-2">
+              <input type="checkbox" checked={restoreBig} onChange={(e) => setRestoreBig(e.target.checked)} className="mt-0.5" />
+              <span>Big screen <span className="text-slate-500">(GRID driver: up to 4096×2160 — native ultrawide and 4K; experimental{bigScreen?.extraPerHour ? `, +${money(bigScreen.extraPerHour)}/h` : ''})</span></span>
+            </label>
+          )}
           <label className="flex items-start gap-2">
             <input type="checkbox" checked={keepSnapshot} onChange={(e) => setKeepSnapshot(e.target.checked)} className="mt-0.5" />
             <span>Keep the snapshot as a backup afterwards <span className="text-slate-500">(off = deleted once the machine is back, so you don&apos;t pay twice; {sd?.shelfMonthly ? `≈${money(sd.shelfMonthly)}/month` : 'a small monthly charge'} if kept)</span></span>
@@ -599,6 +645,7 @@ function MachineCard({
             <button type="button" className="btn-neon-lime text-xs" onClick={async () => {
               setConfirm(null);
               if (restoreSpot !== !!machine.spot) await onAction(machine, 'pricing', { spot: restoreSpot }); // shelved: recorded instantly
+              if (restoreBig !== isBig) await onAction(machine, 'big-screen', { on: restoreBig });      // shelved: recorded instantly
               await onAction(machine, 'restore', { region: restoreRegion, keepSnapshot, ...(restoreSize !== machine.instance_type ? { shapeId: restoreSize } : {}) });
             }}>Restore</button>
             <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
@@ -705,16 +752,18 @@ function MachinesPageInner() {
   const [sizesBy, setSizesBy] = useState<Record<string, ShapeInfo[]>>({});
   const [shapeOf, setShapeOf] = useState<Record<string, ShapeInfo>>({});
   const [bigExtraOf, setBigExtraOf] = useState<Record<string, number>>({});
+  const [bigOf, setBigOf] = useState<Record<string, { available: boolean; extraPerHour: number; notOnGpus?: string[] }>>({});
   // Regions this machine's GPU is offered in.
   const regionsFor = (m: Machine) => (regionsBy[m.provider] || []).filter((r) => !gpuOf[`${m.provider}:${m.instance_type}`] || r.gpus.includes(gpuOf[`${m.provider}:${m.instance_type}`]));
   useEffect(() => {
-    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: ShapeInfo[]; bigScreen?: { extraPerHour: number } }> }>('/machines/options')
+    apiFetch<{ providers: Array<{ provider: string; regions: Region[]; shapes: ShapeInfo[]; bigScreen?: { available: boolean; extraPerHour: number; notOnGpus?: string[] } }> }>('/machines/options')
       .then((o) => {
         setRegionsBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.regions])));
         setGpuOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh.gpuModel]))));
         setShapeOf(Object.fromEntries(o.providers.flatMap((p) => p.shapes.map((sh) => [`${p.provider}:${sh.id}`, sh]))));
         setSizesBy(Object.fromEntries(o.providers.map((p) => [p.provider, p.shapes])));
         setBigExtraOf(Object.fromEntries(o.providers.map((p) => [p.provider, p.bigScreen?.extraPerHour || 0])));
+        setBigOf(Object.fromEntries(o.providers.filter((p) => p.bigScreen).map((p) => [p.provider, p.bigScreen!])));
       })
       .catch(() => undefined);
   }, []);
@@ -858,7 +907,7 @@ function MachinesPageInner() {
             onOpFinished={() => finished(m.id)}
             regions={regionsFor(m)}
             shape={shapeOf[`${m.provider}:${m.instance_type}`]} bigExtra={bigExtraOf[m.provider]}
-            sizes={sizesBy[m.provider]} allRegions={regionsBy[m.provider]}
+            sizes={sizesBy[m.provider]} allRegions={regionsBy[m.provider]} bigScreen={bigOf[m.provider]}
           />
         ))}
       </div>

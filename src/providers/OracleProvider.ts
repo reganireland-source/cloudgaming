@@ -80,6 +80,7 @@ import {
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 import zlib from 'zlib';
 import { buildSetupScript } from './shared/setupScript';
+import { env } from '../config/env';
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 
 /** The parsed, checked credentials. */
@@ -465,7 +466,10 @@ export class OracleProvider extends CloudProvider {
    * cloud-init won't know how to run it).
    */
   private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, nickname?: string): string {
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname, devSshKeys: this.devSshKeys });
+    // Oracle's metadata holds ~32 KB: with the app's public URL the machine downloads
+    // the agent, dev tools and helpers instead (checksummed).
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname, devSshKeys: this.devSshKeys,
+      ...(env.API_PUBLIC_URL ? { agentUrl: `${env.API_PUBLIC_URL}/agent/cgtel.py` } : {}) });
     const newline = script.indexOf('\n');
     return script.slice(0, newline + 1) + this.hostFirewallSnippet() + script.slice(newline + 1);
   }

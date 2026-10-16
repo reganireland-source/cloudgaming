@@ -241,6 +241,16 @@ router.post('/:id/pricing', async (req: Request, res: Response) => {
   }
 });
 
+// Big screen on/off: { on: boolean, start?: boolean } (Google in place; shelved machines at Restore).
+router.post('/:id/big-screen', async (req: Request, res: Response) => {
+  try {
+    if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Send { "on": true } or { "on": false }.' });
+    res.status(202).json(await MachineService.setBigScreen(req.userId!, req.params.id, req.body.on, req.body?.start === true));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to switch big screen');
+  }
+});
+
 // Change size in place (Google, within a GPU family): { shapeId, start?: boolean }.
 router.post('/:id/size', async (req: Request, res: Response) => {
   try {
