@@ -314,6 +314,7 @@ aws s3 ls --no-sign-request s3://ec2-linux-nvidia-drivers/latest/`,
         'Portal → Quotas → Compute → pick your region.',
         'Find "Standard NCASv3_T4 Family vCPUs" → request 8.',
         'For spot machines, also request "Total Regional Spot vCPUs" → 8.',
+        'DEV tier (NC16as_T4_v3: 16 vCPU, 110 GB, for game development): request 16 instead of 8 — in the T4 family, "Total Regional vCPUs" (new subscriptions often have 10) and, for spot, "Total Regional Spot vCPUs".',
         'No NCASv3_T4 row for a region (this happens for Southeast Asia/Singapore on new subscriptions)? Check the machine exists there with  az vm list-skus --location <region> --size Standard_NC4as_T4_v3 --all -o table  (Restrictions should be None). If so, Azure just hasn\'t created the quota for you: open a support request → Service and subscription limits (quotas) → Compute-VM (cores-vCPUs) → that region → NCASv3_T4 → 8. Meanwhile use a nearby region, e.g. Malaysia West (Kuala Lumpur) for Singapore.',
         'az quota update fails with "InvalidResourceName" for a region? Same cause — there\'s no quota entry to update; use the support request above.',
         'Region names in the portal aren\'t cities: Southeast Asia = Singapore, East Asia = Hong Kong, Malaysia West = Kuala Lumpur, Japan East = Tokyo, Japan West = Osaka, Korea Central = Seoul, Central India = Pune, South India = Chennai, Australia East = Sydney.',
@@ -333,7 +334,10 @@ az quota list --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations
 az quota update --resource-name standardNCASv3_T4Family --resource-type dedicated \\
   --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8
 az quota update --resource-name lowPriorityCores --resource-type lowPriority \\
-  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8`,
+  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=8
+# DEV tier (16 vCPU): use value=16 above, and raise the regional total too:
+az quota update --resource-name cores --resource-type dedicated \\
+  --scope "/subscriptions/$SUB/providers/Microsoft.Compute/locations/$LOC" --limit-object value=24`,
       },
     },
     bigScreen: {

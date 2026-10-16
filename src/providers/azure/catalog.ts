@@ -47,6 +47,9 @@ export interface AzureShape {
   memoryGb: number;
   eastUsOnDemand: number;   // $/hour, East US, pay-as-you-go, Linux
   bestFor: string;
+  /** DEV tier (see CatalogShape.dev) and its suggested disk. */
+  dev?: boolean;
+  defaultDiskGb?: number;
 }
 
 export const AZURE_SHAPES: AzureShape[] = [
@@ -69,6 +72,23 @@ export const AZURE_SHAPES: AzureShape[] = [
     memoryGb: 56,
     eastUsOnDemand: 0.752,
     bestFor: 'CPU-heavy games (strategy, simulators) at 1080p60. Same GPU, twice the CPU.',
+  },
+  {
+    // DEV tier: the biggest single-GPU size of the same family (AMD EPYC, so
+    // 16 vCPU = 8 physical cores). Same T4 family quota as the gaming sizes,
+    // but it needs 16 vCPUs of it AND of "Total Regional vCPUs" (often 10 on
+    // new pay-as-you-go subscriptions). Disk 256 GB: Azure bills disks by
+    // size step, and 300 GB would be charged as the 512 GB step.
+    id: 'Standard_NC16as_T4_v3',
+    label: 'T4 · 16 vCPU · 110 GB RAM',
+    gpuModel: 'T4',
+    quotaFamily: 'standardNCASv3_T4Family',
+    vcpus: 16,
+    memoryGb: 110,
+    eastUsOnDemand: 1.204,
+    bestFor: 'Game development: 8 physical cores and 110 GB for imports, builds and parallel test runs; the T4 is fine for the editor.',
+    dev: true,
+    defaultDiskGb: 256,
   },
 ];
 

@@ -584,7 +584,7 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
             cli: `az extension add --name quota --only-show-errors\naz quota update --resource-name ${T4_QUOTA_FAMILY} --resource-type dedicated --scope "/subscriptions/${String(provider.subscriptionId || '<subscription-id>')}/providers/Microsoft.Compute/locations/${region}" --limit-object value=8` };
       // What can I run: on-demand needs the vCPUs free in BOTH the T4 family
       // and the regional total; spot only in the spot (low-priority) quota.
-      // Big screen uses the same quotas. Azure only has T4 machines (Good).
+      // Big screen uses the same quotas. Azure only has T4 machines (Good, and Dev with 16 vCPU).
       const famKey = fam?.name || T4_QUOTA_FAMILY;
       const azCell = (s: { vcpus: number }, m: RunMode): RunCell => {
         if (isSpotMode(m)) {
@@ -605,10 +605,22 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
       };
       const azPend = (key: string) => (azPending || []).filter((x) => String(x.quota).toLowerCase() === key.toLowerCase()).map((x) => ({ requested: x.requested, status: x.status, created: x.created }));
       const sub = String(provider.subscriptionId || '<subscription-id>');
+      // A Dev machine (16 vCPU) needs that many free in each quota it uses.
+      const azDevNeed = Math.max(0, ...AZURE_SHAPES.filter((s) => s.dev).map((s) => s.vcpus));
       const azQ = (key: string, label: string, u?: { limit: number; current: number }, lowPriority = false): QuotaDetail => {
         const short = !u || u.limit - u.current < AZ_MIN;
         const want = Math.max(8, (u?.current || 0) + 8);
         const missingEntry = !u && !lowPriority && key !== 'cores';
+        const devWant = (u?.current || 0) + azDevNeed;
+        const devRequest = !azDevNeed || (u && u.limit - u.current >= azDevNeed) ? undefined : missingEntry ? {
+          consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Support/NewSupportRequestV3Blade', consoleLabel: 'New support request',
+          cli: `az vm list-skus --location ${region} --size Standard_NC16as_T4_v3 --all -o table`,
+          note: `For a Dev machine: support request (Service and subscription limits → Compute-VM → ${region}, NCASv3_T4, new limit ${devWant}).`,
+        } : {
+          consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Capacity/QuotaMenuBlade/~/myQuotas', consoleLabel: 'Open Quotas',
+          cli: `az quota update --resource-name ${key} --resource-type ${lowPriority ? 'lowPriority' : 'dedicated'} --scope "/subscriptions/${sub}/providers/Microsoft.Compute/locations/${region}" --limit-object value=${devWant}`,
+          note: `For a Dev machine: asks for ${devWant} vCPUs (${azDevNeed} for the dev machine${u?.current ? ` + ${u.current} your machines use now` : ''}). Larger asks may need Microsoft to review them.`,
+        };
         const request = !short ? undefined : missingEntry ? {
           consoleUrl: 'https://portal.azure.com/#view/Microsoft_Azure_Support/NewSupportRequestV3Blade', consoleLabel: 'New support request',
           cli: `az vm list-skus --location ${region} --size Standard_NC4as_T4_v3 --all -o table`,
@@ -618,7 +630,7 @@ async function azureAccess(provider: any, regionIds: string[], log: Log = noLog)
           cli: `az quota update --resource-name ${key} --resource-type ${lowPriority ? 'lowPriority' : 'dedicated'} --scope "/subscriptions/${sub}/providers/Microsoft.Compute/locations/${region}" --limit-object value=${want}`,
           note: `Asks for ${want} vCPUs. Run in Azure Cloud Shell (first time: az extension add --name quota).`,
         };
-        return { key, label, used: u ? u.current : 0, limit: u ? u.limit : 0, unit: 'vCPUs', unlocks: [], short, ...(request ? { request } : {}), ...(azPend(key).length ? { pending: azPend(key) } : {}) };
+        return { key, label, used: u ? u.current : 0, limit: u ? u.limit : 0, unit: 'vCPUs', unlocks: [], short, ...(request ? { request } : {}), ...(devRequest ? { devRequest } : {}), ...(azPend(key).length ? { pending: azPend(key) } : {}) };
       };
       const extra = {
         ...buildRun(AZURE_SHAPES, () => true, true, azCell, [
