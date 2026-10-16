@@ -77,6 +77,7 @@ import {
 } from './azure/catalog';
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 import { buildSetupScript } from './shared/setupScript';
+import { env } from '../config/env';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 
 /** The parsed, checked credentials. */
@@ -270,7 +271,10 @@ fi
 `;
 
 function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, displayDriver?: 'standard' | 'grid', nickname?: string, devSshKeys?: string[]): string {
-  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure', serverName: nickname, devSshKeys });
+  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure', serverName: nickname, devSshKeys,
+    // Azure's custom data holds at most 64 KB: with the app's public URL the
+    // machine downloads the agent, dev tools and pairing helper (checksummed).
+    ...(env.API_PUBLIC_URL ? { agentUrl: `${env.API_PUBLIC_URL}/agent/cgtel.py` } : {}) });
   // Keep the "#!/bin/bash" line first (cloud-init needs it to run the file as a script).
   const firstNewline = script.indexOf('\n');
   return script.slice(0, firstNewline + 1) + AZURE_SCRIPT_PRELUDE + script.slice(firstNewline + 1);

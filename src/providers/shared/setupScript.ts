@@ -148,6 +148,8 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__CG_AGENT_SHA__').join(AGENT_SHA256)
     .split('__CG_DEVTOOLS__').join(opts.agentUrl ? '' : DEV_TOOLS_SCRIPT.replace(/\n$/, ''))
     .split('__CG_DEVTOOLS_SHA__').join(DEV_TOOLS_SHA256)
+    .split('__CG_MLPAIR__').join(opts.agentUrl ? '' : MLWEB_PAIR_SOURCE.replace(/\n$/, ''))
+    .split('__CG_MLPAIR_SHA__').join(MLWEB_PAIR_SHA256)
     .split('__DEV_SSH_KEYS__').join(devSshKeyLines(opts.devSshKeys || []));
 }
 
@@ -527,7 +529,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=10
+APPS_VERSION=11
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -751,6 +753,10 @@ COPY lutris-runtime-update.py /cloudy/bin/lutris-runtime-update.py
 COPY lutris-runtime.supervisor.conf /tmp/lutris-runtime.supervisor.conf
 RUN chmod 755 /cloudy/bin/lutris-runtime-update.py \
  && cat /tmp/lutris-runtime.supervisor.conf >> /cloudy/conf/supervisor/supervisord.conf && rm /tmp/lutris-runtime.supervisor.conf
+COPY desktop-scale.sh /cloudy/bin/setup-xfce4-desktop-icon-size.sh
+RUN chmod 755 /cloudy/bin/setup-xfce4-desktop-icon-size.sh \
+ && printf '[Desktop Entry]\nName=Display scale\nExec=/cloudy/bin/setup-xfce4-desktop-icon-size.sh pick\nIcon=preferences-desktop-display\nType=Application\nCategories=Settings;\n' > /usr/share/applications/display-scale.desktop \
+ && printf '\n[program:desktop-scale]\nautorestart=false\nstartsecs=0\nuser=%%(ENV_CLOUDYPAD_USER)s\ncommand=bash -c "sleep 25; . /cloudy/bin/export-dbus-address.sh; /cloudy/bin/setup-xfce4-desktop-icon-size.sh"\nenvironment=DISPLAY="%%(ENV_DISPLAY)s",HOME="%%(ENV_CLOUDYPAD_USER_HOME)s",XDG_RUNTIME_DIR="%%(ENV_XDG_RUNTIME_DIR)s"\n' >> /cloudy/conf/supervisor/supervisord.conf
 COPY add-apps.py /tmp/add-apps.py
 RUN chmod 755 /cloudy/bin/battlenet-start.sh /cloudy/bin/all-apps.sh && python3 /tmp/add-apps.py && rm /tmp/add-apps.py \
  && chown -R cloudy:cloudy /cloudy/bin /cloudy/conf/sunshine /cloudy/conf/xfce4-default
@@ -829,125 +835,12 @@ environment=HOME="%(ENV_CLOUDYPAD_USER_HOME)s",DISPLAY="%(ENV_DISPLAY)s"
 stdout_logfile=%(ENV_CLOUDYPAD_LOG_DIR)s/kasmvnc.log
 stderr_logfile=%(ENV_CLOUDYPAD_LOG_DIR)s/kasmvnc.err.log
 SUPV
-cat > /usr/local/sbin/cloudgaming-mlweb-pair.py <<'MLPAIR'
-#!/usr/bin/env python3
-"""Pair the browser client (moonlight-web-stream) with this machine's Sunshine.
-
-Runs on the machine after both containers are up, on every boot; it does
-nothing if already paired. Steps, all on 127.0.0.1:
-  1. sign in to Moonlight Web with the machine's login (the first sign-in
-     creates that user as its admin);
-  2. add Sunshine (127.0.0.1:47989) as a host, unless it's there;
-  3. start pairing: Moonlight Web answers with a PIN (first line of a
-     streamed JSON response), which we hand to Sunshine's /api/pin with the
-     same login - no one has to type it; then read the result.
-Usage: MLWEB_PASSWORD=... mlweb-pair.py <moonlight-web port> <username>
-"""
-import http.cookiejar, json, os, ssl, sys, time, urllib.request, base64
-
-port, user = sys.argv[1], sys.argv[2]
-password = os.environ["MLWEB_PASSWORD"]
-WEB = "https://127.0.0.1:%s/api" % port
-SUNSHINE_PIN = "https://127.0.0.1:47990/api/pin"
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE  # both use self-signed certificates on this machine
-jar = http.cookiejar.CookieJar()
-opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), urllib.request.HTTPCookieProcessor(jar))
-
-
-def call(method, path, body=None, timeout=20):
-    data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(WEB + path, data=data, method=method, headers={"Content-Type": "application/json"})
-    return opener.open(req, timeout=timeout)
-
-
-def log(msg):
-    print("mlweb-pair: " + msg, flush=True)
-
-
-def sunshine(method, body=None):
-    auth = base64.b64encode(("%s:%s" % (user, password)).encode()).decode()
-    data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(SUNSHINE_PIN, data=data, method=method,
-                                 headers={"Content-Type": "application/json", "Authorization": "Basic " + auth})
-    with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
-        return json.loads(r.read() or b"{}")
-
-
-def send_pin(pin):
-    body = {"pin": pin, "name": "Browser (Moonlight Web)"}
-    # Newer Sunshine lists waiting pairing requests (GET /api/pin) and wants
-    # the request's id with the PIN; older versions have no such list.
-    try:
-        pending = sunshine("GET").get("pairings")
-    except Exception:
-        pending = None
-    if pending is not None:
-        if not pending:
-            return False  # our request hasn't reached Sunshine yet
-        mine = [p for p in pending if str(p.get("address", "")).endswith("127.0.0.1")] or pending
-        body["pairing_id"] = mine[-1]["id"]
-    return sunshine("POST", body).get("status") in (True, "true")
-
-
-# 1. Wait for Moonlight Web, then sign in.
-for attempt in range(60):
-    try:
-        call("POST", "/login", {"name": user, "password": password}).read()
-        break
-    except Exception as e:  # not up yet
-        if attempt == 59:
-            log("Moonlight Web didn't answer: %s" % e); sys.exit(1)
-        time.sleep(5)
-
-# 2. Sunshine as a host (wait for it too: it starts after the desktop).
-host_id = None
-for attempt in range(60):
-    try:
-        # Streamed: first line = the list, later lines = live updates.
-        hosts = json.loads(call("GET", "/hosts").readline()).get("hosts", [])
-        if hosts:
-            h = hosts[0]
-            host_id = h["host_id"]
-            if h.get("paired") == "Paired":
-                log("already paired"); sys.exit(0)
-        else:
-            host_id = json.loads(call("POST", "/host", {"address": "127.0.0.1", "http_port": 47989}).readline())["host"]["host_id"]
-            log("added Sunshine as host %s" % host_id)
-        break
-    except Exception as e:
-        if attempt == 59:
-            log("couldn't add Sunshine: %s" % e); sys.exit(1)
-        time.sleep(5)
-
-# 3. Pair: read the PIN, give it to Sunshine, read the outcome.
-for attempt in range(5):
-    try:
-        resp = call("POST", "/pair", {"host_id": host_id}, timeout=120)
-        first = json.loads(resp.readline())
-        pin = first.get("Pin") if isinstance(first, dict) else None
-        if not pin:
-            raise RuntimeError("no PIN: %s" % first)
-        ok = False
-        for _ in range(20):  # Sunshine accepts the PIN once the pairing request has reached it
-            time.sleep(1)
-            try:
-                if send_pin(pin):
-                    ok = True; break
-            except Exception:
-                pass
-        second = resp.readline()
-        result = json.loads(second) if second.strip() else None
-        if isinstance(result, dict) and "Paired" in result:
-            log("paired with Sunshine"); sys.exit(0)
-        log("pairing attempt %d failed (PIN accepted: %s, result: %s)" % (attempt + 1, ok, result))
-    except Exception as e:
-        log("pairing attempt %d error: %s" % (attempt + 1, e))
-    time.sleep(10)
-sys.exit(1)
+MLP=/usr/local/sbin/cloudgaming-mlweb-pair.py
+cat > $MLP.new <<'MLPAIR'
+__CG_MLPAIR__
 MLPAIR
-chmod 700 /usr/local/sbin/cloudgaming-mlweb-pair.py
+grep -q import $MLP.new || curl -fsSL --retry 3 -m 60 "$(dirname '__CG_AGENT_URL__')/mlweb-pair.py" -o $MLP.new 2>/dev/null
+if [ "$(sha256sum < $MLP.new | cut -c1-64)" = '__CG_MLPAIR_SHA__' ]; then mv $MLP.new $MLP; chmod 700 $MLP; else rm -f $MLP.new; fi
 
 # Battle.net pre-install (first container start, in the background): Blizzard's
 # installer run silently through Proton (umu-run - what Lutris uses under the
@@ -1232,6 +1125,38 @@ else:
     print("WARNING: dock layout not recognised - apps are still in Moonlight and the app menu")
 PY
 
+# Desktop scale: CloudyPad sizes only the dock (10% of the screen height) and
+# leaves text at 96 DPI and xterm on a bitmap font, so on a 1440p+/Retina
+# stream the text is tiny and the dock huge. This replaces its per-session
+# script (run when Moonlight connects, after the resolution is set; and once
+# at desktop start): text DPI, top bar, dock, desktop icons, cursor and
+# xterm all follow the resolution (1080p 100%, 1440p 125%, 1600p 150%, 4K
+# 200%), or the choice saved by "Display scale" in the app menu.
+cat > "$SUN_DIR/project/desktop-scale.sh" <<'DSCALE'
+#!/usr/bin/env bash
+F=$HOME/.config/cloudgaming-scale
+if [ "$1" = pick ]; then
+  C=$(zenity --list --radiolist --title="Display scale" --text="Text, bars and icons" --height=360 --column=" " --column=Scale \
+    TRUE auto FALSE 100 FALSE 125 FALSE 150 FALSE 175 FALSE 200) || exit 0
+  mkdir -p "$HOME/.config"; echo "$C" > "$F"
+fi
+R=$(xrandr -q 2>/dev/null | grep -w connected | grep -oP '\d+x\d+' | head -n1)
+H=$(echo "$R" | cut -dx -f2)
+[ -n "$H" ] || exit 0
+P=$(cat "$F" 2>/dev/null)
+case "$P" in 100|125|150|175|200) ;; *) P=$(( H <= 1080 ? 100 : H <= 1440 ? 125 : H <= 1800 ? 150 : 200 )) ;; esac
+s() { echo $(( $1 * P / 100 )); }
+x() { xfconf-query -c "$1" -p "$2" -n -t "$3" -s "$4" 2>/dev/null || xfconf-query -c "$1" -p "$2" -s "$4"; }
+x xsettings /Xft/DPI int "$(s 96)"
+x xsettings /Gtk/CursorThemeSize int "$(s 24)"
+x xfce4-panel /panels/panel-1/size uint "$(s 26)"
+x xfce4-panel /panels/panel-1/icon-size uint "$(s 16)"
+x xfce4-panel /panels/panel-2/size uint "$(s 60)"
+x xfce4-desktop /desktop-icons/icon-size uint "$(s 48)"
+printf 'Xft.dpi: %s\nXTerm*faceName: Monospace\nXTerm*faceSize: 11\nXTerm*geometry: 110x32\nXTerm*background: #1d1f21\nXTerm*foreground: #e6e6e6\n' "$(s 96)" | xrdb -merge
+echo "Desktop scaled to $P% for $R"
+DSCALE
+
 cd "$SUN_DIR/project" || fail 60 "project directory missing"
 if ! docker image inspect "$APPS_IMAGE" >/dev/null 2>&1; then
   if ! docker image inspect "$SUNSHINE_IMAGE" >/dev/null 2>&1; then
@@ -1295,7 +1220,7 @@ if [ "$HEALTH" != "healthy" ]; then
 fi
 
 # Browser play: pair Moonlight Web with Sunshine (no-op once paired).
-if docker container inspect mlweb >/dev/null 2>&1; then
+if [ -f /usr/local/sbin/cloudgaming-mlweb-pair.py ] && docker container inspect mlweb >/dev/null 2>&1; then
   ( MLWEB_PASSWORD="$(printf '%s' "$SUN_PASS_B64" | base64 -d)" python3 /usr/local/sbin/cloudgaming-mlweb-pair.py "$MLWEB_PORT" "$SUN_USER" 2>&1 \
       | while read -r line; do say "$line"; done ) &
 fi
@@ -1398,6 +1323,7 @@ fi
 import type { SetupStage } from './types';
 import { AGENT_SOURCE, AGENT_SHA256 } from './agent';
 import { DEV_TOOLS_SCRIPT, DEV_TOOLS_SHA256 } from './devTools';
+import { MLWEB_PAIR_SOURCE, MLWEB_PAIR_SHA256 } from './mlwebPair';
 export type { SetupStage };
 
 /** One 15-second telemetry sample from the on-machine agent (fields: see shared/agent.ts). */
