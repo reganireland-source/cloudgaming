@@ -78,6 +78,7 @@ import {
 import type { InventoryItem, BillingActuals, BillingDay, CloudInvoice, CloudInvoices } from './shared/types';
 import { buildSetupScript } from './shared/setupScript';
 import { env } from '../config/env';
+import zlib from 'zlib';
 import { RESOURCE_TAG, STREAMING_FIREWALL_NAME, SUNSHINE_PORT_RANGES } from './shared/streaming';
 
 /** The parsed, checked credentials. */
@@ -278,6 +279,16 @@ function azureSetupScript(sunshineUsername: string, sunshinePassword: string, au
   // Keep the "#!/bin/bash" line first (cloud-init needs it to run the file as a script).
   const firstNewline = script.indexOf('\n');
   return script.slice(0, firstNewline + 1) + AZURE_SCRIPT_PRELUDE + script.slice(firstNewline + 1);
+}
+
+/**
+ * Azure's custom data holds at most 64 KB (decoded). The script is sent as
+ * is while it fits; past ~60 KB it's gzip-compressed (~4x smaller), which
+ * cloud-init unpacks by itself before running it (as on AWS and Oracle).
+ */
+export function azureCustomData(script: string): string {
+  const raw = Buffer.from(script, 'utf8');
+  return (raw.length > 60_000 ? zlib.gzipSync(raw, { level: 9 }) : raw).toString('base64');
 }
 
 export class AzureProvider extends CloudProvider {
@@ -674,7 +685,7 @@ export class AzureProvider extends CloudProvider {
               computerName: vmName,
               adminUsername: ADMIN_USER,
               // The setup script, base64-encoded. cloud-init runs it on first boot.
-              customData: Buffer.from(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver, options.nickname, this.devSshKeys)).toString('base64'),
+              customData: azureCustomData(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver, options.nickname, this.devSshKeys)),
               linuxConfiguration: {
                 disablePasswordAuthentication: true,
                 ssh: { publicKeys: [{ path: `/home/${ADMIN_USER}/.ssh/authorized_keys`, keyData: throwawaySshPublicKey() }] },
