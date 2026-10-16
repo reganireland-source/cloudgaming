@@ -76,8 +76,11 @@ export default function MegaQuotaCommand({ report, ctx, me }: { report: AccessRe
       for (const q of r.quotaDetail || []) {
         if (!q.unlocks.some(wanted)) continue;
         if (q.pending?.length) { waiting++; continue; }
-        if (!q.request?.cli) { have++; continue; }
-        block.push(...fillCommand(q.request.cli, ctx, provider).split('\n'));
+        // Dev selected and this quota can't fit a Dev machine: the bigger ask (covers the gaming tiers too).
+        const devAsk = tiers.includes('Dev') && q.unlocks.some((u) => u.startsWith('Dev ·') && wanted(u)) ? q.devRequest?.cli : undefined;
+        const cli = devAsk || q.request?.cli;
+        if (!cli) { have++; continue; }
+        block.push(...fillCommand(cli, ctx, provider).split('\n'));
       }
       const fresh = block.filter((l) => l.trim() && !seen.has(l));
       if (fresh.length) {

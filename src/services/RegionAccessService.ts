@@ -108,6 +108,8 @@ export interface QuotaDetail {
   short?: boolean;
   /** How to ask for more: a console page and a one-line command (works in bash and PowerShell). */
   request?: { consoleUrl?: string; consoleLabel?: string; cli?: string; note?: string };
+  /** vCPU quotas: the bigger ask a DEV machine (16–36 vCPU) needs, when the limit can't fit one. */
+  devRequest?: { consoleUrl?: string; consoleLabel?: string; cli?: string; note?: string };
 }
 
 const na = (why: string): RunCell => ({ ok: null, na: true, why });
@@ -116,12 +118,12 @@ const isBigMode = (m: RunMode) => m === 'big' || m === 'bigSpot';
 
 /** One row per tier (its cheapest machine sold here), plus which quota unlocks what. */
 function buildRun<S extends { id: string; gpuModel: string; vcpus: number }>(
-  shapes: S[], isSold: (gpuModel: string) => boolean, bigScreen: boolean | ((gpuModel: string) => boolean),
+  shapes: S[], isSold: (shape: S) => boolean, bigScreen: boolean | ((gpuModel: string) => boolean),
   cell: (shape: S, mode: RunMode) => RunCell, quotas: QuotaDetail[],
 ): { run: RunRow[]; quotaDetail: QuotaDetail[] } {
   const run: RunRow[] = TIERS.map((t) => {
     const ofTier = shapes.filter((s) => inTier(s as any, t.id)).sort((a, b) => a.vcpus - b.vcpus);
-    const soldHere = ofTier.filter((s) => isSold(s.gpuModel));
+    const soldHere = ofTier.filter((s) => isSold(s));
     const s = soldHere[0];
     const cells = Object.fromEntries(RUN_MODES.map((m) => [m,
       !ofTier.length ? na('This cloud has no machine in this tier')
@@ -183,7 +185,7 @@ const API: Record<ProviderName, Record<string, Describe>> = {
   aws: {
     getRegionOptIn: (_a, r) => ({ api: 'EC2 DescribeRegions AllRegions=true', host: 'ec2.us-east-1.amazonaws.com',
       out: r && `${Object.keys(r).length} regions, ${Object.values(r).filter((v) => v === 'not-opted-in').length} not switched on` }),
-    getGpuTypesOffered: ([reg], r) => ({ api: 'EC2 DescribeInstanceTypeOfferings g4dn/g5/g6e', host: `ec2.${reg}.amazonaws.com`, out: r && ([...r].join(', ') || 'none sold') }),
+    getGpuTypesOffered: ([reg], r) => ({ api: 'EC2 DescribeInstanceTypeOfferings g4dn/g5/g6/g6e', host: `ec2.${reg}.amazonaws.com`, out: r && ([...r].join(', ') || 'none sold') }),
     getQuotaRequests: ([reg], r) => ({ api: 'ServiceQuotas ListRequestedServiceQuotaChangeHistory ec2', host: `servicequotas.${reg}.amazonaws.com`, out: r === null ? 'not readable' : r && `${r.length} open request${r.length === 1 ? '' : 's'}` }),
     getEc2Quota: ([reg, code], r) => ({ api: `ServiceQuotas GetServiceQuota ec2/${code}${code === 'L-3819A6DF' ? ' (spot)' : ' (on-demand)'}`, host: `servicequotas.${reg}.amazonaws.com`, out: r == null ? undefined : `${r} vCPUs` }),
   },
@@ -356,7 +358,7 @@ async function gcpAccess(provider: any, regionIds: string[], log: Log = noLog): 
         return { ok: false, inUse: true, why: `${gcpLabel(k)}: all ${l.limit} in use by your running machine${l.used === 1 ? '' : 's'}`, uses };
       };
       const usedKeys = uniq(['GPUS_ALL_REGIONS', ...GCP_SHAPES.flatMap((s) => RUN_MODES.flatMap((m) => metricsFor(s, m)))]);
-      const detail = buildRun(GCP_SHAPES, (g) => (sold as string[]).includes(g), (g) => !noBig.includes(g), gcpCell,
+      const detail = buildRun(GCP_SHAPES, (s) => (sold as string[]).includes(s.gpuModel), (g) => !noBig.includes(g), gcpCell,
         usedKeys.map((k) => {
           const l = k === 'GPUS_ALL_REGIONS' ? { limit: globalLimit, used: globalUsage } : line(k);
           const pend = pendingFor(k, l.limit);
@@ -449,14 +451,17 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
     // Which of our instance types AWS sells here (asked live; skipped if it can't be read).
     const allModels = uniq(AWS_SHAPES.map((sh) => sh.gpuModel));
     let notSold: string[] = [];
+    let offered: Set<string> | null = null;
     try {
-      const offered: Set<string> = await provider.getGpuTypesOffered(region);
-      const sold = allModels.filter((m) => AWS_SHAPES.some((sh) => sh.gpuModel === m && offered.has(sh.id)));
+      offered = await provider.getGpuTypesOffered(region) as Set<string>;
+      const sold = allModels.filter((m) => AWS_SHAPES.some((sh) => sh.gpuModel === m && offered!.has(sh.id)));
       void applyOffering('aws', region, sold, allModels); // live answer corrects the catalog (Recon, launch)
-      if (!sold.length) return notOffered(region, 'AWS sells no g4dn (T4), g5 (A10G) or g6e (L40S) machines in this region', 'https://aws.amazon.com/ec2/instance-types/g4/', 'AWS G4dn instances');
+      if (!sold.length) return notOffered(region, 'AWS sells no g4dn (T4), g5 (A10G), g6 (L4) or g6e (L40S) machines in this region', 'https://aws.amazon.com/ec2/instance-types/g4/', 'AWS G4dn instances');
       notSold = allModels.filter((m) => !sold.includes(m));
     } catch { /* unknown: assume the catalog is right */ }
     const withSold = (a: RegionAccess): RegionAccess => (notSold.length ? { ...a, notSold, summary: `${a.summary} · no ${notSold.join('/')} machines sold here` } : a);
+    // Sold here: per instance type when AWS answered (a family can lack a size), else by GPU.
+    const isSoldHere = (s: { id: string; gpuModel: string }) => (offered ? offered.has(s.id) : !notSold.includes(s.gpuModel));
     try {
       const [od, sp, awsPending] = await Promise.all([
         provider.getEc2Quota(region, AWS_ON_DEMAND),
@@ -474,19 +479,26 @@ async function awsAccess(provider: any, regionIds: string[], log: Log = noLog): 
           : { ok: false, why: `Limit ${lim} vCPUs — needs ${s.vcpus}`, uses: [code] };
       };
       const pend = (code: string) => (awsPending || []).filter((x: any) => x.quota === code).map((x: any) => ({ requested: x.requested, status: x.status, created: x.created }));
+      // A Dev machine needs its whole vCPU count (16–32) within this quota.
+      const devNeed = Math.max(0, ...AWS_SHAPES.filter((s) => s.dev && isSoldHere(s)).map((s) => s.vcpus));
       const awsQ = (code: string, label: string, limit: number | null): QuotaDetail => {
         const short = (limit ?? 0) < AWS_MIN;
         const want = Math.max(8, (limit ?? 0) + AWS_MIN);
+        const consoleUrl = `https://${region}.console.aws.amazon.com/servicequotas/home/services/ec2/quotas/${code}`;
+        const cliFor = (n: number) => `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${code} --desired-value ${n}`;
         return { key: code, label, used: null, limit: limit ?? 0, unit: 'vCPUs', unlocks: [], short,
           ...(short ? { request: {
-            consoleUrl: `https://${region}.console.aws.amazon.com/servicequotas/home/services/ec2/quotas/${code}`, consoleLabel: 'Request in Service Quotas',
-            cli: `aws service-quotas request-service-quota-increase --region ${region} --service-code ec2 --quota-code ${code} --desired-value ${want}`,
+            consoleUrl, consoleLabel: 'Request in Service Quotas', cli: cliFor(want),
             note: `Asks for ${want} vCPUs (two small machines, or one 8-vCPU). Run in AWS CloudShell.`,
+          } } : {}),
+          ...(devNeed && (limit ?? 0) < devNeed ? { devRequest: {
+            consoleUrl, consoleLabel: 'Request in Service Quotas', cli: cliFor(devNeed),
+            note: `For a Dev machine: asks for ${devNeed} vCPUs (one ${devNeed}-vCPU dev machine, or a dev machine plus a small one while it’s off). Larger asks can take AWS longer to approve.`,
           } } : {}),
           ...(pend(code).length ? { pending: pend(code) } : {}) };
       };
       const extra = {
-        ...buildRun(AWS_SHAPES, (g) => !notSold.includes(g), true, awsCell,
+        ...buildRun(AWS_SHAPES, isSoldHere, true, awsCell,
           [awsQ(AWS_ON_DEMAND, 'Running On-Demand G and VT instances (vCPUs)', od), awsQ(AWS_SPOT, 'All G and VT Spot Instance Requests (vCPUs)', sp)]),
         ...(awsPending ? {} : { pendingNote: 'Couldn’t read open quota requests (the key needs “ServiceQuotasReadOnlyAccess”).' }),
       };

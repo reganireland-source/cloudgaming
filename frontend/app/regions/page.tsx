@@ -485,6 +485,13 @@ function QuotaList({ r }: { r: RegionAccess }) {
                   {q.request.note && <p className="text-slate-500">{q.request.note}</p>}
                 </div>
               )}
+              {q.devRequest && !q.pending?.length && q.unlocks.some((u) => u.startsWith('Dev')) && (
+                <div className="mt-1 ml-3 pl-2 border-l border-neon-purple/40 space-y-1">
+                  <p className="text-neon-purple">Not enough for a Dev machine.</p>
+                  {q.devRequest.cli && <Cli text={fill(q.devRequest.cli)} wrap />}
+                  {q.devRequest.note && <p className="text-slate-500">{q.devRequest.note}</p>}
+                </div>
+              )}
             </li>
           );
         })}

@@ -62,6 +62,8 @@ export interface QuotaDetail {
   short?: boolean;
   /** How to ask for more: console page + one-line command. */
   request?: { consoleUrl?: string; consoleLabel?: string; cli?: string; note?: string };
+  /** vCPU quotas: the bigger ask a DEV machine needs, when the limit can't fit one. */
+  devRequest?: { consoleUrl?: string; consoleLabel?: string; cli?: string; note?: string };
 }
 
 export interface CloudAccess {

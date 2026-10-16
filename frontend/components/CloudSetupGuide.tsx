@@ -234,7 +234,7 @@ aws iam create-access-key --user-name $U --query 'AccessKey.[AccessKeyId,SecretA
         { href: 'https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas/L-3819A6DF', label: 'Spot G and VT (L-3819A6DF)' },
         { href: 'https://console.aws.amazon.com/servicequotas/home/requests', label: 'Your quota requests' },
       ],
-      summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge (including the SUPER-tier g6e.2xlarge, L40S) needs 8.',
+      summary: 'New AWS accounts have a GPU limit of 0 vCPUs. The limit is counted in vCPUs, not machines: a g4dn.xlarge needs 4, a 2xlarge (including the SUPER-tier g6e.2xlarge, L40S) needs 8, and a DEV-tier machine 16 (g6.4xlarge) or 32 (g6/g5/g4dn.8xlarge).',
       steps: [
         'Service Quotas → AWS services → Amazon EC2, in the region you\'ll use.',
         'Find "Running On-Demand G and VT instances" (quota code L-DB2E81BA) → Request increase at account level → 8. "Account level" is just AWS\'s name for your account\'s limit: it still applies only to the region selected.',
@@ -256,7 +256,8 @@ for R in $REGIONS; do
   echo "$R on-demand=$(aws service-quotas get-service-quota --region $R --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value) spot=$(aws service-quotas get-service-quota --region $R --service-code ec2 --quota-code L-3819A6DF --query Quota.Value)"
 done
 
-# Request 8 vCPUs of each (enough for one g5.2xlarge or one SUPER-tier g6e.2xlarge)
+# Request 8 vCPUs of each (enough for one g5.2xlarge or one SUPER-tier g6e.2xlarge).
+# For a DEV-tier machine (16 cores, 32 vCPUs) use --desired-value 32 instead.
 for R in $REGIONS; do
   aws service-quotas request-service-quota-increase --region $R --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
   aws service-quotas request-service-quota-increase --region $R --service-code ec2 --quota-code L-3819A6DF --desired-value 8
