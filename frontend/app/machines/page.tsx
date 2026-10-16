@@ -164,11 +164,12 @@ function AutoShelvePicker({ value, saving, onChange, inline }: { value: number |
   );
 }
 
-interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string; prices?: Record<string, { onDemand: number; spot: number | null }> }
-type TierId = 'good' | 'better' | 'best' | 'super';
+interface ShapeInfo { id: string; gpuModel: string; vcpus: number; memoryGb: number; label: string; dev?: boolean; prices?: Record<string, { onDemand: number; spot: number | null }> }
+type TierId = 'good' | 'better' | 'best' | 'super' | 'dev';
 
 /** Recon's hardware tiers (same rule as tierOf in src/services/ReconService.ts). */
 function tierOf(sh: ShapeInfo): TierId {
+  if (sh.dev) return 'dev';
   if (sh.gpuModel === 'L40S' || sh.gpuModel === 'RTX PRO 6000') return 'super';
   if (sh.gpuModel === 'T4') return 'good';
   if (sh.gpuModel === 'A10') return 'best';
@@ -179,17 +180,20 @@ const TIER_STYLE: Record<TierId, { label: string; cls: string; bars: number; not
   better: { label: 'Better', cls: 'text-neon-lime border-neon-lime/40', bars: 2, note: '1440p60 · modern AAA' },
   best: { label: 'Best', cls: 'text-neon-magenta border-neon-magenta/50', bars: 3, note: 'up to 1440p/4K · demanding and CPU-heavy games' },
   super: { label: 'Super', cls: 'text-neon-amber border-neon-amber/60', bars: 4, note: '4K · modern AAA with ray tracing and DLSS frame generation' },
+  dev: { label: 'Dev', cls: 'text-neon-purple border-neon-purple/60', bars: 0, note: 'game development and testing · many cores, lots of memory' },
 };
 
-/** GOOD / BETTER / BEST / SUPER — the Recon tier this machine's hardware falls in. */
+/** GOOD / BETTER / BEST / SUPER / DEV — the Recon tier this machine's hardware falls in. */
 function TierBadge({ shape }: { shape: ShapeInfo }) {
   const t = TIER_STYLE[tierOf(shape)];
   return (
     <span className={`inline-flex items-center gap-1.5 text-[0.66rem] uppercase tracking-label border rounded px-1.5 py-0.5 ${t.cls}`}
       title={`${t.label} tier: ${shape.gpuModel} GPU · ${shape.vcpus} vCPU · ${shape.memoryGb} GB RAM — ${t.note}`}>
-      <span aria-hidden className="inline-flex items-end gap-px h-2.5">
-        {[1, 2, 3, 4].map((b) => <span key={b} className={`w-[3px] rounded-sm ${b <= t.bars ? 'bg-current' : 'bg-current opacity-25'}`} style={{ height: `${b * 25}%` }} />)}
-      </span>
+      {t.bars ? (
+        <span aria-hidden className="inline-flex items-end gap-px h-2.5">
+          {[1, 2, 3, 4].map((b) => <span key={b} className={`w-[3px] rounded-sm ${b <= t.bars ? 'bg-current' : 'bg-current opacity-25'}`} style={{ height: `${b * 25}%` }} />)}
+        </span>
+      ) : <span aria-hidden className="font-mono leading-none">{'</>'}</span>}
       {t.label}
       <span className="normal-case tracking-normal text-slate-400">{shape.gpuModel} · {shape.vcpus} vCPU</span>
     </span>

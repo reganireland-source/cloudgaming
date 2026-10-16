@@ -39,6 +39,20 @@ export interface CatalogShape {
   vcpus: number;
   memoryGb: number;
   bestFor: string;        // one line of advice for the launch form
+  /** A DEV tier machine: many cores and lots of memory for game development and testing. */
+  dev?: boolean;
+  /** A gaming machine big enough to also count as DEV (e.g. Oracle's 30-vCPU A10). */
+  alsoDev?: boolean;
+  /** Suggested boot disk for this machine (else the cloud's defaultDiskGb). */
+  defaultDiskGb?: number;
+}
+
+/** A cloud catalog's machine as the app sees it (only the shared fields). */
+export function toCatalogShape(s: CatalogShape): CatalogShape {
+  return {
+    id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor,
+    ...(s.dev ? { dev: true } : {}), ...(s.alsoDev ? { alsoDev: true } : {}), ...(s.defaultDiskGb ? { defaultDiskGb: s.defaultDiskGb } : {}),
+  };
 }
 
 export interface ProviderCatalog {

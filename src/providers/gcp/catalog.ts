@@ -36,6 +36,9 @@ export interface GcpShape {
   memoryGb: number;
   usCentralOnDemand: number; // $/hour, machine + GPU, us-central1
   bestFor: string;
+  /** DEV tier (see CatalogShape.dev) and its suggested disk. */
+  dev?: boolean;
+  defaultDiskGb?: number;
 }
 
 export const GCP_SHAPES: GcpShape[] = [
@@ -84,6 +87,37 @@ export const GCP_SHAPES: GcpShape[] = [
     memoryGb: 32,
     usCentralOnDemand: 0.85,
     bestFor: 'Demanding AAA games at 1440p–4K60.',
+  },
+  {
+    // DEV tier: the same L4 machine family with more cores and memory, for
+    // game development and testing. G2 needs ONLY the L4 GPU quota (Google's
+    // allocation-quota docs: no CPU quota for G2/G4/A-series), so these use
+    // the same quota as the gaming L4 machines. vCPUs are hyperthreads: 16
+    // vCPU = 8 physical cores. Price = 16×0.0250 + 64×0.00293 + L4 0.56.
+    id: 'g2-standard-16',
+    label: 'L4 · 16 vCPU · 64 GB RAM',
+    machineType: 'g2-standard-16',
+    gpuModel: 'L4',
+    gpuQuotaMetric: 'NVIDIA_L4_GPUS',
+    vcpus: 16,
+    memoryGb: 64,
+    usCentralOnDemand: 1.15,
+    bestFor: 'Game development: 8 physical cores and 64 GB for imports, builds and parallel test runs.',
+    dev: true,
+    defaultDiskGb: 300,
+  },
+  {
+    id: 'g2-standard-32',
+    label: 'L4 · 32 vCPU · 128 GB RAM',
+    machineType: 'g2-standard-32',
+    gpuModel: 'L4',
+    gpuQuotaMetric: 'NVIDIA_L4_GPUS',
+    vcpus: 32,
+    memoryGb: 128,
+    usCentralOnDemand: 1.73,
+    bestFor: 'Game development at full speed: 16 physical cores and 128 GB — big imports and many tests at once.',
+    dev: true,
+    defaultDiskGb: 300,
   },
   {
     // SUPER tier. G4 = RTX PRO 6000 Blackwell (GB202, the RTX 5090's chip),
@@ -254,6 +288,7 @@ export function estimateHourly(shapeId: string, regionId: string, spot = false):
 // The generic catalog the launch form reads (see shared/types.ts)
 // ---------------------------------------------------------------------------
 import type { ProviderCatalog } from '../shared/types';
+import { toCatalogShape } from '../shared/types';
 
 export const GCP_CATALOG: ProviderCatalog = {
   provider: 'gcp',
@@ -264,7 +299,7 @@ export const GCP_CATALOG: ProviderCatalog = {
   defaultDiskGb: 150,
   minDiskGb: 50,
   regions: GCP_REGIONS.map((r) => ({ id: r.id, name: r.name, lat: r.lat, lng: r.lng, gpus: r.gpus, egressPerGb: r.egressPerGb })),
-  shapes: GCP_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
+  shapes: GCP_SHAPES.map(toCatalogShape),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: BALANCED_DISK_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,

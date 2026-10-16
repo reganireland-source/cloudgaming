@@ -35,6 +35,7 @@
  */
 
 import type { ProviderCatalog } from '../shared/types';
+import { toCatalogShape } from '../shared/types';
 
 export interface AzureShape {
   id: string;               // our id AND Azure's VM size name, stored in machines.instance_type
@@ -202,7 +203,7 @@ export const AZURE_CATALOG: ProviderCatalog = {
   defaultDiskGb: 150,
   minDiskGb: 64,
   regions: AZURE_REGIONS.map((r) => ({ id: r.id, name: r.name, lat: r.lat, lng: r.lng, gpus: r.gpus, egressPerGb: r.egressPerGb })),
-  shapes: AZURE_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
+  shapes: AZURE_SHAPES.map(toCatalogShape),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: PREMIUM_DISK_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,

@@ -44,7 +44,7 @@ import { GCP_SHAPES, GCP_CATALOG, gpuOfMetric, quotaRequestOf, spotMetricOf, vws
 import { AWS_SHAPES } from '../providers/aws/catalog';
 import { AZURE_SHAPES, T4_QUOTA_FAMILY } from '../providers/azure/catalog';
 import { ORACLE_SHAPES } from '../providers/oracle/catalog';
-import { TIERS, tierOf, type TierId } from './ReconService';
+import { TIERS, inTier, type TierId } from './ReconService';
 import { applyOffering } from './Offerings';
 
 export type RegionStatus = 'ready' | 'no-quota' | 'not-enabled' | 'not-offered' | 'unknown' | 'not-connected';
@@ -120,7 +120,7 @@ function buildRun<S extends { id: string; gpuModel: string; vcpus: number }>(
   cell: (shape: S, mode: RunMode) => RunCell, quotas: QuotaDetail[],
 ): { run: RunRow[]; quotaDetail: QuotaDetail[] } {
   const run: RunRow[] = TIERS.map((t) => {
-    const ofTier = shapes.filter((s) => tierOf(s as any) === t.id).sort((a, b) => a.vcpus - b.vcpus);
+    const ofTier = shapes.filter((s) => inTier(s as any, t.id)).sort((a, b) => a.vcpus - b.vcpus);
     const soldHere = ofTier.filter((s) => isSold(s.gpuModel));
     const s = soldHere[0];
     const cells = Object.fromEntries(RUN_MODES.map((m) => [m,

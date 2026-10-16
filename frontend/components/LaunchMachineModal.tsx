@@ -30,6 +30,8 @@ import { ACCESS_STYLE, RUN_MODES, fetchRegionAccess, indexAccess, statusFor, typ
 interface Region { id: string; name: string; gpus: string[]; egressPerGb: number; lat?: number; lng?: number }
 interface Shape {
   id: string; label: string; gpuModel: string; vcpus: number; memoryGb: number; bestFor: string;
+  /** DEV tier (game development: many cores) and its suggested disk. */
+  dev?: boolean; alsoDev?: boolean; defaultDiskGb?: number;
   prices: Record<string, {
     onDemand: number; spot: number | null;
     // Spot detail (src/services/SpotPriceService.ts): live where the cloud publishes it.
@@ -138,6 +140,9 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   }, [shapesHere, shapeId]);
 
   const shape = shapesHere.find((s) => s.id === shapeId);
+  // DEV machines suggest a bigger disk (projects, imports, build output): raise it, never shrink it.
+  const suggestedDisk = shape?.defaultDiskGb || 0;
+  useEffect(() => { if (suggestedDisk) setDiskGb((d) => Math.max(d, suggestedDisk)); }, [suggestedDisk]);
   const price = shape?.prices[region];
   const bigOk = !!current?.bigScreen?.available && !(shape && current?.bigScreen?.notOnGpus?.includes(shape.gpuModel));
   const hourly = (spot && price?.spot != null ? price.spot : price?.onDemand || 0) + (bigScreen && bigOk ? current!.bigScreen!.extraPerHour : 0);
@@ -293,6 +298,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                             <span className="flex justify-between gap-2">
                               <span className="font-semibold text-slate-100">{s.label}
                                 {(s.gpuModel === 'L40S' || s.gpuModel === 'RTX PRO 6000') && <span className="ml-1.5 text-[0.64rem] tracking-label text-neon-amber border border-neon-amber/50 rounded px-1" title="SUPER tier: RTX 4090/5090-class GPU with DLSS frame generation">SUPER</span>}
+                                {(s.dev || s.alsoDev) && <span className="ml-1.5 text-[0.64rem] tracking-label text-neon-purple border border-neon-purple/50 rounded px-1" title="DEV tier: many cores and lots of memory for game development and testing (vCPUs are hyperthreads: 2 per physical core)">DEV</span>}
                               </span>
                               <span className="text-neon-lime tabular-nums">≈USD {p?.onDemand.toFixed(2)}/h</span>
                             </span>
@@ -375,7 +381,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   <div>
                     <label htmlFor="launch-nickname" className="label block mb-2">Name</label>
                     <input id="launch-nickname" value={nickname} maxLength={40} onChange={(e) => setNickname(e.target.value)}
-                      placeholder={defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}
+                      placeholder={defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, dev: shape?.dev, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}
                       className="input-neon w-full sm:w-2/3 lg:w-full px-3 py-2 font-mono text-sm" autoComplete="off" />
                     <p className={`text-xs mt-1 ${nickname.trim() && !NICKNAME_RE.test(nickname.trim()) ? 'text-neon-amber' : 'text-slate-500'}`}>
                       {nickname.trim() && !NICKNAME_RE.test(nickname.trim())
@@ -441,7 +447,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                   <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-5 px-3 sm:px-5 py-3 bg-cyber-dark/95 backdrop-blur border-t border-white/10 flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
                     <p className="mr-auto text-xs text-slate-300 tabular-nums">
                       <span className="text-neon-lime font-semibold">≈ USD {hourly.toFixed(2)}/h</span> running · USD {diskMonthly.toFixed(2)}/month disk
-                      {nickname.trim() || shape ? <span className="text-slate-500"> · {nickname.trim() || defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}</span> : null}
+                      {nickname.trim() || shape ? <span className="text-slate-500"> · {nickname.trim() || defaultNickname({ provider, regionName: regionInfo?.name || region, gpuModel: shape?.gpuModel, vcpus: shape?.vcpus, dev: shape?.dev, spot: spot && !!current?.supportsSpot, bigScreen: bigScreen && bigOk })}</span> : null}
                     </p>
                     <button type="button" onClick={onClose} className="text-sm text-slate-400 hover:text-slate-200 px-3">Cancel</button>
                     <button

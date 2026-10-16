@@ -103,6 +103,7 @@ const GUIDES: Record<ProviderKey, Guide> = {
         'Filter "NVIDIA T4 GPUs" (cheapest) or "NVIDIA L4 GPUs" for your region (e.g. asia-southeast1) → request at least 1.',
         'For spot machines, also request "Preemptible NVIDIA T4 GPUs" (or L4).',
         'Quota is per GPU model: T4 quota covers GOOD-tier machines only; BETTER (L4) needs "NVIDIA L4 GPUs" as well. Request both in each region you travel to.',
+        'DEV tier (L4 with 16 or 32 vCPU, for game development): the same "NVIDIA L4 GPUs" quota — Google needs no CPU quota for G2 machines. One L4 quota runs one L4 machine at a time, gaming or dev.',
         'SUPER tier (G4, RTX PRO 6000): filter "GPUs per GPU family", pick the row with gpu_family NVIDIA_RTX_PRO_6000 in your region → request 1. For spot, "Preemptible NVIDIA RTX PRO 6000 GPUs". No CPU quota needed. Big screen on G4 needs BOTH that quota (or the Preemptible one for spot) AND "NVIDIA RTX PRO 6000 Virtual Workstation GPUs" (spot: its Preemptible version).',
         'Region names: asia-southeast1 = Singapore, asia-east2 = Hong Kong, asia-east1 = Taiwan, asia-northeast1 = Tokyo, asia-northeast3 = Seoul, asia-south1 = Mumbai, australia-southeast1 = Sydney, us-west1 = Oregon, us-west2 = Los Angeles.',
         'Approval usually takes from a few minutes to 2 business days.',
@@ -130,7 +131,7 @@ gcloud beta quotas preferences create --project=$P --billing-project=$P --servic
 # GOOD tier (T4), on-demand / spot:
 gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-T4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
 gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-T4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
-# BETTER / BEST tiers (L4), on-demand / spot:
+# BETTER / BEST / DEV tiers (L4), on-demand / spot:
 gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
 gcloud beta quotas preferences create --project=$P --billing-project=$P --service=compute.googleapis.com --quota-id=PREEMPTIBLE-NVIDIA-L4-GPUS-per-project-region --preferred-value=1 --dimensions=region=$R --email=<your email> --justification="Personal cloud gaming VM"
 # SUPER tier (RTX PRO 6000, G4), on-demand / spot:

@@ -29,7 +29,7 @@ import {
 const CLOUDS = [
   { id: 'gcp', short: 'Google' }, { id: 'aws', short: 'AWS' }, { id: 'azure', short: 'Azure' }, { id: 'oracle', short: 'Oracle' },
 ];
-const TIER_ORDER = ['Good', 'Better', 'Best', 'Super'];
+const TIER_ORDER = ['Good', 'Better', 'Best', 'Super', 'Dev'];
 const MODE_SHORT: Record<RunMode, string> = { normal: 'N', spot: 'S', big: 'B', bigSpot: 'B+S' };
 
 type Mark = 'yes' | 'no' | 'wait' | 'inuse' | 'unknown' | 'na';

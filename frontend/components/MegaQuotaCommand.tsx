@@ -18,7 +18,7 @@ import { RUN_MODES, type AccessReport, type RegionAccess, type RunMode } from '@
 import { fillCommand, type CommandContext } from '@/lib/commandContext';
 
 const TIERS = [
-  { id: 'Good', label: 'Good' }, { id: 'Better', label: 'Better' }, { id: 'Best', label: 'Best' }, { id: 'Super', label: 'Super' },
+  { id: 'Good', label: 'Good' }, { id: 'Better', label: 'Better' }, { id: 'Best', label: 'Best' }, { id: 'Super', label: 'Super' }, { id: 'Dev', label: 'Dev' },
 ];
 const SHELL: Record<string, { name: string; href: string }> = {
   gcp: { name: 'Google Cloud Shell', href: 'https://shell.cloud.google.com/' },

@@ -15,7 +15,8 @@
  * 3. General first, specific if wanted: the tier cards — GOOD (T4,
  *    1080p60), BETTER (L4/A10G, 1440p60), BEST (more GPU + CPU, up to 4K60),
  *    SUPER (L40S / RTX PRO 6000, 4K with ray tracing and DLSS frame
- *    generation) — can be switched directly, and "Fine-tune" holds a specific game,
+ *    generation), DEV (16+ vCPU and lots of memory, for game development
+ *    and testing; off the gaming ladder) — can be switched directly, and "Fine-tune" holds a specific game,
  *    a budget and the sort order.
  * 4. Pricing: RELIABLE (on-demand) or SPOT — the clouds' spare capacity at a
  *    steep discount, which the cloud can take back at short notice. Spot
@@ -42,7 +43,7 @@ import { useAuth } from '@/components/AuthProvider';
 import LaunchMachineModal, { type LaunchPreset } from '@/components/LaunchMachineModal';
 import { placeLabel, type Place } from '@/lib/places';
 
-type TierId = 'good' | 'better' | 'best' | 'super';
+type TierId = 'good' | 'better' | 'best' | 'super' | 'dev';
 type Priority = 'latency' | 'balanced' | 'price';
 type Rating = 'excellent' | 'good' | 'fair' | 'poor';
 
@@ -96,6 +97,8 @@ const CATEGORIES: Array<{ id: string; label: string; examples: string; tier: Tie
     why: 'Ray tracing and DLSS frame generation need an RTX 4090/5090-class GPU (L40S or RTX PRO 6000). Costs 2–5× more per hour, so spot is worth a look.' },
   { id: 'classic', label: 'Classic', examples: 'Skyrim, The Witcher 3, Fallout 4, older AAA', tier: 'good', priority: 'balanced',
     why: 'A T4 runs these at 1080p60 — no need to pay for more; good ping, then lowest price.' },
+  { id: 'gamedev', label: 'Game development', examples: 'Godot / Unity / Unreal: imports, builds, automated test runs', tier: 'dev', priority: 'balanced',
+    why: 'Imports, builds and test runs use every core you give them — 16+ vCPUs and lots of memory, with a GPU that’s plenty for the editor and test renders.' },
   { id: 'indie', label: 'Indie & casual', examples: 'Hades, Stardew Valley, Minecraft, turn-based', tier: 'good', priority: 'price',
     why: 'Light on hardware and forgiving of a little lag — the cheapest region that’s still playable.' },
 ];
@@ -106,7 +109,7 @@ const ANTI_CHEAT_BLOCKED = /valorant|fortnite|apex legends|pubg|league of legend
 const PRIORITY_LABEL: Record<Priority, string> = { latency: 'Lowest ping', balanced: 'Balanced', price: 'Lowest price' };
 
 // Tier → the launch form's streaming quality.
-const TIER_QUALITY: Record<TierId, string> = { good: 'good', better: 'high', best: 'ultra', super: 'ultra' };
+const TIER_QUALITY: Record<TierId, string> = { good: 'good', better: 'high', best: 'ultra', super: 'ultra', dev: 'high' };
 const QUICK_PICKS = ['Sydney', 'Singapore', 'Tokyo', 'London', 'New York', 'Los Angeles'];
 const STORE_KEY = 'recon.place';
 
@@ -426,8 +429,8 @@ export default function RecommendationsPage() {
         <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; SCANNING_REGIONS…</p>
       ) : (
         <>
-          {/* ---- Tier picker: GOOD / BETTER / BEST / SUPER ---- */}
-          <div role="radiogroup" aria-label="Hardware tier" className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          {/* ---- Tier picker: GOOD / BETTER / BEST / SUPER / DEV ---- */}
+          <div role="radiogroup" aria-label="Hardware tier" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
             {result.tiers.map((t) => {
               const pick = t.options[0];
               const selected = t.id === tierId;
@@ -714,7 +717,8 @@ function CoordinatesEditor({ place, onSet }: { place: ChosenPlace | null; onSet:
 function GoLarge({ tiers, tierId, spot, onSwitch }: { tiers: Tier[]; tierId: TierId; spot: boolean; onSwitch: (t: TierId, spot: boolean) => void }) {
   const order: TierId[] = ['good', 'better', 'best', 'super'];
   const current = tiers.find((t) => t.id === tierId);
-  if (!current?.onDemandFrom) return null;
+  // DEV isn't on the gaming ladder: no "go large" from or to it.
+  if (!current?.onDemandFrom || !order.includes(tierId)) return null;
   // Biggest tier above the current one whose spot price beats the current tier on-demand.
   const bigger = order.slice(order.indexOf(tierId) + 1).reverse()
     .map((id) => tiers.find((t) => t.id === id))

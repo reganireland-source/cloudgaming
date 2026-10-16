@@ -36,6 +36,7 @@ export const TIER_CONSUMER: Record<string, string> = {
   better: '≈ RTX 3060 Ti–3070',
   best: '≈ RTX 3070 + more CPU',
   super: '≈ RTX 4080 Super–5090 · DLSS FG',
+  dev: '8–18 real cores · 64–440 GB RAM',
 };
 
 /** Tier → DLSS features its GPUs support (games still have to support them). */
@@ -44,4 +45,5 @@ export const TIER_DLSS: Record<string, string> = {
   better: 'DLSS 2 upscaling (L4: DLSS 3 frame generation)',
   best: 'DLSS 2 upscaling',
   super: 'DLSS 3 frame generation (L40S) · DLSS 4 multi-frame generation (RTX PRO 6000)',
+  dev: 'Built for development: imports, builds and parallel test runs (vCPUs are hyperthreads: 2 per core)',
 };

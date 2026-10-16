@@ -28,6 +28,7 @@
  */
 
 import type { ProviderCatalog } from '../shared/types';
+import { toCatalogShape } from '../shared/types';
 
 export interface AwsShape {
   id: string;               // the AWS instance type — also stored in machines.instance_type
@@ -199,7 +200,7 @@ export const AWS_CATALOG: ProviderCatalog = {
   defaultDiskGb: 150,
   minDiskGb: 50,
   regions: AWS_REGIONS.map((r) => ({ id: r.id, name: r.name, lat: r.lat, lng: r.lng, gpus: r.gpus, egressPerGb: r.egressPerGb })),
-  shapes: AWS_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
+  shapes: AWS_SHAPES.map(toCatalogShape),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: GP3_PER_GB_MONTH,
   snapshotPerGbMonth: SNAPSHOT_PER_GB_MONTH,

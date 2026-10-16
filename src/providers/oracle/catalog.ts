@@ -36,6 +36,7 @@
  */
 
 import type { ProviderCatalog } from '../shared/types';
+import { toCatalogShape } from '../shared/types';
 
 export interface OracleShape {
   id: string;               // Oracle's shape name, also stored in machines.instance_type
@@ -182,7 +183,7 @@ export const ORACLE_CATALOG: ProviderCatalog = {
   defaultDiskGb: 150,
   minDiskGb: 50,
   regions: ORACLE_REGIONS.map((r) => ({ id: r.id, name: r.name, lat: r.lat, lng: r.lng, gpus: r.gpus, egressPerGb: r.egressPerGb })),
-  shapes: ORACLE_SHAPES.map((s) => ({ id: s.id, label: s.label, gpuModel: s.gpuModel, vcpus: s.vcpus, memoryGb: s.memoryGb, bestFor: s.bestFor })),
+  shapes: ORACLE_SHAPES.map(toCatalogShape),
   estimateHourly: (shapeId, regionId, spot) => estimateHourly(shapeId, regionId, spot),
   diskPerGbMonth: BOOT_VOLUME_PER_GB_MONTH,
   snapshotPerGbMonth: BACKUP_PER_GB_MONTH,

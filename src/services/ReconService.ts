@@ -40,7 +40,7 @@ import { CATALOGS } from '../providers/registry';
 import type { CatalogShape, ProviderName } from '../providers/shared/types';
 import { getSpotInfo, type SpotInfo } from './SpotPriceService';
 
-export type TierId = 'good' | 'better' | 'best' | 'super';
+export type TierId = 'good' | 'better' | 'best' | 'super' | 'dev';
 
 // Streaming quality per tier; GB/h matches the streaming_qualities seed data.
 export const TIERS: Array<{
@@ -56,14 +56,25 @@ export const TIERS: Array<{
   // RTX 4090/5090-class power. 2–5× the price of BEST.
   { id: 'super', label: 'Super', gpuClass: 'NVIDIA L40S / RTX PRO 6000', gpuShort: 'L40S · RTX PRO 6000', resolution: '4K', fps: 60, gbPerHour: 9,
     bestFor: 'Modern AAA with ray tracing and DLSS frame generation; 4K or high frame rates' },
+  // A different axis from the gaming tiers: cores and memory for game
+  // development and testing (imports, builds, parallel headless test runs),
+  // with a GPU good enough for the editor and test renders.
+  { id: 'dev', label: 'Dev', gpuClass: 'NVIDIA L4 / A10G / A10 / T4 with 16–36 vCPU', gpuShort: '16+ vCPU · L4 · A10', resolution: '1440p', fps: 60, gbPerHour: 5.4,
+    bestFor: 'Game development and testing: many cores and lots of memory for imports, builds and parallel test runs' },
 ];
 
 /** Which tier a catalog shape belongs to. */
 export function tierOf(shape: CatalogShape): TierId {
+  if (shape.dev) return 'dev';
   if (shape.gpuModel === 'L40S' || shape.gpuModel === 'RTX PRO 6000') return 'super';
   if (shape.gpuModel === 'T4') return 'good';                       // T4 with 8 vCPU is still a T4
   if (shape.gpuModel === 'A10') return 'best';                      // Oracle's A10 VM: 30 vCPU, 240 GB
   return shape.vcpus >= 8 ? 'best' : 'better';                      // L4 / A10G
+}
+
+/** Whether a machine belongs in a tier's list (a big gaming machine can also count as DEV). */
+export function inTier(shape: CatalogShape, tier: TierId): boolean {
+  return tierOf(shape) === tier || (tier === 'dev' && !!shape.alsoDev);
 }
 
 // game_profiles.gpu_class → suggested tier
@@ -168,7 +179,7 @@ export async function recon(opts: { lat: number; lng: number; budgetPerHour?: nu
     const all: ReconOption[] = [];
     const offeredBy = new Set<string>();
     for (const catalog of catalogs) {
-      const shapes = catalog.shapes.filter((s) => tierOf(s) === tier.id);
+      const shapes = catalog.shapes.filter((s) => inTier(s, tier.id));
       if (shapes.length) offeredBy.add(catalog.label);
       for (const region of catalog.regions) {
         let best: ReconOption | null = null;
