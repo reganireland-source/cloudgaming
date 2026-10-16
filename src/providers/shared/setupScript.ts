@@ -463,8 +463,8 @@ fi
 #    login always applies)
 # ============================================================================
 stage 60 sunshine "Configuring the Sunshine streaming container"
-mkdir -p "$SUN_DIR/data" "$SUN_DIR/conf/xfce4" "$SUN_DIR/conf/heroic" "$SUN_DIR/home" "$SUN_DIR/project" "$SUN_DIR/fps"
-chmod 1777 "$SUN_DIR/fps"
+mkdir -p "$SUN_DIR/data" "$SUN_DIR/conf/xfce4" "$SUN_DIR/conf/heroic" "$SUN_DIR/home" "$SUN_DIR/project" "$SUN_DIR/fps" "$SUN_DIR/x11"
+chmod 1777 "$SUN_DIR/fps" "$SUN_DIR/x11"
 # Settings + logins of the apps we add live under XDG_CONFIG_HOME
 # (/cloudy/conf) inside the container, which is NOT kept when the container
 # is recreated. Keep them on the machine's disk like Steam and the home
@@ -601,6 +601,7 @@ services:
       - $SUN_DIR/home:/home/cloudy
       - $SUN_DIR/project/mangohud.conf:/etc/mangohud.conf:ro
       - $SUN_DIR/fps:/cloudy/fps
+      - $SUN_DIR/x11:/tmp/.X11-unix
       - $SUN_DIR/project/sunshine.conf.template:/cloudy/conf/sunshine/sunshine.conf.template:ro
       - $SUN_DIR/tls:/cloudy/conf/tls:ro
     ports:
@@ -1299,6 +1300,18 @@ mv $K.new $K
 chown -R dev: /home/dev/.ssh
 chmod 700 /home/dev/.ssh
 chmod 600 $K
+# on-desktop CMD: run a program from SSH on the streamed desktop (display :42
+# in the container, whose X socket folder is shared at $SUN_DIR/x11; the
+# server runs with -ac, so no cookie is needed).
+cat > /usr/local/bin/on-desktop <<'ODESK'
+#!/bin/sh
+[ $# -gt 0 ] || { echo "usage: on-desktop <program> [args...]  (shows it on the streamed desktop)" >&2; exit 2; }
+[ -e /tmp/.X11-unix/X42 ] || { mkdir -p /tmp/.X11-unix 2>/dev/null; ln -sfn /var/lib/cloudgaming/sunshine/x11/X42 /tmp/.X11-unix/X42 2>/dev/null; }
+[ -S /tmp/.X11-unix/X42 ] || { echo "The streamed desktop isn't running yet (machine still starting, or its streaming container is down)." >&2; exit 1; }
+DISPLAY=:42 exec "$@"
+ODESK
+chmod 755 /usr/local/bin/on-desktop
+mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix && ln -sfn "$SUN_DIR/x11/X42" /tmp/.X11-unix/X42
 
 # ============================================================================
 # 6. Developer tools (Godot, WINE, Python; user "dev"): in the background,

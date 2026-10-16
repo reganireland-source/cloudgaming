@@ -91,6 +91,7 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
           Every machine has Godot 4.7.2 (<code className="text-slate-200">/usr/local/bin/godot</code>), Python tools (<code className="text-slate-200">/opt/devtools/venv</code>),
           WineHQ with DXVK + VKD3D-Proton, and Vulkan on its NVIDIA GPU, under the user <strong className="text-slate-200">{data.user}</strong>. They install in the background
           after the machine is ready to play (about 10 minutes; <code className="text-slate-200">cat /opt/devtools/READY</code> once done). Login is by SSH key only.
+          {' '}To see a program on your stream (Moonlight or the browser desktop), start it with <code className="text-slate-200">on-desktop</code>, e.g. <code className="text-slate-200">on-desktop godot --path ~/rocjob</code> — without it, programs run off-screen.
         </p>
 
         <div className="space-y-1.5">
