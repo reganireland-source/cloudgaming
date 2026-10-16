@@ -68,6 +68,8 @@ export interface SetupScriptOptions {
    * user-data limit can't hold it. Unset = shipped inline.
    */
   agentUrl?: string;
+  /** SSH public keys for the "dev" user (validated: see devSshKeyLines). */
+  devSshKeys?: string[];
   sunshineUsername: string;   // letters/digits only
   sunshinePassword: string;   // base64url characters only
   /**
@@ -143,7 +145,39 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     // After compactScript, so nothing in the agent can be stripped.
     .split('__CG_AGENT__').join(opts.agentUrl ? '' : AGENT_SOURCE.replace(/\n$/, ''))
     .split('__CG_AGENT_URL__').join(opts.agentUrl || '')
-    .split('__CG_AGENT_SHA__').join(AGENT_SHA256);
+    .split('__CG_AGENT_SHA__').join(AGENT_SHA256)
+    .split('__CG_DEVTOOLS__').join(opts.agentUrl ? '' : DEV_TOOLS_SCRIPT.replace(/\n$/, ''))
+    .split('__CG_DEVTOOLS_SHA__').join(DEV_TOOLS_SHA256)
+    .split('__DEV_SSH_KEYS__').join(devSshKeyLines(opts.devSshKeys || []));
+}
+
+/** Validated keys → "type base64 cg-app:comment" lines (anything else is dropped). */
+function devSshKeyLines(keys: string[]): string {
+  return keys.map((k) => parseSshPublicKey(k)).filter((k): k is NonNullable<typeof k> => !!k)
+    .map((k) => `${k.type} ${k.data} cg-app${k.comment ? `:${k.comment}` : ''}`).join('\n');
+}
+
+const SSH_KEY_TYPES = ['ssh-ed25519', 'ssh-rsa', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'sk-ssh-ed25519@openssh.com', 'sk-ecdsa-sha2-nistp256@openssh.com'];
+
+/** An OpenSSH public key line, checked (its base64 must name the same key type), or null. */
+export function parseSshPublicKey(line: string): { type: string; data: string; comment: string } | null {
+  const m = /^(\S+)\s+([A-Za-z0-9+/]+={0,2})(?:\s+(.*))?$/.exec(String(line).trim());
+  if (!m || !SSH_KEY_TYPES.includes(m[1])) return null;
+  const blob = Buffer.from(m[2], 'base64');
+  if (blob.length < 20 || blob.toString('base64') !== m[2]) return null;
+  // The blob is length-prefixed fields: the type again, then the key itself.
+  // They must fill it exactly (a truncated or mistyped key won't).
+  const fields: Buffer[] = [];
+  for (let at = 0; at < blob.length;) {
+    if (at + 4 > blob.length) return null;
+    const len = blob.readUInt32BE(at);
+    if (at + 4 + len > blob.length) return null;
+    fields.push(blob.subarray(at + 4, at + 4 + len));
+    at += 4 + len;
+  }
+  if (fields.length < 2 || fields[0].toString() !== m[1]) return null;
+  if (m[1] === 'ssh-ed25519' && (fields.length !== 2 || fields[1].length !== 32)) return null;
+  return { type: m[1], data: m[2], comment: (m[3] || '').replace(/[^A-Za-z0-9@._-]/g, '').slice(0, 60) };
 }
 
 /**
@@ -1284,7 +1318,7 @@ if [ "$AUTOSTOP_MINUTES" != "0" ]; then
   cat > /usr/local/sbin/cloudgaming-autostop.sh <<AUTOSTOP
 #!/bin/bash
 # Shut down after $AUTOSTOP_MINUTES minutes with no Moonlight or browser traffic and no
-# download above ~10 Mbit/s. Checked every 30 seconds.
+# download above ~10 Mbit/s, and no dev-user work (tests) using CPU. Checked every 30 seconds.
 LIMIT=\$(( $AUTOSTOP_MINUTES * 60 ))
 IDLE=0
 IFACE=\$(ip route show default | awk '{print \$5; exit}')
@@ -1295,7 +1329,8 @@ while true; do
   pkts=\$(( pkts + 0 ))
   rx=\$(cat /sys/class/net/\$IFACE/statistics/rx_bytes)
   mbps=\$(( (rx - last_rx) * 8 / 30 / 1000000 ))
-  if [ "\$pkts" -gt "\$last_pkts" ] || [ "\$mbps" -ge 10 ]; then IDLE=0; else IDLE=\$(( IDLE + 30 )); fi
+  dev=\$(ps -u dev -o pcpu= 2>/dev/null | awk '{s+=\$1} END {print int(s)}'); dev=\$(( dev + 0 ))
+  if [ "\$pkts" -gt "\$last_pkts" ] || [ "\$mbps" -ge 10 ] || [ "\$dev" -ge 5 ]; then IDLE=0; else IDLE=\$(( IDLE + 30 )); fi
   last_pkts=\$pkts; last_rx=\$rx
   if [ "\$IDLE" -ge "\$LIMIT" ]; then
     echo "CLOUDGAMING_AUTOSTOP idle for $AUTOSTOP_MINUTES minutes - shutting down" > /dev/ttyS0 2>/dev/null
@@ -1323,10 +1358,46 @@ else
 fi
 
 stage 100 ready "Ready to stream - open Moonlight and add this machine's IP"
+
+# ============================================================================
+# 5b. SSH keys for the "dev" user, from the app (key-only login; port 22 is
+#     only open to the IPs allowed in the app). Lines tagged cg-app are ours.
+# ============================================================================
+id dev >/dev/null 2>&1 || useradd -m -s /bin/bash -p '*' dev
+K=/home/dev/.ssh/authorized_keys
+mkdir -p /home/dev/.ssh
+{ grep -v ' cg-app' $K 2>/dev/null; cat <<'CGK'
+__DEV_SSH_KEYS__
+CGK
+} | grep -v '^$' > $K.new
+mv $K.new $K
+chown -R dev: /home/dev/.ssh
+chmod 700 /home/dev/.ssh
+chmod 600 $K
+
+# ============================================================================
+# 6. Developer tools (Godot, WINE, Python; user "dev"): in the background,
+#    once, after the machine is playable. Log: /var/log/cg-devtools.log
+# ============================================================================
+D=/opt/devtools/install.sh
+mkdir -p /opt/devtools
+cat > $D.new <<'CGD'
+__CG_DEVTOOLS__
+CGD
+grep -q godot $D.new || curl -fsSL --retry 3 -m 60 "$(dirname '__CG_AGENT_URL__')/dev-tools.sh" -o $D.new 2>/dev/null
+S=$(sha256sum < $D.new | cut -c1-64)
+if [ "$S" = '__CG_DEVTOOLS_SHA__' ]; then
+  mv $D.new $D
+  [ "$(cat /opt/devtools/installed.sha 2>/dev/null)" = "$S" ] || systemd-run --unit=cg-devtools --collect --quiet -p Nice=10 -p IOSchedulingClass=idle \
+    sh -c "bash $D > /var/log/cg-devtools.log 2>&1 && echo $S > /opt/devtools/installed.sha" >/dev/null 2>&1 || true
+else
+  rm -f $D.new
+fi
 `;
 
 import type { SetupStage } from './types';
 import { AGENT_SOURCE, AGENT_SHA256 } from './agent';
+import { DEV_TOOLS_SCRIPT, DEV_TOOLS_SHA256 } from './devTools';
 export type { SetupStage };
 
 /** One 15-second telemetry sample from the on-machine agent (fields: see shared/agent.ts). */

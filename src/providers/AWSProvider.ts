@@ -284,6 +284,43 @@ export class AWSProvider extends CloudProvider {
     return { vpcId, subnets: list };
   }
 
+  /** SSH: TCP 22 in our streaming security group, in each region with machines, only from these IPs. */
+  private async sshGroups(regions: string[]) {
+    const out: Array<{ region: string; group: AWS.EC2.SecurityGroup }> = [];
+    for (const region of [...new Set(regions)]) {
+      const r = await this.ec2For(region).describeSecurityGroups({ Filters: [{ Name: 'group-name', Values: [STREAMING_FIREWALL_NAME] }] }).promise();
+      for (const group of r.SecurityGroups || []) out.push({ region, group });
+    }
+    return out;
+  }
+  private static sshPerms(group: AWS.EC2.SecurityGroup) {
+    return (group.IpPermissions || []).filter((p) => p.IpProtocol === 'tcp' && p.FromPort === 22 && p.ToPort === 22);
+  }
+
+  async getSshAccess(regions: string[]): Promise<string[]> {
+    const cidrs = new Set<string>();
+    for (const { group } of await this.sshGroups(regions)) {
+      for (const p of AWSProvider.sshPerms(group)) for (const r of p.IpRanges || []) if (r.CidrIp) cidrs.add(r.CidrIp);
+    }
+    return [...cidrs];
+  }
+
+  async setSshAccess(cidrs: string[], regions: string[]): Promise<void> {
+    for (const { region, group } of await this.sshGroups(regions)) {
+      const ec2 = this.ec2For(region);
+      const old = AWSProvider.sshPerms(group).flatMap((p) => p.IpRanges || []).filter((r) => r.CidrIp);
+      if (old.length) {
+        await ec2.revokeSecurityGroupIngress({ GroupId: group.GroupId!, IpPermissions: [{ IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: old.map((r) => ({ CidrIp: r.CidrIp })) }] }).promise();
+      }
+      if (cidrs.length) {
+        await ec2.authorizeSecurityGroupIngress({
+          GroupId: group.GroupId!,
+          IpPermissions: [{ IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: cidrs.map((c) => ({ CidrIp: c, Description: 'SSH for the developer tools' })) }],
+        }).promise();
+      }
+    }
+  }
+
   /**
    * Make sure the security group (firewall) that opens the streaming ports
    * exists in this VPC, and return its id. Created once per region.
@@ -486,6 +523,7 @@ export class AWSProvider extends CloudProvider {
       displayDriver: options.displayDriver,
       gridSource: 'aws',
       serverName: options.nickname,
+      devSshKeys: this.devSshKeys,
       // The telemetry agent doesn't fit in AWS's 16 KB: the machine downloads it from this app
       // (no API_PUBLIC_URL = no telemetry on AWS machines; everything else works).
       agentUrl: env.API_PUBLIC_URL ? `${env.API_PUBLIC_URL}/agent/cgtel.py` : 'none',

@@ -91,6 +91,9 @@ export abstract class CloudProvider {
   /** Which cloud this is. Each subclass sets it, e.g. name = 'aws'. */
   abstract name: 'aws' | 'azure' | 'gcp' | 'oracle';
 
+  /** The user's SSH public keys for the "dev" user, baked into setup scripts (set by providerFor). */
+  devSshKeys: string[] = [];
+
   /**
    * true = the provider installs the streaming software itself (e.g. GCP
    * via a startup script), so MachineService must NOT run the SSH-based
@@ -151,6 +154,19 @@ export abstract class CloudProvider {
    */
   async refreshSetupScript(_instanceId: string, _opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string }): Promise<boolean> {
     return false;
+  }
+
+  /**
+   * SSH (TCP 22) to the machines, for the developer tools' "dev" user: the
+   * IPv4 ranges allowed in. [] = closed (the default). null = this cloud
+   * can't do it from the app. `regions`: where this user has machines (for
+   * clouds whose firewall is per region).
+   */
+  async getSshAccess(_regions: string[]): Promise<string[] | null> {
+    return null;
+  }
+  async setSshAccess(_cidrs: string[], _regions: string[]): Promise<void> {
+    throw new Error('This cloud can’t open SSH from the app yet.');
   }
 
   /** Enlarge the machine's boot disk to sizeGb (bigger only). The machine grows its filesystem itself. */

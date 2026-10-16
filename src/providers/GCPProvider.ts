@@ -49,6 +49,7 @@ import {
   GCP_REGIONS,
   GCP_SHAPES,
   NETWORK_TAG,
+  SSH_RULE_NAME,
   SUNSHINE_TCP_PORTS,
   SUNSHINE_UDP_PORTS,
   estimateHourly,
@@ -306,6 +307,53 @@ export class GCPProvider extends CloudProvider {
     }
   }
 
+  /** SSH: one project-wide firewall rule, only for our machines (network tag), only from these IPs. */
+  async getSshAccess(): Promise<string[]> {
+    try {
+      const [rule] = await this.firewalls.get({ project: this.projectId, firewall: SSH_RULE_NAME });
+      return (rule.sourceRanges || []).map(String);
+    } catch (error) {
+      if (isNotFound(error)) return [];
+      throw error;
+    }
+  }
+
+  async setSshAccess(cidrs: string[]): Promise<void> {
+    const exists = await this.firewalls.get({ project: this.projectId, firewall: SSH_RULE_NAME })
+      .then(() => true, (e: any) => (isNotFound(e) ? false : Promise.reject(e)));
+    if (!cidrs.length) {
+      if (exists) await this.waitGlobalOp((await this.firewalls.delete({ project: this.projectId, firewall: SSH_RULE_NAME }))[0]);
+      return;
+    }
+    if (exists) {
+      await this.waitGlobalOp((await this.firewalls.patch({ project: this.projectId, firewall: SSH_RULE_NAME, firewallResource: { sourceRanges: cidrs } }))[0]);
+      return;
+    }
+    try {
+      await this.waitGlobalOp((await this.firewalls.insert({
+        project: this.projectId,
+        firewallResource: {
+          name: SSH_RULE_NAME,
+          network: `global/networks/${NETWORK_NAME}`,
+          direction: 'INGRESS',
+          description: 'Gints Global Gaming Hubjob: SSH for the developer tools, only from the IPs you allowed',
+          sourceRanges: cidrs,
+          targetTags: [NETWORK_TAG],
+          allowed: [{ IPProtocol: 'tcp', ports: ['22'] }],
+        },
+      }))[0]);
+    } catch (error: any) {
+      if (/network/i.test(String(error?.message)) && /not found|notFound|was not found/i.test(String(error?.message))) {
+        throw new FriendlyCloudError({
+          code: 'NO_NETWORK', title: 'Launch a Google machine first',
+          explanation: 'SSH is opened on the app’s own network, which Google creates with your first machine.',
+          fixes: ['Launch a machine, then allow SSH again.'],
+        });
+      }
+      throw error;
+    }
+  }
+
   /**
    * Make sure the firewall rule that opens the streaming ports exists.
    * Created once per project; machines opt in via their network tag.
@@ -467,7 +515,7 @@ export class GCPProvider extends CloudProvider {
           : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD' },
         metadata: {
           items: [
-            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp', serverName: options.nickname }) },
+            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp', serverName: options.nickname, devSshKeys: this.devSshKeys }) },
             // Read by the machine at every boot (rename in the app = update this).
             ...(options.nickname ? [{ key: 'cg-nickname', value: options.nickname }] : []),
             { key: 'sunshine-username', value: options.sunshineUsername },
@@ -571,7 +619,7 @@ export class GCPProvider extends CloudProvider {
     const sunshineUsername = opts.sunshineUsername || get('sunshine-username');
     const sunshinePassword = opts.sunshinePassword || get('sunshine-password');
     if (!sunshineUsername || !sunshinePassword) throw new Error('The machine\'s streaming login isn\'t stored with it, so its script can\'t be rebuilt.');
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes: opts.autoStopMinutes, displayDriver: opts.displayDriver, gridSource: 'gcp', serverName: opts.nickname || get('cg-nickname') });
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes: opts.autoStopMinutes, displayDriver: opts.displayDriver, gridSource: 'gcp', serverName: opts.nickname || get('cg-nickname'), devSshKeys: this.devSshKeys });
     const next = items.filter((i) => i.key !== 'startup-script');
     next.push({ key: 'startup-script', value: script });
     await this.report('info', `Writing the current setup script to ${name} (used from its next start)…`);

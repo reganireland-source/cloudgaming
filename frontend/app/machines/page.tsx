@@ -43,6 +43,7 @@ import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
 import LaunchMachineModal from '@/components/LaunchMachineModal';
 import OperationConsole from '@/components/OperationConsole';
 import DiskMeter from '@/components/DiskMeter';
+import DevAccess from '@/components/DevAccess';
 import TelemetryPanel from '@/components/TelemetryPanel';
 import { byMachineOrder, isDeadStatus } from '@/lib/machineOrder';
 import FriendlyErrorCard from '@/components/FriendlyErrorCard';
@@ -373,7 +374,7 @@ function MachineCard({
           )}
           {machine.provider === 'gcp' && !placeholderId && ['running', 'stopped'].includes(machine.status) && (
             <button type="button" disabled={busy} onClick={() => setConfirm('update-script')} className="btn-neon text-xs disabled:opacity-40"
-              title="Install the newest on-machine script: telemetry, game FPS, disk reporting">Update script</button>
+              title="Install the newest on-machine script: telemetry, game FPS, disk reporting, developer tools and SSH keys">Update script</button>
           )}
           <button type="button" disabled={busy} onClick={() => setConfirm('delete')} className="text-xs border border-red-600/50 text-red-400 hover:border-red-500 rounded px-3 py-1.5 disabled:opacity-40">Delete</button>
         </div>
@@ -805,6 +806,9 @@ function MachinesPageInner() {
           </div>
         </details>
       )}
+
+      {/* ---- SSH for the developer tools ---- */}
+      <DevAccess />
 
       {/* ---- Recent activity across all machines ---- */}
       {recent.length > 0 && (

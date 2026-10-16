@@ -217,6 +217,8 @@ export const BOOT_IMAGE = 'projects/ubuntu-os-cloud/global/images/family/ubuntu-
 export const NETWORK_NAME = 'cloudgaming-net';
 export const FIREWALL_RULE_NAME = 'cloudgaming-net-sunshine';
 export const NETWORK_TAG = 'cloudgaming-sunshine';
+/** SSH (TCP 22) for the developer tools, open only to the IPs you allow. */
+export const SSH_RULE_NAME = 'cloudgaming-net-ssh';
 
 /** A unique private address range per region: 10.<64+index>.0.0/20. */
 export function subnetCidrFor(regionId: string): string {

@@ -210,5 +210,8 @@ export async function loadCredentials(userId: string, provider: string): Promise
  */
 export async function providerFor(userId: string, provider: string, reporter?: Reporter): Promise<CloudProvider> {
   const credentials = await loadCredentials(userId, provider);
-  return getProvider(provider, credentials).setReporter(reporter);
+  const p = getProvider(provider, credentials).setReporter(reporter);
+  p.devSshKeys = await query('SELECT keys FROM dev_ssh_keys WHERE user_id = $1', [userId])
+    .then((r: any) => (r.rows[0]?.keys as string[]) || [], () => []);
+  return p;
 }

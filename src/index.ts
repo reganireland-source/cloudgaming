@@ -95,6 +95,7 @@ import { recordRequest } from './services/Metrics';
 // request if it's missing or invalid. See src/api/middleware/auth.ts.
 import { authMiddleware } from './api/middleware/auth';
 import { AGENT_SOURCE } from './providers/shared/agent';
+import { DEV_TOOLS_SCRIPT } from './providers/shared/devTools';
 
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
@@ -185,7 +186,8 @@ app.use('/api/status', statusRoutes);          // PUBLIC: status lights must wor
 app.use('/api/auth', authRoutes);
 // PUBLIC: the telemetry agent AWS machines download at boot (no secrets in it; the
 // machine checks its sha256 against the one built into its setup script).
-app.get('/api/agent/cgtel.py', (_req, res) => { res.type('text/x-python').send(AGENT_SOURCE); });              // PUBLIC: you can't require login on the login page
+app.get('/api/agent/cgtel.py', (_req, res) => { res.type('text/x-python').send(AGENT_SOURCE); });
+app.get('/api/agent/dev-tools.sh', (_req, res) => { res.type('text/x-shellscript').send(DEV_TOOLS_SCRIPT); });   // PUBLIC: nothing secret in it              // PUBLIC: you can't require login on the login page
 app.use('/api/machines', authMiddleware, machineRoutes);
 app.use('/api/credentials', authMiddleware, credentialRoutes);  // your encrypted cloud keys
 app.use('/api/operations', authMiddleware, operationRoutes);    // live progress of cloud actions

@@ -38,6 +38,7 @@ import { FriendlyCloudError } from '../../providers/errors';
 import { CATALOGS } from '../../providers/registry';
 import { listCredentialSummaries } from '../../services/CredentialService';
 import { getSpotInfo, ON_RECLAIM } from '../../services/SpotPriceService';
+import { getSshAccess, setSshAccess, setSshKeys } from '../../services/SshAccessService';
 
 const router = Router();
 
@@ -159,6 +160,32 @@ router.get('/options', async (req: Request, res: Response) => {
 });
 
 /** GET /api/machines/:id */
+// SSH for the developer tools: who may connect, per cloud (closed by default).
+router.get('/ssh-access', async (req: Request, res: Response) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getSshAccess(req.userId!));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to read SSH access');
+  }
+});
+// { keys: "ssh-ed25519 AAAA… name\n…" } — the dev user's public keys (replaces them).
+router.put('/ssh-keys', async (req: Request, res: Response) => {
+  try {
+    res.json({ keys: await setSshKeys(req.userId!, req.body?.keys) });
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to save the SSH keys');
+  }
+});
+// { cidrs: ["203.0.113.7", ...] } — [] closes it again.
+router.put('/ssh-access/:provider', async (req: Request, res: Response) => {
+  try {
+    res.json(await setSshAccess(req.userId!, req.params.provider, req.body?.cidrs));
+  } catch (error) {
+    sendRouteError(res, error, 'Failed to change SSH access');
+  }
+});
+
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE id = $1 AND user_id = $2`, [req.params.id, req.userId]);

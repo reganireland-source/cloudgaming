@@ -465,7 +465,7 @@ export class OracleProvider extends CloudProvider {
    * cloud-init won't know how to run it).
    */
   private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, nickname?: string): string {
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname });
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname, devSshKeys: this.devSshKeys });
     const newline = script.indexOf('\n');
     return script.slice(0, newline + 1) + this.hostFirewallSnippet() + script.slice(newline + 1);
   }
