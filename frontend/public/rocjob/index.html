@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ROCJOB</title>
+<!--
+  The Rocjob game page, served at /rocjob (see frontend/next.config.js).
+  A plain static page: no sign-in, no tracking, nothing from the GGGH app.
+  ALL of its text, links and pictures come from page.txt in this folder;
+  to change the page, edit page.txt (how: README.md in this folder).
+-->
+<meta name="description" content="Rocjob: a rhythm beat 'em up through rock history. An early build for friends and playtesters.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ROCJOB">
+<meta property="og:description" content="A rhythm beat 'em up through rock history.">
+<meta name="theme-color" content="#140f19">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #140f19;
+  --bg-dot: #1f1727;
+  --glow: #2d1d3b;
+  --panel: #1e1726;
+  --panel-2: #271e32;
+  --line: #413353;
+  --ink: #f2ece2;
+  --muted: #c0b5cb;
+  --dim: #9488a5;
+  --black: #07050a;
+  --yellow: #ffd23f;
+  --yellow-hi: #ffe27a;
+  --yellow-lo: #b98f14;
+  --yellow-ink: #241900;
+  --groove: #b57cff;
+  --green: #5fd068;
+  --p1: #e5483f;
+  --p2: #3f90e8;
+  --pixel: "Silkscreen", "Courier New", monospace;
+  --body: Verdana, "DejaVu Sans", Geneva, Tahoma, sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 90% 460px at 50% 0, var(--glow) 0, transparent 72%),
+    radial-gradient(var(--bg-dot) 1px, transparent 1.6px);
+  background-size: 100% 100%, 6px 6px;
+  background-repeat: no-repeat, repeat;
+  color: var(--ink);
+  font: 15px/1.65 var(--body);
+  -webkit-text-size-adjust: 100%;
+}
+a { color: var(--yellow); }
+a:hover { color: var(--yellow-hi); }
+:focus-visible { outline: 3px solid var(--groove); outline-offset: 3px; }
+[hidden] { display: none !important; }
+
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 28px 40px;
+  display: grid;
+  gap: 30px;
+}
+
+/* ---- Masthead ---- */
+.masthead { display: grid; justify-items: center; gap: 14px; text-align: center; padding-top: 8px; }
+.hud {
+  font: 700 12px/1 var(--pixel); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--yellow); background: var(--black); border: 2px solid var(--line);
+  padding: 7px 12px 6px;
+}
+.logo {
+  margin: 0; text-wrap: balance;
+  font: 700 clamp(52px, 14vw, 120px)/.9 var(--pixel);
+  letter-spacing: .02em;
+  color: var(--yellow);
+  text-shadow: 0 5px 0 var(--p1), 5px 10px 0 var(--black);
+}
+.titlenote {
+  font: 400 12px/1 var(--pixel); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--dim); margin: 2px 0 0;
+}
+.tagline { margin: 0; max-width: 34ch; text-wrap: balance; font-size: clamp(17px, 2.5vw, 21px); line-height: 1.45; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 14px;
+  font: 700 clamp(17px, 2.6vw, 22px)/1.1 var(--pixel); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--yellow-ink); background: var(--yellow); text-decoration: none;
+  padding: 18px 28px 17px;
+  border: 3px solid var(--black);
+  box-shadow: 0 6px 0 var(--yellow-lo), 0 6px 0 3px var(--black);
+  margin-bottom: 9px;
+}
+.btn:hover { background: var(--yellow-hi); color: var(--yellow-ink); }
+.btn:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--yellow-lo), 0 2px 0 3px var(--black); }
+.btn svg { flex: none; width: 20px; height: 20px; }
+.where { margin: 0; font-size: 13px; color: var(--muted); }
+
+.menu { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; margin-top: 6px; }
+.menu a {
+  font: 700 12px/1 var(--pixel); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); text-decoration: none; padding: 6px 2px;
+}
+.menu a::before { content: "[ "; color: var(--dim); }
+.menu a::after { content: " ]"; color: var(--dim); }
+.menu a:hover { color: var(--yellow); }
+
+/* ---- Scrolling banner ---- */
+.banner {
+  overflow: hidden; background: var(--black);
+  border-block: 3px solid var(--line);
+}
+.banner .track { display: flex; width: max-content; animation: banner 46s linear infinite; }
+.banner span {
+  font: 700 13px/1 var(--pixel); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--yellow); white-space: pre; padding: 11px 0 10px;
+}
+.banner b { color: var(--p1); font-weight: 700; }
+@keyframes banner { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .banner .track { animation: none; }
+}
+
+/* ---- Framed pictures ---- */
+.frame {
+  margin: 0; background: var(--black);
+  border: 3px solid var(--black);
+  box-shadow: 0 0 0 2px var(--line), 8px 8px 0 2px var(--black);
+}
+.frame img { display: block; width: 100%; height: auto; aspect-ratio: 1600 / 865; object-fit: cover; }
+.frame figcaption, .shot figcaption {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 8px 12px; font-size: 13px; line-height: 1.4; color: var(--muted);
+  background: var(--panel-2); border-top: 2px solid var(--black);
+}
+.n { font: 700 11px/1 var(--pixel); color: var(--yellow); letter-spacing: .06em; flex: none; }
+.missing {
+  display: grid; place-items: center; aspect-ratio: 1600 / 865; padding: 16px; text-align: center;
+  font: 700 12px/1.5 var(--pixel); color: var(--p1); background: repeating-linear-gradient(45deg, #1a1220 0 10px, #140e19 10px 20px);
+}
+
+/* ---- Boxes ---- */
+.box {
+  background: var(--panel); border: 2px solid var(--line);
+  box-shadow: 6px 6px 0 var(--black);
+  padding: clamp(18px, 3.2vw, 30px);
+  scroll-margin-top: 16px;
+}
+h2 {
+  margin: 0 0 20px;
+  font: 700 clamp(20px, 3vw, 26px)/1.1 var(--pixel); letter-spacing: .04em; text-transform: uppercase;
+}
+h2::after {
+  content: ""; display: block; height: 8px; width: min(260px, 70%); margin-top: 11px;
+  background: repeating-linear-gradient(90deg, var(--groove) 0 12px, transparent 12px 15px);
+}
+.download h2::after { background: repeating-linear-gradient(90deg, var(--green) 0 12px, transparent 12px 15px); }
+h3 { margin: 0 0 10px; font: 700 13px/1.2 var(--pixel); letter-spacing: .08em; text-transform: uppercase; color: var(--yellow); }
+p { margin: 0; }
+.prose { display: grid; gap: 14px; max-width: 68ch; }
+.pitch .prose { font-size: 16.5px; line-height: 1.7; }
+
+.intro { display: grid; gap: 30px; grid-template-columns: 1fr; }
+@media (min-width: 860px) { .intro { grid-template-columns: 1.35fr 1fr; align-items: start; } }
+
+.download { display: grid; gap: 14px; justify-items: start; }
+.download .btn { width: 100%; }
+.chip {
+  display: inline-block; font: 700 12px/1 var(--pixel); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--black); background: var(--green); padding: 6px 9px 5px; border: 2px solid var(--black);
+}
+.notes { color: var(--ink); }
+.folder { width: 100%; border-top: 2px dashed var(--line); padding-top: 14px; }
+.ticks { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; font-size: 13.5px; color: var(--muted); }
+.ticks li { position: relative; padding-left: 20px; }
+.ticks li::before { content: ""; position: absolute; left: 0; top: .5em; width: 8px; height: 8px; background: var(--green); }
+.contact { font-size: 14px; color: var(--muted); }
+
+/* ---- Screenshots ---- */
+.shots { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+.shot { margin: 0; background: var(--black); border: 2px solid var(--black); box-shadow: 0 0 0 2px var(--line); }
+.shot button { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.shot img { display: block; width: 100%; height: auto; aspect-ratio: 1600 / 865; object-fit: cover; }
+.shot button:hover img { filter: brightness(1.08); }
+
+/* ---- Stages ---- */
+.acts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); margin-top: 16px; }
+.act { background: var(--panel-2); border: 2px solid var(--black); padding: 16px 16px 14px; }
+.act ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.act li { display: grid; grid-template-columns: 2.6em 1fr; gap: 6px; align-items: baseline; }
+.act .num { font: 700 12px/1 var(--pixel); color: var(--dim); font-variant-numeric: tabular-nums; }
+.act .band { display: block; font-size: 12.5px; color: var(--dim); }
+.note { color: var(--muted); max-width: 68ch; }
+
+/* ---- Features ---- */
+.feats { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px 30px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+.feats li { position: relative; padding-left: 28px; }
+.feats li::before {
+  content: ""; position: absolute; left: 0; top: .42em; width: 12px; height: 12px;
+  background: var(--yellow); box-shadow: 3px 3px 0 var(--black);
+}
+.feats li:nth-child(5n+2)::before { background: var(--p1); }
+.feats li:nth-child(5n+3)::before { background: var(--green); }
+.feats li:nth-child(5n+4)::before { background: var(--p2); }
+.feats li:nth-child(5n+5)::before { background: var(--groove); }
+
+/* ---- Footer ---- */
+footer { display: grid; gap: 12px; justify-items: center; text-align: center; color: var(--dim); font-size: 12.5px; padding-top: 6px; }
+footer p { max-width: 72ch; }
+.toplink { font: 700 12px/1 var(--pixel); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); text-decoration: none; }
+
+.status { text-align: center; color: var(--muted); font: 700 13px/1.6 var(--pixel); padding: 40px 0; }
+
+/* ---- Screenshot viewer ---- */
+#viewer {
+  width: min(1400px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 24px);
+  padding: 0; border: 3px solid var(--black); background: var(--panel); color: var(--ink);
+  box-shadow: 0 0 0 2px var(--line);
+}
+#viewer::backdrop { background: rgba(6, 4, 9, .88); }
+#viewer figure { margin: 0; }
+#viewer img { display: block; width: 100%; height: auto; max-height: calc(100dvh - 140px); object-fit: contain; background: var(--black); }
+#viewer figcaption { display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; font-size: 14px; color: var(--ink); }
+.vbtns { display: flex; gap: 8px; padding: 0 12px 12px; }
+.vbtns button {
+  flex: 1; font: 700 12px/1 var(--pixel); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink); background: var(--panel-2); border: 2px solid var(--black); box-shadow: 0 0 0 1px var(--line);
+  padding: 12px 8px; cursor: pointer;
+}
+.vbtns button:hover { color: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead" id="top">
+    <p class="hud" id="version" hidden></p>
+    <h1 class="logo" id="title">ROCJOB</h1>
+    <p class="titlenote" id="titleNote" hidden></p>
+    <p class="tagline" id="tagline"></p>
+    <a class="btn" id="cta" hidden target="_blank" rel="noopener">
+      <svg viewBox="0 0 10 10" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 0h2v5h2v1H7v1H6v1H4V7H3V6H2V5h2zM1 9h8v1H1z"/></svg>
+      <span></span>
+    </a>
+    <p class="where" id="where" hidden></p>
+    <nav class="menu" aria-label="On this page">
+      <a href="#download">Download</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#stages">Stages</a>
+      <a href="#features">Features</a>
+      <a href="#how">How to play</a>
+    </nav>
+  </header>
+
+  <div class="banner" id="banner" hidden aria-hidden="true"><div class="track"></div></div>
+
+  <p class="status" id="status">Loading…</p>
+  <noscript><p class="status">This page needs JavaScript switched on to show the game.</p></noscript>
+
+  <main id="page" hidden>
+    <div class="wrap" style="padding:0;max-width:none">
+      <figure class="frame" id="hero" hidden><img alt="" fetchpriority="high"><figcaption></figcaption></figure>
+
+      <div class="intro">
+        <section class="box pitch" id="pitch" hidden>
+          <h2>The game</h2>
+          <div class="prose"></div>
+        </section>
+        <section class="box download" id="download">
+          <h2>Download</h2>
+          <span class="chip" id="dlVersion" hidden></span>
+          <p class="notes" id="dlNotes" hidden></p>
+          <a class="btn" id="dlBtn" hidden target="_blank" rel="noopener">
+            <svg viewBox="0 0 10 10" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 0h2v5h2v1H7v1H6v1H4V7H3V6H2V5h2zM1 9h8v1H1z"/></svg>
+            <span></span>
+          </a>
+          <p class="where" id="dlWhere" hidden></p>
+          <div class="folder" id="folder" hidden>
+            <h3>In the download</h3>
+            <ul class="ticks"></ul>
+          </div>
+          <p class="contact" id="contact" hidden></p>
+        </section>
+      </div>
+
+      <section class="box" id="screenshots" hidden>
+        <h2>Screenshots</h2>
+        <div class="shots"></div>
+      </section>
+
+      <section class="box" id="stages" hidden>
+        <h2>Stages</h2>
+        <div class="prose notes-slot"></div>
+        <div class="acts"></div>
+      </section>
+
+      <section class="box" id="features" hidden>
+        <h2>Features</h2>
+        <ul class="feats"></ul>
+      </section>
+
+      <section class="box" id="how" hidden>
+        <h2>How to play</h2>
+        <div class="prose"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="footer">
+    <p id="credits" hidden></p>
+    <a class="toplink" href="#top">▲ Back to the top</a>
+  </footer>
+</div>
+
+<dialog id="viewer" aria-label="Screenshot">
+  <figure><img alt=""><figcaption><span class="n"></span><span class="cap"></span></figcaption></figure>
+  <div class="vbtns">
+    <button type="button" data-go="-1">◀ Prev</button>
+    <button type="button" data-go="0">Close ✕</button>
+    <button type="button" data-go="1">Next ▶</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  // Where this page's files live (page.txt, screenshots/). Change it only
+  // if the page moves to another address.
+  var ROOT = '/rocjob/';
+
+  var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function show(node) { node.hidden = false; return node; }
+  function norm(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function pad(i) { return (i < 10 ? '0' : '') + i; }
+
+  // ---- Reading page.txt: "Name: value" settings, then [Sections] ----
+  function parse(text) {
+    var settings = {}, sections = {}, cur = null;
+    text.replace(/^﻿/, '').split(/\r?\n/).forEach(function (raw) {
+      var line = raw.trim();
+      if (line.charAt(0) === '#') return;
+      var head = line.match(/^\[(.+)\]$/);
+      if (head) { cur = norm(head[1]); sections[cur] = sections[cur] || []; return; }
+      if (cur === null) {
+        var i = line.indexOf(':');
+        if (i > 0) settings[norm(line.slice(0, i))] = line.slice(i + 1).trim();
+        return;
+      }
+      sections[cur].push(line);
+    });
+    return { get: function (k) { return settings[k] || ''; }, section: function () {
+      for (var i = 0; i < arguments.length; i++) if (sections[arguments[i]]) return sections[arguments[i]];
+      return [];
+    } };
+  }
+  var ITEM = /^[-*•]\s+/;
+  function isItem(l) { return ITEM.test(l); }
+  function itemText(l) { return l.replace(ITEM, '').trim(); }
+  function halves(s) {
+    var i = s.indexOf('|');
+    return i < 0 ? [s.trim(), ''] : [s.slice(0, i).trim(), s.slice(i + 1).trim()];
+  }
+  function paragraphs(lines) {
+    var out = [], cur = [];
+    lines.forEach(function (l) {
+      if (!l || isItem(l)) { if (cur.length) out.push(cur.join(' ')); cur = []; }
+      else cur.push(l);
+    });
+    if (cur.length) out.push(cur.join(' '));
+    return out;
+  }
+  function picture(file) {
+    var name = file.split('/').pop();
+    return ROOT + 'screenshots/' + encodeURIComponent(name);
+  }
+  function safeLink(v) { return /^https?:\/\/\S+$/i.test(v) ? v : ''; }
+
+  function fillProse(box, lines) {
+    var ps = paragraphs(lines);
+    if (!ps.length) return;
+    var slot = $('.prose', box);
+    ps.forEach(function (t) { slot.append(el('p', null, t)); });
+    show(box);
+  }
+  function fillButton(a, href, label) {
+    a.href = href;
+    $('span', a).textContent = label;
+    show(a);
+  }
+  function img(src, alt, eager) {
+    var i = new Image();
+    i.src = src; i.alt = alt; i.decoding = 'async';
+    if (!eager) i.loading = 'lazy';
+    i.width = 1600; i.height = 865;
+    return i;
+  }
+  function missing(file) { return el('div', 'missing', 'Missing picture: ' + file + ' (check the file name in page.txt and the screenshots folder)'); }
+
+  function render(p) {
+    var title = p.get('title') || 'ROCJOB';
+    var tagline = p.get('tagline');
+    document.title = tagline ? title + ' · ' + tagline : title;
+    $('#title').textContent = title;
+    if (p.get('title note')) show($('#titleNote')).textContent = '(' + p.get('title note') + ')';
+    $('#tagline').textContent = tagline;
+
+    var version = p.get('version');
+    if (version) { show($('#version')).textContent = version; show($('#dlVersion')).textContent = version; }
+    if (p.get('release notes')) show($('#dlNotes')).textContent = p.get('release notes');
+
+    var link = safeLink(p.get('download link'));
+    var label = p.get('download button') || 'Download the game';
+    if (link) {
+      fillButton($('#cta'), link, label);
+      fillButton($('#dlBtn'), link, label);
+      if (p.get('download where')) {
+        show($('#where')).textContent = p.get('download where');
+        show($('#dlWhere')).textContent = p.get('download where');
+      }
+    }
+
+    var inDl = p.section('in the download').filter(isItem);
+    if (inDl.length) {
+      var ul = $('#folder ul');
+      inDl.forEach(function (l) { ul.append(el('li', null, itemText(l))); });
+      show($('#folder'));
+    }
+
+    var contact = p.get('contact');
+    if (contact) {
+      var c = show($('#contact'));
+      c.append('Feedback and bug reports: ');
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+        var m = el('a', null, contact); m.href = 'mailto:' + contact; c.append(m);
+      } else if (safeLink(contact)) {
+        var w = el('a', null, contact.replace(/^https?:\/\//i, '')); w.href = contact; w.target = '_blank'; w.rel = 'noopener'; c.append(w);
+      } else {
+        c.append(contact);
+      }
+    }
+
+    var banner = p.get('banner').split('★').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (banner.length) {
+      var track = $('#banner .track');
+      for (var r = 0; r < 4; r++) {
+        var span = el('span');
+        banner.forEach(function (b) { span.append(b + '   '); span.append(el('b', null, '★')); span.append('   '); });
+        track.append(span);
+      }
+      show($('#banner'));
+    }
+
+    fillProse($('#pitch'), p.section('pitch', 'about'));
+    fillProse($('#how'), p.section('how to play', 'controls'));
+
+    // Screenshots, in the order listed.
+    var shots = p.section('screenshots', 'gallery').filter(isItem).map(function (l) {
+      var h = halves(itemText(l));
+      return { file: h[0], caption: h[1] };
+    }).filter(function (s) { return /\.(jpe?g|png|webp|gif)$/i.test(s.file); });
+
+    var heroFile = p.get('top picture') || (shots[0] && shots[0].file) || '';
+    if (heroFile) {
+      var hero = show($('#hero'));
+      var known = shots.filter(function (s) { return s.file === heroFile; })[0];
+      var hi = $('img', hero);
+      hi.src = picture(heroFile); hi.alt = known ? known.caption : title;
+      hi.onerror = function () { hi.replaceWith(missing(heroFile)); };
+      if (known && known.caption) $('figcaption', hero).textContent = known.caption;
+      else $('figcaption', hero).remove();
+    }
+
+    if (shots.length) {
+      var grid = $('#screenshots .shots');
+      shots.forEach(function (s, i) {
+        var fig = el('figure', 'shot');
+        var b = el('button');
+        b.type = 'button';
+        b.setAttribute('aria-label', 'Show bigger: ' + (s.caption || s.file));
+        var im = img(picture(s.file), s.caption || '', false);
+        im.onerror = function () { b.replaceWith(missing(s.file)); };
+        b.append(im);
+        b.addEventListener('click', function () { openViewer(i); });
+        var cap = el('figcaption');
+        cap.append(el('span', 'n', pad(i + 1)), el('span', null, s.caption));
+        fig.append(b, cap);
+        grid.append(fig);
+      });
+      show($('#screenshots'));
+    }
+
+    // Stages: "Act 1:" lines start an act, "- Song | band" lines are stages.
+    var stageLines = p.section('stages', 'stage list');
+    var acts = [], act = null, notes = [];
+    stageLines.forEach(function (l) {
+      if (isItem(l)) {
+        if (!act) { act = { name: '', items: [] }; acts.push(act); }
+        act.items.push(halves(itemText(l)));
+      } else if (/:$/.test(l)) {
+        act = { name: l.slice(0, -1).trim(), items: [] }; acts.push(act);
+      } else if (l) {
+        notes.push(l);
+      }
+    });
+    if (acts.length) {
+      var box = $('#stages');
+      var ns = $('.notes-slot', box);
+      notes.forEach(function (t) { ns.append(el('p', 'note', t)); });
+      var holder = $('.acts', box), n = 0;
+      acts.forEach(function (a) {
+        if (!a.items.length) return;
+        var card = el('div', 'act');
+        if (a.name) card.append(el('h3', null, a.name));
+        var ol = el('ol');
+        a.items.forEach(function (it) {
+          n++;
+          var li = el('li');
+          var txt = el('span', null, it[0]);
+          if (it[1]) txt.append(el('span', 'band', it[1]));
+          li.append(el('span', 'num', pad(n)), txt);
+          ol.append(li);
+        });
+        card.append(ol);
+        holder.append(card);
+      });
+      show(box);
+    }
+
+    var feats = p.section('features').filter(isItem);
+    if (feats.length) {
+      var fl = $('#features ul');
+      feats.forEach(function (l) { fl.append(el('li', null, itemText(l))); });
+      show($('#features'));
+    }
+
+    var credits = paragraphs(p.section('credits', 'footer')).join(' ');
+    if (credits) show($('#credits')).textContent = credits;
+
+    // ---- Screenshot viewer ----
+    var viewer = $('#viewer'), vimg = $('img', viewer), at = 0;
+    function openViewer(i) {
+      at = (i + shots.length) % shots.length;
+      var s = shots[at];
+      vimg.src = picture(s.file);
+      vimg.alt = s.caption;
+      $('.n', viewer).textContent = pad(at + 1) + ' / ' + pad(shots.length);
+      $('.cap', viewer).textContent = s.caption;
+      if (!viewer.open) {
+        if (viewer.showModal) { viewer.showModal(); $('[data-go="1"]', viewer).focus(); }
+        else window.open(vimg.src, '_blank');
+      }
+    }
+    viewer.addEventListener('click', function (e) {
+      var go = e.target.closest && e.target.closest('[data-go]');
+      if (go) { var d = +go.getAttribute('data-go'); if (d) openViewer(at + d); else viewer.close(); return; }
+      if (e.target === viewer) viewer.close();
+    });
+    viewer.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowLeft') openViewer(at - 1);
+      if (e.key === 'ArrowRight') openViewer(at + 1);
+    });
+    var x0 = null;
+    viewer.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    viewer.addEventListener('touchend', function (e) {
+      if (x0 === null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 50) openViewer(at + (dx < 0 ? 1 : -1));
+    });
+
+    $('#status').remove();
+    show($('#page'));
+    if (location.hash) { var t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+  }
+
+  fetch(ROOT + 'page.txt', { cache: 'no-cache' })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+    .then(function (t) { render(parse(t)); })
+    .catch(function () { $('#status').textContent = 'Couldn’t load the page. Please try reloading.'; });
+})();
+</script>
+</body>
+</html>

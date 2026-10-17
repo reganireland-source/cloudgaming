@@ -1,0 +1,123 @@
+# ================================================================
+#  THE ROCJOB PAGE: this is the only file you need to edit.
+# ================================================================
+#  The page at /rocjob reads this file. Change the text below, then
+#  click "Commit changes" on GitHub. The page updates about a minute
+#  later, once the site has redeployed.
+#
+#  How this file works:
+#  - Lines starting with # are notes for you. The page ignores them.
+#  - "Name: value" lines at the top are single settings.
+#    Leave the value empty to hide that thing.
+#  - A name in [square brackets] starts a section of the page.
+#  - A line starting with "- " is one item in a list.
+#    Items show in the order you write them.
+#  - In the screenshot and stage lists, a | splits the line in two
+#    (file | caption, or song | band).
+# ================================================================
+
+Title: ROCJOB
+Title note: working title
+Tagline: A rhythm beat 'em up through rock history.
+
+# The scrolling strip under the title. Separate bits with a star.
+Banner: 2-player co-op ★ 22 band members ★ 18 stages ★ hit on the beat ★ FULL SHRED
+
+# The Google Drive folder with the builds. Replacing the files
+# inside the same folder needs no change here. Only change this
+# link if you ever make a new folder.
+Download link: https://drive.google.com/drive/folders/1IYkxhdmE-AaY4OlPv208qqMy1hrmseiN?usp=sharing
+Download button: Download the game
+Download where: Google Drive · Windows and Mac
+
+# Shown next to the download button. Update these two when you
+# upload a new build (for example "Build 17").
+Version: Shareware 0.1
+Release notes: Early build, made for friends and playtesters. Feedback welcome.
+
+# How people can reach you: an email address or a web link
+# (either becomes clickable). Leave it empty to hide the line.
+Contact:
+
+# The big picture at the top: a file name from the screenshots folder.
+Top picture: 01_s01_p1.jpg
+
+
+[Pitch]
+Rocjob is an HD-2D, rhythm-driven beat 'em up: a love letter to Streets of Rage and Turtles in Time. You time-travel through rock history and play as the band members themselves, in local 2-player co-op, fighting to the bands' songs. Every stage is built from a band's legend, in painted pixel-art worlds you can almost hear.
+
+
+[In the download]
+- Windows build: unzip it and run Rocjob.exe. If it does not start, run Play_Compatibility.bat.
+- Mac build
+- README_FRIENDS.txt: a short how-to-play for friends
+- RELEASE_NOTES.txt: what changed in this build
+- No Linux build yet: the Windows build runs under Wine.
+
+
+[Features]
+- 2-player local co-op beat 'em up; 22 playable band members across five bands: Thin Lizzy, Guns N' Roses, Pantera, The Smashing Pumpkins and Radiohead
+- Combat that lives on the beat: time your hits to the music for bigger combos
+- 18 stages across three acts, from Dublin streets to a Y2K finale, plus bosses, mini-bosses and crossover stages where the bands team up
+- Guitar solos as quick-time moments, and FULL SHRED: a guitar-hero-style note highway you play along to
+- Painted pixel-art worlds with a cinematic lighting look (an optional ULTRA LOOK setting adds depth, glow and atmosphere)
+- Controller support for many pad types (Xbox, PlayStation, Switch, Saturn and Mega Drive style pads) and keyboard, with on-screen prompts that match your device
+- Settings for quality, difficulty and accessibility
+
+
+[Stages]
+# A line ending in a colon starts an act. Stages are numbered for
+# you, in order. Any other plain line shows as a note.
+Each stage is named after a song and built around that band's story.
+
+Act 1:
+- Whiskey in the Jar | Thin Lizzy
+- Welcome to the Jungle | Guns N' Roses
+- I Am the Night | Pantera
+- The Drum Machine | The Smashing Pumpkins
+- On a Friday | Radiohead
+- The Small Rooms | all five bands meet
+
+Act 2:
+- Jailbreak
+- Paradise City
+- Cowboys from Hell
+- Today
+- Lights on the Crowd
+- September '91
+
+Act 3 (in beta):
+- Black Rose
+- November Rain
+- Floods
+- Tonight, Tonight
+- Karma Police
+- Y2K: The Last Show | the finale
+
+
+[How to play]
+Move with the stick or keys, hit on the beat, grab, jump and use your special. Two players share one screen. Full controls are in the game's Settings and in README_FRIENDS.txt in the download.
+
+
+[Screenshots]
+# To add one: upload the picture into the "screenshots" folder next
+# to this file, then add a line here:  - file name | caption
+# To remove one, delete its line (the file can stay).
+- 01_s01_p1.jpg | Dublin streets: Thin Lizzy, Whiskey in the Jar
+- 02_s01_p3.jpg | The road to the gig, horse and cart
+- 03_s02_p1.jpg | Sunset Strip rush hour: Guns N' Roses
+- 04_s02_p1boss.jpg | Sunset Strip, the crowd goes wild
+- 05_s03_p1.jpg | Pantera's Texas trailer park
+- 06_s04_p3.jpg | The Smashing Pumpkins' Chicago stage
+- 07_s05_p1.jpg | Radiohead's first pub gig, Oxford
+- 08_s06_p3.jpg | The Small Rooms: all five bands
+- 09_s08_p3.jpg | Paradise City stadium
+- 10_s09_p2.jpg | Cowboys from Hell: the Honky Tonk
+- 11_s10_p3.jpg | Today: the Jock King's pep rally
+- 12_s11_p1.jpg | Lights on the Crowd: the hotel corridor
+- 13_s15_p9.jpg | Floods: the Rattlesnake arena
+- 14_s18_p1.jpg | Y2K: The Last Show
+
+
+[Credits]
+Rocjob is a fan-made homage by Regan Ireland. All bands and songs are named in affection; no affiliation or endorsement. Pixel-art character bodies are edited from licensed asset packs; the full credits are in the game.
