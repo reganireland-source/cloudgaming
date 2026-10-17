@@ -610,6 +610,7 @@ services:
       - $SUN_DIR/conf/lutris:/cloudy/conf/lutris
       - $SUN_DIR/home:/home/cloudy
       - $SUN_DIR/project/mangohud.conf:/etc/mangohud.conf:ro
+      - $SUN_DIR/project/desktop-scale.sh:/cloudy/bin/setup-xfce4-desktop-icon-size.sh:ro
       - $SUN_DIR/fps:/cloudy/fps
       - $SUN_DIR/x11:/tmp/.X11-unix
       - $SUN_DIR/project/sunshine.conf.template:/cloudy/conf/sunshine/sunshine.conf.template:ro
@@ -1141,11 +1142,15 @@ x xsettings /Xft/DPI int "$(s 96)"
 x xsettings /Gtk/CursorThemeSize int "$(s 24)"
 x xfce4-panel /panels/panel-1/size uint "$(s 26)"
 x xfce4-panel /panels/panel-1/icon-size uint "$(s 16)"
-x xfce4-panel /panels/panel-2/size uint "$(s 60)"
+DK=$(s 60); [ "$DK" -gt $((H * 6 / 100)) ] && DK=$((H * 6 / 100))
+x xfce4-panel /panels/panel-2/size uint "$DK"
 x xfce4-desktop /desktop-icons/icon-size uint "$(s 48)"
 printf 'Xft.dpi: %s\nXTerm*faceName: Monospace\nXTerm*faceSize: 11\nXTerm*geometry: 110x32\nXTerm*background: #1d1f21\nXTerm*foreground: #e6e6e6\nXTerm*selectToClipboard: true\nXTerm*VT100.translations: #override Shift Ctrl <Key>V: insert-selection(CLIPBOARD) \\n Shift Ctrl <Key>C: copy-selection(CLIPBOARD)\n' "$(s 96)" | xrdb -merge
 echo "Desktop scaled to $P% for $R"
 DSCALE
+# Also mounted into the container (docker-compose.yml), so it is the one
+# CloudyPad runs at each stream start even if the image build fell back.
+chmod 755 "$SUN_DIR/project/desktop-scale.sh"
 
 cd "$SUN_DIR/project" || fail 60 "project directory missing"
 if ! docker image inspect "$APPS_IMAGE" >/dev/null 2>&1; then
