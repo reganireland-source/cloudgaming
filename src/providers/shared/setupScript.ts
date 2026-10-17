@@ -433,7 +433,7 @@ GPU_NAME=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader | head -1)
 say "GPU: $GPU_NAME, driver $(cat /sys/module/nvidia/version)"
 if [ "$DISPLAY_DRIVER" = "grid" ]; then
   # Unlicensed GRID drivers slow down after ~20 minutes, so say what we see.
-  GRID_LICENSE=$(nvidia-smi -q 2>/dev/null | grep -i -m1 'License Status' | sed 's/.*: *//')
+  GRID_LICENSE=$(nvidia-smi -q 2>/dev/null | grep -i -m1 'License Status' | sed 's/^[^:]*: *//')
   say "GRID driver (big screen, experimental): licence status '$GRID_LICENSE'"
 fi
 
