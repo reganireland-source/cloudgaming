@@ -260,6 +260,9 @@ UNIT
 #   - different script (new login, or a machine restored from a snapshot with
 #     an older copy) -> install it and restart the service, unless a run is
 #     in progress (then the new copy is used from the next boot).
+# The service waits for Google's boot hook (google-startup-scripts), so at a
+# boot the hook installs a new copy first and the service runs THAT one:
+# "Update script" + restart takes effect on that restart, not the one after.
 if [ "$(printenv CG_FROM_UNIT)" != "1" ]; then
   CHANGED=1
   cmp -s "$0" /usr/local/sbin/cloudgaming-setup.sh && CHANGED=0
@@ -267,7 +270,7 @@ if [ "$(printenv CG_FROM_UNIT)" != "1" ]; then
   cat > /etc/systemd/system/cloudgaming-setup.service <<'UNIT'
 [Unit]
 Description=Gints Global Gaming Hubjob machine setup
-After=network-online.target
+After=network-online.target google-startup-scripts.service
 Wants=network-online.target
 [Service]
 Type=oneshot
