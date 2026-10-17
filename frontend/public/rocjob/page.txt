@@ -12,8 +12,8 @@
 #  - A name in [square brackets] starts a section of the page.
 #  - A line starting with "- " is one item in a list.
 #    Items show in the order you write them.
-#  - In the screenshot and stage lists, a | splits the line in two
-#    (file | caption, or song | band).
+#  - In the lists, a | splits a line into parts
+#    (band | picture | hook, file | caption, or song | band).
 # ================================================================
 
 Title: ROCJOB
@@ -41,6 +41,22 @@ Contact:
 
 # The big picture at the top: a file name from the screenshots folder.
 Top picture: 01_s01_p1.jpg
+
+
+[Bands]
+# One big panel per band, in this order:
+#   - BAND NAME | picture file | the one-line hook
+# Pictures go in the "bands" folder next to this file. The band name
+# printed along the top of each picture is hidden, because the page
+# shows the name big above it.
+# The first sentence of the hook (up to the first full stop) shows in
+# the band's colour.
+Play as the band members themselves. Every stage is built from a band's legend.
+- Thin Lizzy | thin-lizzy.png | Dublin, 1976. Whiskey in the Jar, Jailbreak, Black Rose.
+- Guns N' Roses | guns-n-roses.png | Sunset Strip, 1987. Welcome to the Jungle, Paradise City, November Rain.
+- Pantera | pantera.png | Texas, early 90s. I Am the Night, Cowboys from Hell, Floods.
+- The Smashing Pumpkins | smashing-pumpkins.png | Chicago, mid 90s. The Drum Machine, Today, Tonight, Tonight.
+- Radiohead | radiohead.png | Oxford and beyond. On a Friday, Lights on the Crowd, Karma Police.
 
 
 [Pitch]

@@ -34,6 +34,21 @@ To remove a screenshot, delete its line in `page.txt`.
 If a file name doesn't match exactly (capital letters count), the page shows
 "Missing picture" in its place, so you can spot the typo.
 
+## Change a band panel
+
+Under `[Bands]` in `page.txt`, each band is one line:
+
+```
+- Band name | picture.png | The one-line hook.
+```
+
+To swap a band's picture, upload the new one into the **`bands`** folder and put
+its file name on that line. The strip along the top of each picture (where the
+band name is printed) is hidden, because the page shows the name big above it.
+
+The panels use our own bold lettering and painted portraits, not the bands'
+official logos: those are the bands' trademarks.
+
 ## Rules of `page.txt`
 
 - Lines starting with `#` are notes. The page ignores them.

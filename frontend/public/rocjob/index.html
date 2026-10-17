@@ -17,7 +17,7 @@
 <meta name="theme-color" content="#140f19">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Silkscreen:wght@400;700&display=swap">
 <style>
 :root {
   color-scheme: dark;
@@ -40,6 +40,7 @@
   --p1: #e5483f;
   --p2: #3f90e8;
   --pixel: "Silkscreen", "Courier New", monospace;
+  --poster: "Anton", Impact, "Arial Narrow", sans-serif;
   --body: Verdana, "DejaVu Sans", Geneva, Tahoma, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -185,6 +186,36 @@ p { margin: 0; }
 .ticks li::before { content: ""; position: absolute; left: 0; top: .5em; width: 8px; height: 8px; background: var(--green); }
 .contact { font-size: 14px; color: var(--muted); }
 
+/* ---- Bands: one big panel each (our own type + painted portraits, no logos) ---- */
+.bands, .bands-list { display: grid; gap: 24px; }
+/* Grid items default to their content's width; let the lineups scroll inside their panel instead. */
+.wrap > *, .bands > *, .bands-list > * { min-width: 0; }
+.bands-head { display: grid; gap: 10px; }
+.bands-head h2 { margin: 0; }
+.bands-intro { font-size: 16.5px; max-width: 62ch; }
+.band-card {
+  --accent: var(--yellow);
+  background: var(--panel); border: 2px solid var(--line); border-top: 6px solid var(--accent);
+  box-shadow: 6px 6px 0 var(--black);
+}
+.band-head { display: grid; gap: 8px; padding: clamp(16px, 3vw, 26px) clamp(16px, 3vw, 28px) clamp(14px, 2.4vw, 20px); }
+.band-name {
+  margin: 0; color: var(--ink); text-wrap: balance;
+  font: 400 clamp(42px, 9vw, 92px)/.9 var(--poster); letter-spacing: .01em; text-transform: uppercase;
+  text-shadow: 4px 4px 0 var(--black);
+}
+.band-hook { margin: 0; font-size: 15.5px; color: var(--muted); }
+.band-hook b { color: var(--accent); }
+.lineup { overflow-x: auto; background: #110f1a; border-top: 2px solid var(--black); }
+/* --ar = width / visible height (set from the picture once it loads). */
+.lineup-crop { --ar: 3.64; width: 100%; aspect-ratio: var(--ar); overflow: hidden; }
+.lineup img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center bottom; }
+.swipe { display: none; margin: 0; padding: 6px 12px 8px; font: 700 11px/1 var(--pixel); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+@media (max-width: 700px) {
+  .lineup-crop { width: calc(210px * var(--ar)); height: 210px; aspect-ratio: auto; }
+  .swipe { display: block; }
+}
+
 /* ---- Screenshots ---- */
 .shots { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
 .shot { margin: 0; background: var(--black); border: 2px solid var(--black); box-shadow: 0 0 0 2px var(--line); }
@@ -252,6 +283,7 @@ footer p { max-width: 72ch; }
     </a>
     <p class="where" id="where" hidden></p>
     <nav class="menu" aria-label="On this page">
+      <a href="#bands">Bands</a>
       <a href="#download">Download</a>
       <a href="#screenshots">Screenshots</a>
       <a href="#stages">Stages</a>
@@ -268,6 +300,14 @@ footer p { max-width: 72ch; }
   <main id="page" hidden>
     <div class="wrap" style="padding:0;max-width:none">
       <figure class="frame" id="hero" hidden><img alt="" fetchpriority="high"><figcaption></figcaption></figure>
+
+      <section class="bands" id="bands" hidden>
+        <div class="bands-head">
+          <h2>The bands</h2>
+          <div class="prose bands-intro"></div>
+        </div>
+        <div class="bands-list"></div>
+      </section>
 
       <div class="intro">
         <section class="box pitch" id="pitch" hidden>
@@ -465,6 +505,47 @@ footer p { max-width: 72ch; }
 
     fillProse($('#pitch'), p.section('pitch', 'about'));
     fillProse($('#how'), p.section('how to play', 'controls'));
+
+    // Bands: "- NAME | picture.png | hook". Each picture has the band's name
+    // printed along its top; that strip is hidden (the panel shows the name big).
+    var BAND_TITLE_CROP = 0.17;
+    var ACCENTS = ['var(--yellow)', 'var(--p1)', 'var(--groove)', 'var(--p2)', 'var(--green)'];
+    var bandLines = p.section('bands', 'the bands');
+    var bands = bandLines.filter(isItem).map(function (l) {
+      var parts = itemText(l).split('|').map(function (x) { return x.trim(); });
+      return { name: parts[0] || '', file: parts[1] || '', hook: parts.slice(2).join(' | ') };
+    }).filter(function (b) { return b.name; });
+    if (bands.length) {
+      var bsec = $('#bands');
+      paragraphs(bandLines).forEach(function (t) { $('.bands-intro', bsec).append(el('p', null, t)); });
+      var list = $('.bands-list', bsec);
+      bands.forEach(function (b, i) {
+        var card = el('article', 'band-card');
+        card.style.setProperty('--accent', ACCENTS[i % ACCENTS.length]);
+        var head = el('div', 'band-head');
+        head.append(el('h3', 'band-name', b.name));
+        if (b.hook) {
+          var hook = el('p', 'band-hook'), dot = b.hook.indexOf('. ');
+          if (dot > 0) { hook.append(el('b', null, b.hook.slice(0, dot + 1)), ' ' + b.hook.slice(dot + 2)); }
+          else hook.textContent = b.hook;
+          head.append(hook);
+        }
+        card.append(head);
+        if (/\.(png|jpe?g|webp|gif)$/i.test(b.file)) {
+          var wrap = el('div', 'lineup'), crop = el('div', 'lineup-crop');
+          var im = img(ROOT + 'bands/' + encodeURIComponent(b.file.split('/').pop()), b.name + ' lineup: painted in-game portraits with each member\'s name', false);
+          im.removeAttribute('width'); im.removeAttribute('height');
+          im.onload = function () {
+            crop.style.setProperty('--ar', (im.naturalWidth / (im.naturalHeight * (1 - BAND_TITLE_CROP))).toFixed(4));
+          };
+          im.onerror = function () { wrap.replaceWith(missing(b.file)); };
+          crop.append(im); wrap.append(crop);
+          card.append(wrap, el('p', 'swipe', 'Swipe to see the whole band →'));
+        }
+        list.append(card);
+      });
+      show(bsec);
+    }
 
     // Screenshots, in the order listed.
     var shots = p.section('screenshots', 'gallery').filter(isItem).map(function (l) {
