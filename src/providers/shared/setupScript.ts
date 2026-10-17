@@ -1136,10 +1136,10 @@ P=$(cat "$F" 2>/dev/null)
 case "$P" in 100|125|150|175|200) ;; *) P=$(( H <= 1080 ? 100 : H <= 1440 ? 125 : H <= 1800 ? 150 : 200 )) ;; esac
 s() { echo $(( $1 * P / 100 )); }
 x() { xfconf-query -c "$1" -p "$2" -n -t "$3" -s "$4" 2>/dev/null || xfconf-query -c "$1" -p "$2" -s "$4"; }
-if [ ! -f "$HOME/.config/cloudgaming-look" ]; then
-  [ -d /usr/share/themes/Arc-Dark ] && x xsettings /Net/ThemeName string Arc-Dark && x xfwm4 /general/theme string Arc-Dark
+if [ ! -f "$HOME/.config/cloudgaming-theme" ] && [ -d /usr/share/themes/Arc-Dark ]; then
+  x xsettings /Net/ThemeName string Arc-Dark; x xfwm4 /general/theme string Arc-Dark
   x xsettings /Xft/Antialias int 1; x xsettings /Xft/HintStyle string hintslight; x xsettings /Xft/RGBA string none
-  mkdir -p "$HOME/.config"; touch "$HOME/.config/cloudgaming-look"
+  mkdir -p "$HOME/.config"; touch "$HOME/.config/cloudgaming-theme"
 fi
 x xsettings /Xft/DPI int "$(s 96)"
 x xsettings /Gtk/CursorThemeSize int "$(s 24)"
