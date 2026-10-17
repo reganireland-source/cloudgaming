@@ -29,7 +29,7 @@ interface LocalMachine {
   id: string; name: string; lanIp: string | null; mac: string | null;
   online: boolean; lastSeenAt: string | null; scriptEnabled: boolean; displayMode: LocalMode;
   status: {
-    display?: { mode: LocalMode; virtual: boolean };
+    display?: { mode: LocalMode; virtual: boolean; virtualState?: string; seen?: string[] };
     host?: string; os?: string; uptimeHours?: number; cpuPercent?: number; ramGb?: number; ramFreeGb?: number;
     wired?: boolean; link?: string; streaming?: boolean; sunshine?: string; agentVersion?: string;
     gpu?: { name: string; util: number; tempC: number; encoders: number; vramUsedMb: number; vramTotalMb: number; driver: string };
@@ -268,7 +268,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   };
   const sel = 'input-neon px-2 py-1 text-xs';
   if (err) return <p className="text-xs text-neon-amber">⚠ {err}</p>;
-  if (!host) return <p className="text-xs text-slate-500">Waiting for the PC to report its address (it connects within a few seconds of the install command finishing).</p>;
+  if (!host || !launch) return <p className="text-xs text-slate-500">{host ? 'Loading…' : 'Waiting for the PC to report its address (it connects within a few seconds of the install command finishing).'}</p>;
   return (
     <div className="space-y-3 text-xs">
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -304,11 +304,11 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
         ))}
       </div>
       {mode === 'headless' && os !== 'windows' && m.status?.display && !m.status.display.virtual && (
-        <p className="text-neon-amber">⚠ This PC has no virtual display yet, so Headless can’t switch its screens off. Install one under Settings → Virtual display first (until then it streams as Mirror).</p>
+        <p className="text-neon-amber">⚠ This PC has no virtual display yet, so Headless can’t switch its screens off. Install one under Settings → Virtual display first (until then it streams as Mirror).{m.status.display.seen?.length ? ` Windows lists these display devices: ${m.status.display.seen.join(', ')}.` : ''}</p>
       )}
       <p className="text-slate-500">Stream {res.w}×{res.h} at {fps} fps, about {Math.round(localBitrateKbps(res.w, res.h, fps) / 1000)} Mbit/s over your home network. Needs Moonlight installed and paired (Pair Moonlight above).</p>
       {os === 'windows'
-        ? <><CopyBox text={plainStreamCommand(launch!)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and the Mirror / Headless switch are for the macOS and Linux command.)</p></>
+        ? <><CopyBox text={plainStreamCommand(launch)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and the Mirror / Headless switch are for the macOS and Linux command.)</p></>
         : <>
           <CopyBox text={script} tall />
           <div className="flex flex-wrap items-center gap-3">
@@ -371,7 +371,7 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
         <p className="label">Virtual display (for Headless mode)</p>
         <p className="text-slate-400">Headless mode switches the PC’s own screens off, and Windows still needs <em>a</em> screen to stream from. This installs a software one (the open-source Virtual Display Driver). Same place as before: Terminal (Admin) on the PC.</p>
         {vdCmd ? <CopyBox text={vdCmd} /> : <p className="text-slate-500">Loading…</p>}
-        <p className="text-slate-500">{m.status?.display?.virtual ? '✓ The PC reports a virtual display.' : 'The PC does not report one yet. After installing, press Refresh on the PC card.'} Safety net: if GGGH can’t be reached for 5 minutes, nobody has streamed for 10, or the PC restarts, the agent puts the screens back by itself. “Screens back on” on the PC card does it at once.</p>
+        <p className="text-slate-500">{m.status?.display?.virtual ? '✓ The PC reports a virtual display.' : `The PC does not report one yet. After installing, press Refresh on the PC card.${m.status?.display?.virtualState ? ` (State: ${m.status.display.virtualState}.)` : ''}${m.status?.display?.seen?.length ? ` Windows lists these display devices: ${m.status.display.seen.join(', ')}.` : ''}`} Safety net: if GGGH can’t be reached for 5 minutes, nobody has streamed for 10, or the PC restarts, the agent puts the screens back by itself. “Screens back on” on the PC card does it at once.</p>
       </div>
 
       <div className="space-y-2 border-t border-white/5 pt-3">

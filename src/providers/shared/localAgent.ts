@@ -38,13 +38,13 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '3'
+$AgentVersion = '4'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
 $AgentFile = Join-Path $Dir 'gggh-agent.ps1'
 $BootFile = Join-Path $Dir 'gggh-boot.ps1'
-$VirtRe = 'Virtual|MttVDD|IddSample|Indirect|Parsec'   # how a virtual display shows up in Windows
+$VirtRe = 'Virtual|MttVDD|IddSample|IDD|Indirect|Parsec'   # how a virtual display shows up in Windows
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Log($m) {
@@ -338,7 +338,8 @@ function Get-Status {
       $s.streaming = ([int]$p[3] -gt 0)
     }
   } catch { }
-  $s.display = @{ mode = $(if (Test-Path $HeadlessFile) { 'headless' } else { 'mirror' }); virtual = (Has-Virtual) }
+  $vi = Get-VirtualInfo
+  $s.display = @{ mode = $(if (Test-Path $HeadlessFile) { 'headless' } else { 'mirror' }); virtual = [bool]$vi.virtual; virtualState = [string]$vi.state; seen = @($vi.seen) }
   try { $sv = Get-Service -Name 'SunshineService' -ErrorAction Stop; $s.sunshine = $sv.Status.ToString() } catch { $s.sunshine = 'NotInstalled' }
   return $s
 }
@@ -404,6 +405,7 @@ function Do-Diagnose($c) {
     $e = Smi-Enc; if ($e) { $d.gpu.utilEnc = $e.enc; $d.gpu.utilDec = $e.dec }
   }
   # Screens
+  try { $d.pnpDisplay = @(Get-PnpDevice -Class Display -ErrorAction Stop | ForEach-Object { @{ name = $_.FriendlyName; status = [string]$_.Status } }) } catch { }
   try { $d.displays = @(Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution } | ForEach-Object { @{ name = $_.Name; w = [int]$_.CurrentHorizontalResolution; h = [int]$_.CurrentVerticalResolution; hz = [int]$_.CurrentRefreshRate } }) } catch { }
   try { $d.monitors = @(Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorBasicDisplayParams -ErrorAction Stop).Count } catch { }
   # Sunshine
@@ -610,9 +612,19 @@ $script:lastWatch = [datetime]::MinValue
 $script:vdCache = $null
 $script:vdAt = [datetime]::MinValue
 
-function Has-Virtual {
+function Get-VirtualInfo {
   if ($null -eq $script:vdCache -or ((Get-Date) - $script:vdAt).TotalMinutes -ge 5) {
-    try { $script:vdCache = [bool](@(Get-PnpDevice -Class Display -ErrorAction Stop | Where-Object { $_.Status -eq 'OK' -and $_.FriendlyName -match $VirtRe }).Count) } catch { $script:vdCache = $false }
+    $info = @{ virtual = $false; state = ''; seen = @() }
+    try {
+      $disp = @(Get-PnpDevice -Class Display -ErrorAction Stop)
+      $info.seen = @($disp | ForEach-Object { ('{0} [{1}]' -f $_.FriendlyName, $_.Status) } | Select-Object -First 8)
+      $v = @($disp | Where-Object { $_.FriendlyName -match $VirtRe })
+      if ($v.Count) {
+        $ok = @($v | Where-Object { $_.Status -eq 'OK' })
+        if ($ok.Count) { $info.virtual = $true; $info.state = 'OK' } else { $info.state = [string]$v[0].Status }
+      }
+    } catch { $info.state = 'could not look: ' + $_.Exception.Message }
+    $script:vdCache = $info
     $script:vdAt = Get-Date
   }
   return $script:vdCache
@@ -878,9 +890,10 @@ export const VDISPLAY_PS1 = String.raw`# GGGH: install a virtual display on this
 $ErrorActionPreference = 'Stop'
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Host 'Please run this in an elevated PowerShell: right-click Start, then "Terminal (Admin)".' -ForegroundColor Yellow; return }
-$re = 'Virtual|MttVDD|IddSample|Indirect|Parsec'
+$re = 'Virtual|MttVDD|IddSample|IDD|Indirect|Parsec'
 function Has-Virtual { return [bool](@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and $_.FriendlyName -match $re }).Count) }
-if (Has-Virtual) { Write-Host 'A virtual display is already installed. Nothing to do.' -ForegroundColor Green; return }
+function Show-Devices { Write-Host 'Display devices Windows lists:'; Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ('  {0} [{1}]' -f $_.FriendlyName, $_.Status) } }
+if (Has-Virtual) { Write-Host 'A virtual display is already installed. Nothing to do.' -ForegroundColor Green; Show-Devices; return }
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
   Write-Host 'winget was not found. Install "App Installer" from the Microsoft Store, or install the Virtual Display Driver by hand:' -ForegroundColor Yellow
   Write-Host '  https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
@@ -895,6 +908,7 @@ if (Has-Virtual) {
 } else {
   Write-Host 'The virtual display did not show up. Install it by hand from https://github.com/VirtualDrivers/Virtual-Display-Driver/releases and restart the PC, then press Refresh in GGGH.' -ForegroundColor Yellow
 }
+Show-Devices
 `;
 
 const sha256 = (s: string) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
