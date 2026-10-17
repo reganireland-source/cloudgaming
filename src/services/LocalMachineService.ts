@@ -38,11 +38,11 @@ const POLL_HOLD_MS = 25_000;         // how long the agent's request waits for a
 const MAX_SCRIPT = 4000;
 
 /** What the app may ask for, and what the launcher token may ask for. */
-export type CommandKind = 'refresh' | 'sleep' | 'restart' | 'shutdown' | 'sunshine-restart' | 'sunshine-pin' | 'display-set' | 'display-restore' | 'script'
+export type CommandKind = 'refresh' | 'sleep' | 'restart' | 'shutdown' | 'sunshine-restart' | 'sunshine-pin' | 'display-set' | 'display-headless' | 'display-restore' | 'script'
   | 'diagnose' | 'record' | 'logs' | 'power-plan' | 'gpu-clocks' | 'sunshine-config' | 'sunshine-config-restore';
-const APP_KINDS: CommandKind[] = ['refresh', 'sleep', 'restart', 'shutdown', 'sunshine-restart', 'sunshine-pin', 'display-set', 'display-restore', 'script',
+const APP_KINDS: CommandKind[] = ['refresh', 'sleep', 'restart', 'shutdown', 'sunshine-restart', 'sunshine-pin', 'display-set', 'display-headless', 'display-restore', 'script',
   'diagnose', 'record', 'logs', 'power-plan', 'gpu-clocks', 'sunshine-config', 'sunshine-config-restore'];
-const LAUNCHER_KINDS: CommandKind[] = ['display-set', 'display-restore'];
+const LAUNCHER_KINDS: CommandKind[] = ['display-set', 'display-headless', 'display-restore'];
 
 const MAC_RE = /^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$/;
 const IPV4_RE = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
@@ -52,16 +52,16 @@ const cleanIp = (v: unknown): string | null => (typeof v === 'string' && IPV4_RE
 
 export interface LocalMachineView {
   id: string; name: string; lanIp: string | null; mac: string | null;
-  online: boolean; lastSeenAt: string | null; scriptEnabled: boolean;
+  online: boolean; lastSeenAt: string | null; scriptEnabled: boolean; displayMode: 'mirror' | 'headless';
   status: Record<string, any> | null; createdAt: string;
 }
 
-const COLUMNS = 'id, name, lan_ip, mac_address, script_enabled, status, last_seen_at, created_at';
+const COLUMNS = 'id, name, lan_ip, mac_address, script_enabled, display_mode, status, last_seen_at, created_at';
 const view = (r: any): LocalMachineView => ({
   id: r.id, name: r.name, lanIp: r.lan_ip, mac: r.mac_address,
   online: !!r.last_seen_at && Date.now() - new Date(r.last_seen_at).getTime() < ONLINE_WITHIN_MS,
   lastSeenAt: r.last_seen_at ? new Date(r.last_seen_at).toISOString() : null,
-  scriptEnabled: !!r.script_enabled, status: r.status || null, createdAt: new Date(r.created_at).toISOString(),
+  scriptEnabled: !!r.script_enabled, displayMode: r.display_mode === 'headless' ? 'headless' : 'mirror', status: r.status || null, createdAt: new Date(r.created_at).toISOString(),
 });
 
 async function owned(userId: string, id: string) {
@@ -100,7 +100,7 @@ export async function createLocalMachine(userId: string, input: { name?: unknown
   return { machine: view(row), agentToken };
 }
 
-export async function updateLocalMachine(userId: string, id: string, patch: { name?: unknown; lanIp?: unknown; mac?: unknown; scriptEnabled?: unknown }) {
+export async function updateLocalMachine(userId: string, id: string, patch: { name?: unknown; lanIp?: unknown; mac?: unknown; scriptEnabled?: unknown; displayMode?: unknown }) {
   await owned(userId, id);
   const sets: string[] = []; const vals: any[] = [id, userId];
   const add = (col: string, v: unknown) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
@@ -114,6 +114,10 @@ export async function updateLocalMachine(userId: string, id: string, patch: { na
     add('mac_address', normalizeMac(patch.mac));
   }
   if (patch.scriptEnabled !== undefined) add('script_enabled', patch.scriptEnabled === true);
+  if (patch.displayMode !== undefined) {
+    if (patch.displayMode !== 'mirror' && patch.displayMode !== 'headless') throw new MachineRequestError(400, 'The screen mode is "mirror" or "headless".');
+    add('display_mode', patch.displayMode);
+  }
   if (!sets.length) throw new MachineRequestError(400, 'Nothing to change.');
   const row = (await query(`UPDATE local_machines SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2 RETURNING ${COLUMNS}`, vals)).rows[0];
   return view(row);
@@ -146,7 +150,8 @@ function checkArgs(kind: CommandKind, args: any, scriptEnabled: boolean): Record
       if (!/^\d{4}$/.test(String(a.pin))) throw new MachineRequestError(400, 'The pairing PIN is 4 digits.');
       return { pin: String(a.pin), name: String(a.name || 'GGGH').replace(/[^\w .-]/g, '').slice(0, 30) || 'GGGH' };
     }
-    case 'display-set': {
+    case 'display-set':
+    case 'display-headless': {
       const w = Number(a.width), h = Number(a.height), fps = Number(a.fps || 60);
       if (!(w >= 640 && w <= 7680 && h >= 480 && h <= 4320 && fps >= 24 && fps <= 240)) throw new MachineRequestError(400, 'That screen size isn\'t sensible.', 'Width 640–7680, height 480–4320, 24–240 fps.');
       return { width: Math.round(w), height: Math.round(h), fps: Math.round(fps) };
@@ -290,12 +295,12 @@ export async function agentResult(token: string, commandId: string, ok: boolean,
 // ---------------------------------------------------------------------------
 
 /** Ask the PC to match the screen (or put it back) and wait for the answer. */
-export async function launcherScreen(token: string, action: 'set' | 'restore', args: { width?: unknown; height?: unknown; fps?: unknown }, waitMs = 25_000) {
+export async function launcherScreen(token: string, action: 'set' | 'headless' | 'restore', args: { width?: unknown; height?: unknown; fps?: unknown }, waitMs = 25_000) {
   const m = await byToken(token, 'launcher_token_hash');
   if (!m) return null;
   const online = !!m.last_seen_at && Date.now() - new Date(m.last_seen_at).getTime() < ONLINE_WITHIN_MS;
   if (!online) return { online: false, ok: false, message: 'The PC\'s agent isn\'t connected to GGGH, so its screen was left as it is.' };
-  const kind: CommandKind = action === 'set' ? 'display-set' : 'display-restore';
+  const kind: CommandKind = action === 'set' ? 'display-set' : action === 'headless' ? 'display-headless' : 'display-restore';
   if (!LAUNCHER_KINDS.includes(kind)) return null;
   const cmd = await enqueue(m, kind, args, 'launcher');
   const until = Date.now() + waitMs;

@@ -6,6 +6,7 @@
  * PUBLIC routes (no sign-in) that check a Bearer token instead. Mounted at
  * /api/local-agent:
  *
+ *   GET  /virtual-display.ps1  installs a virtual display driver (for Headless mode; no secrets)
  *   GET  /install.ps1   the installer (no secrets in it; the token is passed on its command line)
  *   GET  /agent.ps1     the agent (it fetches newer copies of itself from here, checked against a SHA-256 GGGH sends)
  *   GET  /boot.ps1      the small wrapper that keeps the agent running and rolls a bad update back
@@ -14,18 +15,19 @@
  *   POST /live          agent: { samples: [...] } during a recording
  *   POST /poll          agent: "here is my status; any work?" — waits up to ~25 s → { commands, pollSeconds }
  *   POST /result        agent: { id, ok, message }
- *   POST /screen        generated Moonlight command (launcher token): { action: 'set'|'restore', width?, height?, fps? }
+ *   POST /screen        generated Moonlight command (launcher token): { action: 'set'|'headless'|'restore', width?, height?, fps? }
  * ============================================================================
  */
 
 import { Router, Request, Response } from 'express';
 import { agentPoll, agentResult, launcherScreen, agentHeartbeat, agentReport, agentLive } from '../../services/LocalMachineService';
-import { AGENT_PS1, BOOT_PS1, INSTALL_PS1 } from '../../providers/shared/localAgent';
+import { AGENT_PS1, BOOT_PS1, INSTALL_PS1, VDISPLAY_PS1 } from '../../providers/shared/localAgent';
 
 const router = Router();
 const bearer = (req: Request) => String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
 
 router.get('/install.ps1', (_req, res) => { res.type('text/plain').send(INSTALL_PS1); });
+router.get('/virtual-display.ps1', (_req, res) => { res.type('text/plain').send(VDISPLAY_PS1); });
 router.get('/agent.ps1', (_req, res) => { res.type('text/plain').send(AGENT_PS1); });
 router.get('/boot.ps1', (_req, res) => { res.type('text/plain').send(BOOT_PS1); });
 
@@ -69,9 +71,10 @@ router.post('/live', async (req: Request, res: Response) => {
 router.post('/screen', async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
   try {
-    const action = req.body?.action === 'restore' ? 'restore' : req.body?.action === 'set' ? 'set' : null;
-    if (!action) return res.status(400).json({ error: 'action must be "set" or "restore".' });
-    const out = await launcherScreen(bearer(req), action, req.body || {}, action === 'set' ? 25_000 : 8_000);
+    const a = req.body?.action;
+    const action = a === 'restore' || a === 'set' || a === 'headless' ? a : null;
+    if (!action) return res.status(400).json({ error: 'action must be "set", "headless" or "restore".' });
+    const out = await launcherScreen(bearer(req), action, req.body || {}, action === 'headless' ? 40_000 : action === 'set' ? 25_000 : 15_000);
     if (!out) return res.status(401).json({ error: 'Unknown token.' });
     res.json(out);
   } catch (e) {

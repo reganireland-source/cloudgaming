@@ -38,12 +38,13 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '2'
+$AgentVersion = '3'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
 $AgentFile = Join-Path $Dir 'gggh-agent.ps1'
 $BootFile = Join-Path $Dir 'gggh-boot.ps1'
+$VirtRe = 'Virtual|MttVDD|IddSample|Indirect|Parsec'   # how a virtual display shows up in Windows
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Log($m) {
@@ -73,18 +74,29 @@ public struct DispMode {
   public int dmICMMethod; public int dmICMIntent; public int dmMediaType; public int dmDitherType;
   public int dmReserved1; public int dmReserved2; public int dmPanningWidth; public int dmPanningHeight;
 }
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct DispDev {
+  public int cb;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+  public int StateFlags;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+}
 public static class Disp {
   [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern bool EnumDisplaySettings(string dev, int mode, ref DispMode dm);
   [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern int ChangeDisplaySettingsEx(string dev, ref DispMode dm, IntPtr hwnd, int flags, IntPtr lp);
+  [DllImport("user32.dll", CharSet = CharSet.Ansi, EntryPoint = "ChangeDisplaySettingsExA")] public static extern int Commit(string dev, IntPtr dm, IntPtr hwnd, int flags, IntPtr lp);
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern bool EnumDisplayDevices(string dev, int i, ref DispDev dd, int flags);
 }
 '@
   function New-Mode { $dm = New-Object DispMode; $dm.dmSize = [int16][Runtime.InteropServices.Marshal]::SizeOf([type]'DispMode'); return $dm }
   function Get-Current { $dm = New-Mode; [void][Disp]::EnumDisplaySettings($null, -1, [ref]$dm); return $dm }
-  function Get-Modes {
+  function Get-Modes($dev) {
     $list = @(); $i = 0
     while ($true) {
       $dm = New-Mode
-      if (-not [Disp]::EnumDisplaySettings($null, $i, [ref]$dm)) { break }
+      if (-not [Disp]::EnumDisplaySettings($dev, $i, [ref]$dm)) { break }
       if ($dm.dmBitsPerPel -ge 24) { $list += [pscustomobject]@{ w = $dm.dmPelsWidth; h = $dm.dmPelsHeight; f = $dm.dmDisplayFrequency } }
       $i++
     }
@@ -106,23 +118,101 @@ public static class Disp {
     $pool = if ($up.Count) { $up | Sort-Object w, @{e={[Math]::Abs($_.f - $fps)}} } else { $same | Sort-Object @{e={-$_.w}}, @{e={[Math]::Abs($_.f - $fps)}} }
     return [pscustomobject]@{ mode = ($pool | Select-Object -First 1); exact = $false }
   }
+
+  # Every display Windows knows of: the real monitors and any virtual one.
+  function Get-Screens {
+    $list = @(); $i = 0
+    while ($true) {
+      $dd = New-Object DispDev
+      $dd.cb = [Runtime.InteropServices.Marshal]::SizeOf([type]'DispDev')
+      if (-not [Disp]::EnumDisplayDevices($null, $i, [ref]$dd, 0)) { break }
+      $i++
+      if (($dd.StateFlags -band 8) -ne 0) { continue }
+      $dm = New-Mode
+      [void][Disp]::EnumDisplaySettings($dd.DeviceName, -1, [ref]$dm)
+      $list += [pscustomobject]@{
+        name = $dd.DeviceName; desc = $dd.DeviceString
+        attached = (($dd.StateFlags -band 1) -ne 0); primary = (($dd.StateFlags -band 4) -ne 0)
+        x = $dm.dmPositionX; y = $dm.dmPositionY; w = $dm.dmPelsWidth; h = $dm.dmPelsHeight; f = $dm.dmDisplayFrequency
+      }
+    }
+    return $list
+  }
+  # Place one display (or, with w = h = 0, take it off the desktop). Takes effect at Commit.
+  function Set-Dev($name, $x, $y, $w, $h, $f, $extra) {
+    $dm = New-Mode
+    [void][Disp]::EnumDisplaySettings($name, -1, [ref]$dm)
+    $dm.dmPositionX = $x; $dm.dmPositionY = $y; $dm.dmPelsWidth = $w; $dm.dmPelsHeight = $h
+    $fields = 0x20 -bor 0x80000 -bor 0x100000
+    if ($w -gt 0) { $dm.dmBitsPerPel = 32; $fields = $fields -bor 0x40000 }
+    if ($f -gt 0) { $dm.dmDisplayFrequency = $f; $fields = $fields -bor 0x400000 }
+    $dm.dmFields = $fields
+    return [Disp]::ChangeDisplaySettingsEx($name, [ref]$dm, [IntPtr]::Zero, (0x1 -bor 0x10000000 -bor $extra), [IntPtr]::Zero)
+  }
+  function Commit-Screens { return [Disp]::Commit($null, [IntPtr]::Zero, [IntPtr]::Zero, 0, [IntPtr]::Zero) }
+
+  $topoPath = Join-Path $DispDir 'topology.json'
+  # Headless: the virtual display becomes the only screen, at the receiver's size.
+  function Do-Headless($w, $h, $fps) {
+    $screens = @(Get-Screens)
+    $v = $screens | Where-Object { $_.desc -match $VirtRe } | Select-Object -First 1
+    if (-not $v) { return @($false, 'This PC has no virtual display yet. Install one from GGGH (Settings, "Virtual display"), then try again.') }
+    $others = @($screens | Where-Object { $_.name -ne $v.name -and $_.attached })
+    if (-not (Test-Path $topoPath)) {
+      $keep = @($screens | Where-Object { $_.attached } | ForEach-Object { @{ name = $_.name; x = $_.x; y = $_.y; w = $_.w; h = $_.h; f = $_.f; primary = $_.primary } })
+      (@{ screens = $keep; virtualName = $v.name; virtualWasAttached = [bool]$v.attached } | ConvertTo-Json -Depth 4 -Compress) | Set-Content $topoPath -Encoding ASCII
+    }
+    $pick = Pick (Get-Modes $v.name) $w $h $fps
+    if (-not $pick) { return @($false, ('The virtual display offers no {0}x{1} mode, or one of the same shape. Add it to the virtual display driver''s resolution list, then try again.' -f $w, $h)) }
+    $m = $pick.mode
+    $rc = Set-Dev $v.name 0 0 $m.w $m.h $m.f 0x10
+    if ($rc -ne 0) { [void](Do-RestoreTopology); return @($false, ('Windows would not use the virtual display at {0}x{1} (code {2}); the screens were left as they were.' -f $m.w, $m.h, $rc)) }
+    foreach ($p in $others) { [void](Set-Dev $p.name 0 0 0 0 0 0) }
+    $rc = Commit-Screens
+    if ($rc -ne 0) { [void](Do-RestoreTopology); return @($false, ('Windows refused the screen change (code {0}); the screens were put back.' -f $rc)) }
+    $after = @(Get-Screens | Where-Object { $_.name -eq $v.name -and $_.attached })
+    if (-not $after.Count) { [void](Do-RestoreTopology); return @($false, 'The virtual display did not switch on; the screens were put back.') }
+    if ($pick.exact) { return @($true, ('Headless: the PC''s own screens are off and the virtual display is {0}x{1} at {2} Hz.' -f $m.w, $m.h, $m.f)) }
+    return @($true, ('Headless, but no exact {0}x{1}: the virtual display uses {2}x{3} at {4} Hz.' -f $w, $h, $m.w, $m.h, $m.f))
+  }
+  # Put the real screens back exactly where they were. $null = nothing to put back.
+  function Do-RestoreTopology {
+    if (-not (Test-Path $topoPath)) { return $null }
+    $t = Get-Content $topoPath -Raw | ConvertFrom-Json
+    $saved = @($t.screens)
+    $order = @($saved | Where-Object { $_.primary }) + @($saved | Where-Object { -not $_.primary })
+    foreach ($s in $order) { $x = $(if ($s.primary) { 0x10 } else { 0 }); [void](Set-Dev $s.name ([int]$s.x) ([int]$s.y) ([int]$s.w) ([int]$s.h) ([int]$s.f) $x) }
+    if (-not $t.virtualWasAttached) { [void](Set-Dev $t.virtualName 0 0 0 0 0 0) }
+    $rc = Commit-Screens
+    if ($rc -eq 0) { Remove-Item $topoPath -Force; return @($true, 'The PC''s own screens are back on.') }
+    return @($false, ('Windows refused to put the screens back (code {0}).' -f $rc))
+  }
+
   $resultPath = Join-Path $DispDir 'result.json'
   $req = Get-Content (Join-Path $DispDir 'request.json') -Raw | ConvertFrom-Json
   $ok = $false; $msg = ''
   try {
     $orig = Join-Path $DispDir 'original.json'
     if ($req.action -eq 'restore') {
+      $parts = @(); $ok = $true
+      $tr = Do-RestoreTopology
+      if ($tr) { $parts += $tr[1]; if (-not $tr[0]) { $ok = $false } }
       if (Test-Path $orig) {
         $o = Get-Content $orig -Raw | ConvertFrom-Json
         $rc = Apply-Mode ([int]$o.w) ([int]$o.h) ([int]$o.f)
-        if ($rc -eq 0) { Remove-Item $orig -Force; $ok = $true; $msg = ('Screen put back to {0}x{1} at {2} Hz.' -f $o.w, $o.h, $o.f) } else { $msg = ('Windows refused to put the screen back (code {0}).' -f $rc) }
-      } else { $ok = $true; $msg = 'The screen was already as you left it.' }
+        if ($rc -eq 0) { Remove-Item $orig -Force; $parts += ('Screen put back to {0}x{1} at {2} Hz.' -f $o.w, $o.h, $o.f) } else { $ok = $false; $parts += ('Windows refused to put the screen back (code {0}).' -f $rc) }
+      }
+      if (-not $parts.Count) { $parts += 'The screen was already as you left it.' }
+      $msg = $parts -join ' '
+    } elseif ($req.action -eq 'headless') {
+      $r = Do-Headless ([int]$req.width) ([int]$req.height) ([int]$req.fps)
+      $ok = [bool]$r[0]; $msg = [string]$r[1]
     } else {
       $w = [int]$req.width; $h = [int]$req.height; $fps = [int]$req.fps
       $cur = Get-Current
       if ($cur.dmPelsWidth -eq $w -and $cur.dmPelsHeight -eq $h) { $ok = $true; $msg = ('The screen is already {0}x{1}.' -f $w, $h) }
       else {
-        $pick = Pick (Get-Modes) $w $h $fps
+        $pick = Pick (Get-Modes $null) $w $h $fps
         if (-not $pick) {
           $msg = ('This PC offers no {0}x{1} screen mode, or one of the same shape. Add a custom resolution in the NVIDIA Control Panel (or use a virtual display), then try again.' -f $w, $h)
         } else {
@@ -248,6 +338,7 @@ function Get-Status {
       $s.streaming = ([int]$p[3] -gt 0)
     }
   } catch { }
+  $s.display = @{ mode = $(if (Test-Path $HeadlessFile) { 'headless' } else { 'mirror' }); virtual = (Has-Virtual) }
   try { $sv = Get-Service -Name 'SunshineService' -ErrorAction Stop; $s.sunshine = $sv.Status.ToString() } catch { $s.sunshine = 'NotInstalled' }
   return $s
 }
@@ -493,10 +584,10 @@ function Do-Display($c, $action) {
   New-Item -ItemType Directory -Force -Path $DispDir | Out-Null
   Remove-Item (Join-Path $DispDir 'result.json') -Force -ErrorAction SilentlyContinue
   $req = @{ id = $c.id; action = $action }
-  if ($action -eq 'set') { $req.width = [int]$c.args.width; $req.height = [int]$c.args.height; $req.fps = [int]$c.args.fps }
+  if ($action -eq 'set' -or $action -eq 'headless') { $req.width = [int]$c.args.width; $req.height = [int]$c.args.height; $req.fps = [int]$c.args.fps }
   ($req | ConvertTo-Json -Compress) | Set-Content (Join-Path $DispDir 'request.json') -Encoding UTF8
   Start-ScheduledTask -TaskName 'GGGH Display' | Out-Null
-  for ($i = 0; $i -lt 40; $i++) {
+  for ($i = 0; $i -lt 70; $i++) {
     Start-Sleep -Milliseconds 500
     Beat
     $rp = Join-Path $DispDir 'result.json'
@@ -505,6 +596,70 @@ function Do-Display($c, $action) {
     }
   }
   return @($false, 'Nobody is signed in to Windows on the PC (or it is locked), so its screen could not be changed.')
+}
+
+# ---------------------------------------------------------------------------
+# Mirror / Headless. Headless = the PC's own screens off, a virtual display at
+# the receiver's size. headless.json marks it; the watchdog puts the screens
+# back if the stream is over, GGGH is out of reach, or the PC has restarted.
+# ---------------------------------------------------------------------------
+$HeadlessFile = Join-Path $Dir 'headless.json'
+$script:lastOk = Get-Date
+$script:idleSince = $null
+$script:lastWatch = [datetime]::MinValue
+$script:vdCache = $null
+$script:vdAt = [datetime]::MinValue
+
+function Has-Virtual {
+  if ($null -eq $script:vdCache -or ((Get-Date) - $script:vdAt).TotalMinutes -ge 5) {
+    try { $script:vdCache = [bool](@(Get-PnpDevice -Class Display -ErrorAction Stop | Where-Object { $_.Status -eq 'OK' -and $_.FriendlyName -match $VirtRe }).Count) } catch { $script:vdCache = $false }
+    $script:vdAt = Get-Date
+  }
+  return $script:vdCache
+}
+
+function Run-Headless($c) {
+  $r = Do-Display $c 'headless'
+  if ($r[0]) {
+    $pp = Do-PowerPlan 'high'
+    $changed = ($pp[0] -and ([string]$pp[1] -notmatch 'already'))
+    (@{ since = (Get-Date).ToString('s'); powerChanged = $changed } | ConvertTo-Json -Compress) | Set-Content $HeadlessFile -Encoding ASCII
+    return @($true, ([string]$r[1] + $(if ($changed) { ' Power plan set to High performance while headless.' } else { '' })))
+  }
+  return $r
+}
+
+function Do-Restore($c) {
+  $r = Do-Display $c 'restore'
+  if ($r[0] -and (Test-Path $HeadlessFile)) {
+    $back = $false
+    try { $back = [bool](Get-Content $HeadlessFile -Raw | ConvertFrom-Json).powerChanged } catch { }
+    Remove-Item $HeadlessFile -Force -ErrorAction SilentlyContinue
+    if ($back) { $pp = Do-PowerPlan 'restore'; return @($true, ([string]$r[1] + ' Power plan put back.')) }
+  }
+  return $r
+}
+
+function Watch-Headless($st) {
+  if (-not (Test-Path $HeadlessFile)) { $script:idleSince = $null; return }
+  $why = $null
+  if (((Get-Date) - $script:lastOk).TotalMinutes -ge 5) { $why = 'GGGH has been out of reach for 5 minutes' }
+  try {
+    $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+    if ((Get-Item $HeadlessFile).LastWriteTime -lt $boot) { $why = 'the PC restarted while it was headless' }
+  } catch { }
+  if ($st -and $st.gpu) {
+    if ($st.streaming) { $script:idleSince = $null }
+    elseif ($null -eq $script:idleSince) { $script:idleSince = Get-Date }
+    elseif (((Get-Date) - $script:idleSince).TotalMinutes -ge 10) { $why = 'nobody has been streaming for 10 minutes' }
+  }
+  if (-not $why) { return }
+  if (((Get-Date) - $script:lastWatch).TotalSeconds -lt 60) { return }
+  $script:lastWatch = Get-Date
+  Log ('headless watchdog: putting the screens back because ' + $why)
+  $r = Do-Restore ([pscustomobject]@{ id = [guid]::NewGuid().ToString() })
+  Log ('headless watchdog: ' + [string]$r[1])
+  if ($r[0]) { $script:idleSince = $null }
 }
 
 function Do-Script($text) {
@@ -526,13 +681,14 @@ function Run-Command($c) {
   Log ('command ' + $c.kind)
   try {
     switch ($c.kind) {
-      'refresh' { Report $c.id $true 'Status refreshed.' }
+      'refresh' { $script:vdCache = $null; Report $c.id $true 'Status refreshed.' }
       'sunshine-restart' { Restart-Service -Name 'SunshineService' -Force; Report $c.id $true 'Sunshine restarted.' }
       'sunshine-pin' { $r = Do-Pin ([string]$c.args.pin) ([string]$c.args.name); Report $c.id $r[0] $r[1] }
       'sunshine-config' { $r = Do-SunshineConfig ([string]$c.args.key) ([string]$c.args.value); Report $c.id $r[0] $r[1] }
       'sunshine-config-restore' { $r = Do-SunshineConfigRestore; Report $c.id $r[0] $r[1] }
       'display-set' { $r = Do-Display $c 'set'; Report $c.id $r[0] $r[1] }
-      'display-restore' { $r = Do-Display $c 'restore'; Report $c.id $r[0] $r[1] }
+      'display-restore' { $r = Do-Restore $c; Report $c.id $r[0] $r[1] }
+      'display-headless' { $r = Run-Headless $c; Report $c.id $r[0] $r[1] }
       'diagnose' { $r = Do-Diagnose $c; Report $c.id $r[0] $r[1] }
       'record' { $r = Do-Record $c; Report $c.id $r[0] $r[1] }
       'logs' { $r = Do-Logs $c; Report $c.id $r[0] $r[1] }
@@ -591,17 +747,21 @@ $fails = 0
 while ($true) {
   $t0 = Get-Date
   try {
-    $r = Post 'poll' (Get-Status) 45
+    $st = Get-Status
+    $r = Post 'poll' $st 45
     $fails = 0
+    $script:lastOk = Get-Date
     $pending = Join-Path $Dir 'update.pending'
     if (Test-Path $pending) { Remove-Item $pending -Force -ErrorAction SilentlyContinue }
     if (@($r.update).Count) { Try-Update $r.update }
     foreach ($c in @($r.commands)) { Run-Command $c }
+    try { Watch-Headless $st } catch { Log ('headless watchdog failed: ' + $_.Exception.Message) }
     if (((Get-Date) - $t0).TotalSeconds -lt 1.5) { Start-Sleep -Seconds 2 }
   } catch {
     $fails++
     $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
     Log ('poll failed ({0}): {1}' -f $code, $_.Exception.Message)
+    try { Watch-Headless $null } catch { }
     if ($code -eq 401) { Start-Sleep -Seconds 60 } else { Start-Sleep -Seconds ([Math]::Min(60, 3 * $fails)) }
   }
 }
@@ -712,6 +872,29 @@ Write-Host 'Done. Go back to GGGH: this PC should show as online within a few se
 Write-Host 'The agent keeps itself up to date from GGGH.'
 Write-Host ('Sunshine admin page (on this PC): https://localhost:47990 (user name: {0}; the password is saved in the agent file)' -f $user)
 Write-Host 'For waking this PC from sleep, use a wired network connection.'
+`;
+
+export const VDISPLAY_PS1 = String.raw`# GGGH: install a virtual display on this PC (for Headless / Gaming mode). Run in an ELEVATED PowerShell.
+$ErrorActionPreference = 'Stop'
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { Write-Host 'Please run this in an elevated PowerShell: right-click Start, then "Terminal (Admin)".' -ForegroundColor Yellow; return }
+$re = 'Virtual|MttVDD|IddSample|Indirect|Parsec'
+function Has-Virtual { return [bool](@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and $_.FriendlyName -match $re }).Count) }
+if (Has-Virtual) { Write-Host 'A virtual display is already installed. Nothing to do.' -ForegroundColor Green; return }
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+  Write-Host 'winget was not found. Install "App Installer" from the Microsoft Store, or install the Virtual Display Driver by hand:' -ForegroundColor Yellow
+  Write-Host '  https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
+  return
+}
+Write-Host 'Installing the Virtual Display Driver (Windows may ask you to trust the driver publisher)...'
+& winget install --id VirtualDrivers.Virtual-Display-Driver -e --silent --accept-package-agreements --accept-source-agreements
+Start-Sleep -Seconds 5
+if (Has-Virtual) {
+  Write-Host 'Done. The virtual display is installed; GGGH will see it within a few minutes (press Refresh on the PC card).' -ForegroundColor Green
+  Write-Host 'Tip: its resolution list is in the driver''s own settings (vdd_settings.xml). Add your TV and screen sizes there if Headless says a mode is missing.'
+} else {
+  Write-Host 'The virtual display did not show up. Install it by hand from https://github.com/VirtualDrivers/Virtual-Display-Driver/releases and restart the PC, then press Refresh in GGGH.' -ForegroundColor Yellow
+}
 `;
 
 const sha256 = (s: string) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');

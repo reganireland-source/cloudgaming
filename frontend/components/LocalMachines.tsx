@@ -22,13 +22,14 @@ import { SCREENS, detectScreen, fitResolution } from '@/lib/screens';
 import LocalDiagnose from '@/components/LocalDiagnose';
 import {
   LOCAL_APPS, buildCheckScript, buildLaunchScript, localBitrateKbps, pairCommand, plainStreamCommand,
-  type LocalCodec, type LocalLaunch, type LocalOS,
+  type LocalCodec, type LocalLaunch, type LocalMode, type LocalOS,
 } from '@/lib/localCommand';
 
 interface LocalMachine {
   id: string; name: string; lanIp: string | null; mac: string | null;
-  online: boolean; lastSeenAt: string | null; scriptEnabled: boolean;
+  online: boolean; lastSeenAt: string | null; scriptEnabled: boolean; displayMode: LocalMode;
   status: {
+    display?: { mode: LocalMode; virtual: boolean };
     host?: string; os?: string; uptimeHours?: number; cpuPercent?: number; ramGb?: number; ramFreeGb?: number;
     wired?: boolean; link?: string; streaming?: boolean; sunshine?: string; agentVersion?: string;
     gpu?: { name: string; util: number; tempC: number; encoders: number; vramUsedMb: number; vramTotalMb: number; driver: string };
@@ -140,6 +141,7 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
           {st?.cpuPercent != null && <Stat label="CPU">{st.cpuPercent}%</Stat>}
           {st?.ramGb != null && <Stat label="Memory">{(st.ramGb - (st.ramFreeGb || 0)).toFixed(1)}/{st.ramGb} GB</Stat>}
           <Stat label="Sunshine"><span className={st?.sunshine === 'Running' ? 'text-neon-lime' : 'text-neon-amber'}>{st?.sunshine === 'NotInstalled' ? 'not installed' : (st?.sunshine || '—').toLowerCase()}</span></Stat>
+          {st?.display && <Stat label="Screens">{st.display.mode === 'headless' ? <span className="text-neon-cyan">headless · virtual display</span> : 'mirror · own screens on'}{!st.display.virtual && <span className="text-slate-500"> · no virtual display yet</span>}</Stat>}
           {st?.agentVersion && <Stat label="Agent">v{st.agentVersion} <span className="text-slate-500">updates itself</span></Stat>}
           {st?.uptimeHours != null && <Stat label="Up for">{st.uptimeHours < 48 ? `${st.uptimeHours} h` : `${Math.round(st.uptimeHours / 24)} days`}</Stat>}
         </div>
@@ -151,6 +153,7 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
         <button type="button" className={btn} disabled={off || !!busy} onClick={startPairing}>Pair Moonlight</button>
         <button type="button" className={btn} disabled={off || !!busy} onClick={() => send('sunshine-restart', undefined, 'Restart Sunshine')}>Restart Sunshine</button>
         <button type="button" className={btn} disabled={off || !!busy} onClick={() => send('refresh')}>Refresh</button>
+        {st?.display?.mode === 'headless' && <button type="button" className={btn} disabled={off || !!busy} onClick={() => send('display-restore', undefined, 'Screens back on')}>Screens back on</button>}
         <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={off || !!busy} onClick={() => setConfirm('sleep')}>Sleep</button>
         <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={off || !!busy} onClick={() => setConfirm('restart')}>Restart PC</button>
         <button type="button" className="btn-neon-pink text-xs disabled:opacity-40" disabled={off || !!busy} onClick={() => setConfirm('shutdown')}>Shut down</button>
@@ -232,7 +235,12 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   const [codec, setCodec] = useState<LocalCodec>('HEVC');
   const [fullscreen, setFullscreen] = useState(true);
   const [wake, setWake] = useState(true);
-  const [match, setMatch] = useState(true);
+  const [mode, setMode] = useState<LocalMode>(m.displayMode || 'mirror');
+  useEffect(() => setMode(m.displayMode || 'mirror'), [m.displayMode]);
+  const chooseMode = (v: LocalMode) => {
+    setMode(v); // the choice is also kept as this PC's default
+    apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { displayMode: v } }).catch(() => undefined);
+  };
   const [overlay, setOverlay] = useState(true);
 
   const screen = screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 });
@@ -241,7 +249,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   const mac = info?.mac || m.mac;
   const launch: LocalLaunch | null = info && host ? {
     os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
-    wake: wake && !!mac, matchScreen: match && os !== 'windows', overlay, api: info.api, token: info.launcherToken,
+    wake: wake && !!mac, mode, overlay, api: info.api, token: info.launcherToken,
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -280,14 +288,27 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-slate-300">
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={fullscreen} onChange={(e) => setFullscreen(e.target.checked)} /> Full screen</label>
         <label className={`flex items-center gap-1.5 ${mac ? '' : 'opacity-50'}`} title={mac ? undefined : 'Needs the PC’s MAC address (Settings)'}><input type="checkbox" checked={wake && !!mac} disabled={!mac} onChange={(e) => setWake(e.target.checked)} /> Wake the PC first</label>
-        <label className={`flex items-center gap-1.5 ${os === 'windows' ? 'opacity-50' : ''}`}><input type="checkbox" checked={match && os !== 'windows'} disabled={os === 'windows'} onChange={(e) => setMatch(e.target.checked)} /> Match the PC’s screen to this one, then put it back</label>
         <label className="flex items-center gap-1.5" title="Moonlight draws decode time, dropped frames and network delay over the stream: the first thing to look at when it lags"><input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} /> Show Moonlight’s performance overlay</label>
         <label className="flex items-center gap-1.5">Run it on
           <select className={sel} value={os} onChange={(e) => setOs(e.target.value as LocalOS)}><option value="macos">macOS</option><option value="linux">Linux</option><option value="windows">Windows</option></select></label>
       </div>
+      <div className={`grid sm:grid-cols-2 gap-3 ${os === 'windows' ? 'opacity-50' : ''}`}>
+        {([
+          ['mirror', 'Mirror', 'The PC’s own screens stay on at their own resolution, and its desktop shows here too. For setting things up. Speed matters less.'],
+          ['headless', 'Headless (gaming)', 'The PC’s screens switch off and a virtual display takes over at this screen’s size and refresh rate, with the stream tuned for play. The screens come back when you stop.'],
+        ] as const).map(([v, title, text]) => (
+          <label key={v} className={`flex items-start gap-2 rounded border p-3 cursor-pointer ${mode === v ? 'border-neon-cyan/60 bg-neon-cyan/5' : 'border-white/10 hover:border-white/25'}`}>
+            <input type="radio" name={`mode-${m.id}`} className="mt-0.5" checked={mode === v} disabled={os === 'windows'} onChange={() => chooseMode(v)} />
+            <span><span className="block text-slate-100 font-semibold">{title}</span><span className="block text-slate-400">{text}</span></span>
+          </label>
+        ))}
+      </div>
+      {mode === 'headless' && os !== 'windows' && m.status?.display && !m.status.display.virtual && (
+        <p className="text-neon-amber">⚠ This PC has no virtual display yet, so Headless can’t switch its screens off. Install one under Settings → Virtual display first (until then it streams as Mirror).</p>
+      )}
       <p className="text-slate-500">Stream {res.w}×{res.h} at {fps} fps, about {Math.round(localBitrateKbps(res.w, res.h, fps) / 1000)} Mbit/s over your home network. Needs Moonlight installed and paired (Pair Moonlight above).</p>
       {os === 'windows'
-        ? <><CopyBox text={plainStreamCommand(launch!)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and screen matching are for the macOS and Linux command.)</p></>
+        ? <><CopyBox text={plainStreamCommand(launch!)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and the Mirror / Headless switch are for the macOS and Linux command.)</p></>
         : <>
           <CopyBox text={script} tall />
           <div className="flex flex-wrap items-center gap-3">
@@ -319,6 +340,8 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
     setSaving(true); setMsg(null);
     try { await apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { name, lanIp: ip, mac } }); setMsg('Saved.'); onChanged(); } catch (e) { setMsg(`⚠ ${errText(e)}`); } finally { setSaving(false); }
   };
+  const [vdCmd, setVdCmd] = useState<string | null>(null);
+  useEffect(() => { apiFetch<{ api: string }>(`/local-machines/${m.id}/launcher`).then((i) => setVdCmd(`irm '${i.api}/local-agent/virtual-display.ps1' | iex`)).catch(() => undefined); }, [m.id]);
   const [scriptOn, setScriptOn] = useState(m.scriptEnabled);
   useEffect(() => setScriptOn(m.scriptEnabled), [m.scriptEnabled]);
   const toggleScript = async (on: boolean) => {
@@ -342,6 +365,13 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
         <p className="label">Connect the PC</p>
         <p className="text-slate-400">On the PC (Windows 11), right-click Start → Terminal (Admin), paste the command and press Enter. It installs Sunshine if needed, sets Sunshine’s login (only the PC keeps it), turns on Wake-on-LAN and starts the agent.</p>
         {newToken ? <CopyBox text={newToken} /> : <p className="text-slate-500">The command is shown once, when the PC is added. Lost it? <button type="button" className="text-neon-cyan hover:underline" onClick={askToken}>Make a new one</button> (the old one stops working).</p>}
+      </div>
+
+      <div className="space-y-2 border-t border-white/5 pt-3">
+        <p className="label">Virtual display (for Headless mode)</p>
+        <p className="text-slate-400">Headless mode switches the PC’s own screens off, and Windows still needs <em>a</em> screen to stream from. This installs a software one (the open-source Virtual Display Driver). Same place as before: Terminal (Admin) on the PC.</p>
+        {vdCmd ? <CopyBox text={vdCmd} /> : <p className="text-slate-500">Loading…</p>}
+        <p className="text-slate-500">{m.status?.display?.virtual ? '✓ The PC reports a virtual display.' : 'The PC does not report one yet. After installing, press Refresh on the PC card.'} Safety net: if GGGH can’t be reached for 5 minutes, nobody has streamed for 10, or the PC restarts, the agent puts the screens back by itself. “Screens back on” on the PC card does it at once.</p>
       </div>
 
       <div className="space-y-2 border-t border-white/5 pt-3">
@@ -369,7 +399,7 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
 function LogPanel({ id }: { id: string }) {
   const [rows, setRows] = useState<CmdLogRow[] | null>(null);
   useEffect(() => { apiFetch<CmdLogRow[]>(`/local-machines/${id}/commands?limit=25`).then(setRows).catch(() => setRows([])); }, [id]);
-  const show = (r: CmdLogRow) => (r.kind === 'script' ? `script: ${String((r.args as any).script || '').slice(0, 160)}` : r.kind === 'sunshine-pin' ? 'pair Moonlight' : r.kind === 'display-set' ? `match screen ${(r.args as any).width}×${(r.args as any).height}` : r.kind.replace('-', ' '));
+  const show = (r: CmdLogRow) => (r.kind === 'script' ? `script: ${String((r.args as any).script || '').slice(0, 160)}` : r.kind === 'sunshine-pin' ? 'pair Moonlight' : r.kind === 'display-set' ? `match screen ${(r.args as any).width}×${(r.args as any).height}` : r.kind === 'display-headless' ? `headless ${(r.args as any).width}×${(r.args as any).height}` : r.kind === 'display-restore' ? 'screens back on' : r.kind.replace('-', ' '));
   if (!rows) return <p className="text-xs text-slate-500 animate-pulse">&gt; loading…</p>;
   if (!rows.length) return <p className="text-xs text-slate-500">Nothing has been asked of this PC yet.</p>;
   return (

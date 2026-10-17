@@ -7,7 +7,7 @@
  *
  *   GET    /                       my local machines (status as the agent last reported)
  *   POST   /                       add one  { name, lanIp?, mac? } → { machine, agentToken, installCommand }
- *   PATCH  /:id                    { name?, lanIp?, mac?, scriptEnabled? }
+ *   PATCH  /:id                    { name?, lanIp?, mac?, scriptEnabled?, displayMode? }
  *   DELETE /:id
  *   POST   /:id/token              new agent token (the old one stops) → { agentToken, installCommand }
  *   GET    /:id/launcher           what the generated Moonlight command needs → { launcherToken, lanIp, mac, api }

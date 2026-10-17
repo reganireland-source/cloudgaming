@@ -4,9 +4,13 @@
  * Builds the terminal script for one local machine (Windows + Sunshine on the
  * home network). On macOS / Linux it:
  *   1. wakes the PC if it's asleep (Wake-on-LAN, then waits for Sunshine),
- *   2. asks GGGH (through the agent) to match the PC's screen to this device,
+ *   2. asks GGGH (through the agent) to set the PC up for the chosen mode:
+ *        Mirror    the PC's own screens stay on, at their own resolution; the
+ *                  desktop appears on this device (setup work, nothing fast).
+ *        Headless  the PC's screens go off and a virtual display takes over at
+ *                  THIS device's resolution and refresh rate (gaming);
  *   3. runs `moonlight stream` for the chosen app,
- *   4. puts the PC's screen back when the stream ends.
+ *   4. puts the PC's screens back when the stream ends (headless only).
  * Streaming itself needs only the PC's address: if GGGH can't be reached the
  * screen steps are skipped with a note, and the stream still starts.
  * On Windows only the plain `moonlight stream` line is offered.
@@ -15,6 +19,7 @@
  * screen to match / be put back, never power off or run anything.
  */
 
+export type LocalMode = 'mirror' | 'headless';
 export type LocalOS = 'macos' | 'linux' | 'windows';
 export type LocalCodec = 'H.264' | 'HEVC' | 'AV1';
 
@@ -31,7 +36,8 @@ export interface LocalLaunch {
   codec: LocalCodec;
   fullscreen: boolean;
   wake: boolean;
-  matchScreen: boolean;
+  /** mirror: PC screens stay as they are. headless: PC screens off, a virtual display at width x height. */
+  mode: LocalMode;
   /** Moonlight's own overlay: decode time, dropped frames, network delay. The first thing to look at for lag. */
   overlay?: boolean;
   api: string;
@@ -99,7 +105,7 @@ export function buildLaunchScript(l: LocalLaunch): string {
     `HOST=${sq(l.host)}`,
   ];
   if (wake) lines.push(`MAC=${sq(l.mac!)}`);
-  if (l.matchScreen) lines.push(`API=${sq(l.api)}`, `TOKEN=${sq(l.token)}`);
+  if (l.mode) lines.push(`API=${sq(l.api)}`, `TOKEN=${sq(l.token)}`);
   lines.push(`up() { nc -z -w 2 "$HOST" 47989 >/dev/null 2>&1; }`);
 
   if (wake) {
@@ -130,18 +136,26 @@ export function buildLaunchScript(l: LocalLaunch): string {
     );
   }
 
-  if (l.matchScreen) {
+  const screenCall = [
+    '',
+    '# Ask GGGH (through the agent on the PC) to set up its screens. Streaming itself needs only the PC\'s address.',
+    'screen() {',
+    '  curl -fsS -m "$2" -X POST -H "Authorization: Bearer $TOKEN" -H \'Content-Type: application/json\' -d "$1" "$API/local-agent/screen" 2>/dev/null \\',
+    `    | sed -n 's/.*"message":"\\([^"]*\\)".*/\\1/p'`,
+    '}',
+  ];
+  lines.push(...screenCall);
+  if (l.mode === 'headless') {
     lines.push(
-      '',
-      '# Ask GGGH (through the agent on the PC) to match the PC\'s screen to this device, and put it back afterwards.',
-      'screen() {',
-      '  curl -fsS -m "$2" -X POST -H "Authorization: Bearer $TOKEN" -H \'Content-Type: application/json\' -d "$1" "$API/local-agent/screen" 2>/dev/null \\',
-      `    | sed -n 's/.*"message":"\\([^"]*\\)".*/\\1/p'`,
-      '}',
-      `msg=$(screen '{"action":"set","width":${l.width},"height":${l.height},"fps":${l.fps}}' 30)`,
-      'echo "${msg:-Could not reach GGGH, so the screen of the PC was left as it is.}"',
-      `restore() { screen '{"action":"restore"}' 10 >/dev/null; }`,
+      `msg=$(screen '{"action":"headless","width":${l.width},"height":${l.height},"fps":${l.fps}}' 50)`,
+      'echo "${msg:-Could not reach GGGH, so the PC was left as it is.}"',
+      `restore() { screen '{"action":"restore"}' 20 >/dev/null; }`,
       'trap restore EXIT',
+    );
+  } else {
+    lines.push(
+      `msg=$(screen '{"action":"restore"}' 20)`,
+      'echo "Mirror: ${msg:-the own screens of the PC are used as they are.}"',
     );
   }
 
