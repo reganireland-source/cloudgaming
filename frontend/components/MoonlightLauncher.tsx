@@ -29,6 +29,8 @@
  *    full-notch, ultrawide 21:9/32:9, tablets): same pixel budget as the
  *    preset, the display's aspect ratio, within 2560x1600 (lib/screens.ts).
  *    The machine builds a matching virtual screen for any size requested.
+ *    Always --no-multi-controller (Moonlight's "Force gamepad #1 always
+ *    connected"): with several gamepads one physical pad can appear twice.
  *    The app names ("Desktop", "Steam (Big Picture)"…) are the ones defined
  *    in the Sunshine container on the machine.
  *
@@ -185,6 +187,9 @@ export default function MoonlightLauncher({
     '--audio-config', 'stereo',
     '--game-optimization',
     '--quit-after',
+    // "Force gamepad #1 always connected": one controller on the machine.
+    // With several, one physical pad can show up twice in games.
+    '--no-multi-controller',
   ].join(' '), [exe, host, app, os, p, fullscreen]);
 
   const pairCommand = pairing ? `${exe} pair ${pairing.host} --pin ${pairing.pin}` : '';
