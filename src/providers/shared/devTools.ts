@@ -20,7 +20,7 @@
 
 import crypto from 'crypto';
 
-export const DEV_TOOLS_SCRIPT = String.raw`#!/bin/bash
+const DEV_TOOLS_SOURCE = String.raw`#!/bin/bash
 # Developer tools for a game project: Godot (headless tests), WINE (Windows
 # smoke test), Python audio/chart tools. Ubuntu 22.04/24.04, x86_64.
 # Run as root. Safe to run again.
@@ -173,5 +173,11 @@ mkdir -p /opt/devtools
 } | tee /opt/devtools/READY
 say "Done. Log in as $DEV_USER (sudo -iu $DEV_USER, or ssh $DEV_USER@<machine>)."
 `;
+
+/**
+ * What the machine gets: the script without its comment lines (it can be
+ * inlined into Oracle's 32 KB user data). The sha256 is of exactly this.
+ */
+export const DEV_TOOLS_SCRIPT = DEV_TOOLS_SOURCE.split('\n').filter((line, i) => i === 0 || !/^\s*#(?!!)/.test(line)).join('\n');
 
 export const DEV_TOOLS_SHA256 = crypto.createHash('sha256').update(DEV_TOOLS_SCRIPT).digest('hex');

@@ -539,7 +539,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=13
+APPS_VERSION=14
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -695,6 +695,8 @@ MANGOHUD
 
 cat > "$SUN_DIR/project/Dockerfile" <<DOCKERFILE
 FROM $SUNSHINE_IMAGE
+# No package may stop the build with a question (tzdata asks for a time zone).
+ARG DEBIAN_FRONTEND=noninteractive
 # Each app is best-effort: if a download fails, the machine still streams,
 # just without that app (the build log says which one was skipped).
 # Google Chrome: official .deb (also adds Google's repo for updates).
@@ -743,6 +745,7 @@ RUN apt-get update \
 RUN apt-get update \
  && ( apt-get install -y --no-install-recommends unzip zip 7zip unar xarchiver thunar-archive-plugin \
       || apt-get install -y --no-install-recommends unzip zip || echo "WARNING: archive tools skipped (no Extract Here)" ) \
+ && ( apt-get install -y --no-install-recommends arc-theme || echo "WARNING: Arc theme skipped" ) \
  && ( apt-get install -y --no-install-recommends xdotool || echo "WARNING: xdotool skipped (Battle.net pre-install can't click prompts)" ) \
  && ( apt-get install -y --no-install-recommends xfce4-terminal || echo "WARNING: xfce4-terminal skipped (the dock keeps xterm)" ) \
  && ( apt-get install -y --no-install-recommends xfdashboard xfdashboard-plugins || apt-get install -y --no-install-recommends xfdashboard \
@@ -1104,13 +1107,23 @@ for L in /cloudy/conf/xfce4/panel/launcher-*/terminal.desktop "$HOME"/.config/xf
   [ -f "$L" ] && command -v xfce4-terminal >/dev/null && sed -i 's/^Exec=xterm$/Exec=xfce4-terminal/' "$L"
 done
 D=$(dirname "$(ls -d /cloudy/conf/xfce4/panel/launcher-16 "$HOME"/.config/xfce4/panel/launcher-16 2>/dev/null | head -1)")
-if [ -d "$D" ] && ! xfconf-query -c xfce4-panel -p /plugins/plugin-23 >/dev/null 2>&1; then
-  mkdir -p "$D/launcher-23"
-  for f in display-scale keyboard-mode xfce-display-settings; do [ -f "/usr/share/applications/$f.desktop" ] && cp "/usr/share/applications/$f.desktop" "$D/launcher-23/"; done
-  xfconf-query -c xfce4-panel -p /plugins/plugin-23 -n -t string -s launcher
-  xfconf-query -c xfce4-panel -p /plugins/plugin-23/items -n -a -t string -s display-scale.desktop -t string -s keyboard-mode.desktop -t string -s xfce-display-settings.desktop
+addl() {
+  N=$1; shift; IT=""
+  [ -d "$D/launcher-16" ] && ! xfconf-query -c xfce4-panel -p /plugins/plugin-$N >/dev/null 2>&1 || return 0
+  mkdir -p "$D/launcher-$N"
+  for f; do [ -f "/usr/share/applications/$f.desktop" ] && cp "/usr/share/applications/$f.desktop" "$D/launcher-$N/" && IT="$IT -t string -s $f.desktop"; done
+  [ -n "$IT" ] || return 0
+  xfconf-query -c xfce4-panel -p /plugins/plugin-$N -n -t string -s launcher
+  xfconf-query -c xfce4-panel -p /plugins/plugin-$N/items -n -a $IT
   I=$(xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids | grep -E '^[0-9]+$' | sed 's/^/-t int -s /' | tr '\n' ' ')
-  [ -n "$I" ] && xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -a $I -t int -s 23 && (xfce4-panel -r >/dev/null 2>&1 &)
+  [ -n "$I" ] && xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -a $I -t int -s $N && RP=1
+}
+addl 23 display-scale keyboard-mode xfce-display-settings
+addl 24 xfce4-appfinder
+[ -n "$RP" ] && (xfce4-panel -r >/dev/null 2>&1 &)
+C=$(printenv XDG_CONFIG_HOME); [ -n "$C" ] || C=$HOME/.config
+if command -v xfce4-terminal >/dev/null && ! grep -q '^TerminalEmulator=' "$C/xfce4/helpers.rc" 2>/dev/null; then
+  mkdir -p "$C/xfce4"; echo TerminalEmulator=xfce4-terminal >> "$C/xfce4/helpers.rc"
 fi
 R=$(xrandr -q 2>/dev/null | grep -w connected | grep -oP '\d+x\d+' | head -n1)
 H=$(echo "$R" | cut -dx -f2)
@@ -1119,6 +1132,11 @@ P=$(cat "$F" 2>/dev/null)
 case "$P" in 100|125|150|175|200) ;; *) P=$(( H <= 1080 ? 100 : H <= 1440 ? 125 : H <= 1800 ? 150 : 200 )) ;; esac
 s() { echo $(( $1 * P / 100 )); }
 x() { xfconf-query -c "$1" -p "$2" -n -t "$3" -s "$4" 2>/dev/null || xfconf-query -c "$1" -p "$2" -s "$4"; }
+if [ ! -f "$HOME/.config/cloudgaming-look" ]; then
+  [ -d /usr/share/themes/Arc-Dark ] && x xsettings /Net/ThemeName string Arc-Dark && x xfwm4 /general/theme string Arc-Dark
+  x xsettings /Xft/Antialias int 1; x xsettings /Xft/HintStyle string hintslight; x xsettings /Xft/RGBA string none
+  mkdir -p "$HOME/.config"; touch "$HOME/.config/cloudgaming-look"
+fi
 x xsettings /Xft/DPI int "$(s 96)"
 x xsettings /Gtk/CursorThemeSize int "$(s 24)"
 x xfce4-panel /panels/panel-1/size uint "$(s 26)"
@@ -1136,7 +1154,7 @@ if ! docker image inspect "$APPS_IMAGE" >/dev/null 2>&1; then
     docker pull "$SUNSHINE_IMAGE" || fail 65 "could not download $SUNSHINE_IMAGE"
   fi
   stage 70 apps "Adding Chrome, Discord and Battle.net (2-4 minutes)"
-  if ! docker build -t "$APPS_IMAGE" .; then
+  if ! timeout 1800 docker build -t "$APPS_IMAGE" .; then
     # Don't lose the machine over optional apps: stream with CloudyPad's
     # image as-is (Steam, Firefox, Heroic, Lutris) and say so.
     say "WARNING: couldn't add Chrome, Discord and Battle.net - using the standard container"
