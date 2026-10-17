@@ -8,13 +8,15 @@
  * bar with GB and %. The full version (Machines page) has "Enlarge": the
  * cloud grows the disk in place — games and settings untouched — and the
  * machine grows its filesystem into the new space by itself. Disks can only
- * grow. The compact version (Dashboard) is the bar alone.
+ * grow. The compact version (Dashboard) is the bar alone. The machine card
+ * shows its Enlarge button elsewhere: it passes `open` / `onOpenChange` and
+ * `hideButton`, and learns what the disk allows from `onInfo`.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/auth';
 
-interface DiskInfo {
+export interface DiskInfo {
   sizeGb: number;
   usage: { usedGb: number; totalGb: number; percent: number; at: string | null } | null;
   note?: string; canResize: boolean; resizeWhileRunning: boolean; maxGb: number;
@@ -26,8 +28,12 @@ const level = (pct: number) =>
   : { bar: 'bg-neon-lime', text: 'text-neon-lime', word: '' };
 const PRESETS = [50, 100, 250];
 
-export default function DiskMeter({ machineId, status, compact = false, perGbMonth, busy = false, onResize, onUpdateScript }: {
+export default function DiskMeter({ machineId, status, compact = false, perGbMonth, busy = false, onResize, onUpdateScript, open: openProp, onOpenChange, hideButton = false, onInfo }: {
   machineId: string; status: string; compact?: boolean;
+  /** Controlled Enlarge panel (the card's own Enlarge button opens it). */
+  open?: boolean; onOpenChange?: (open: boolean) => void; hideButton?: boolean;
+  /** Told what the disk allows once it's loaded (size, can it grow, while running?). */
+  onInfo?: (info: DiskInfo) => void;
   /** USD per GB-month, to price the bigger disk. */
   perGbMonth?: number;
   busy?: boolean;
@@ -37,12 +43,22 @@ export default function DiskMeter({ machineId, status, compact = false, perGbMon
   onUpdateScript?: (restart: boolean) => void;
 }) {
   const [info, setInfo] = useState<DiskInfo | null>(null);
-  const [open, setOpen] = useState(false);
+  const [openSelf, setOpenSelf] = useState(false);
+  const open = openProp ?? openSelf;
+  const setOpen = (v: boolean | ((o: boolean) => boolean)) => {
+    const next = typeof v === 'function' ? v(open) : v;
+    setOpenSelf(next); onOpenChange?.(next);
+  };
+  const infoCb = useRef(onInfo);
+  infoCb.current = onInfo;
+  useEffect(() => { if (info) infoCb.current?.(info); }, [info]);
   const [target, setTarget] = useState(0);
   const load = useCallback((refresh = false) => {
     apiFetch<DiskInfo>(`/machines/${machineId}/disk${refresh ? '?refresh=true' : ''}`).then(setInfo).catch(() => setInfo(null));
   }, [machineId]);
   useEffect(() => { if (!['shelved', 'terminated', 'deleting'].includes(status)) load(); }, [load, status]);
+  // Opened from outside: start from the suggested size again.
+  useEffect(() => { if (openProp) setTarget(0); }, [openProp]);
 
   if (!info) return null;
   const u = info.usage;
@@ -72,7 +88,7 @@ export default function DiskMeter({ machineId, status, compact = false, perGbMon
     <div className="space-y-1.5 max-w-xl">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <div className="flex-1 min-w-[12rem]">{bar}</div>
-        {info.canResize && onResize && (
+        {info.canResize && onResize && !hideButton && (
           <button type="button" disabled={busy} onClick={() => { setOpen((v) => !v); setTarget(0); }}
             className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40 shrink-0">＋ Enlarge</button>
         )}

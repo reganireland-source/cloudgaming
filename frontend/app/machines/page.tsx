@@ -42,7 +42,7 @@ import { RequireAuth } from '@/components/AuthProvider';
 import { apiFetch, ApiError, type FriendlyError } from '@/lib/auth';
 import LaunchMachineModal from '@/components/LaunchMachineModal';
 import OperationConsole from '@/components/OperationConsole';
-import DiskMeter from '@/components/DiskMeter';
+import DiskMeter, { type DiskInfo } from '@/components/DiskMeter';
 import DevAccess from '@/components/DevAccess';
 import TelemetryPanel from '@/components/TelemetryPanel';
 import { byMachineOrder, isDeadStatus } from '@/lib/machineOrder';
@@ -158,10 +158,10 @@ function isStuck(m: Machine, activeOp: string | null): boolean {
 }
 
 /** "Auto-shelve after N days stopped" — off by default for existing machines. */
-function AutoShelvePicker({ value, saving, onChange, inline }: { value: number | null; saving: boolean; onChange: (d: number | null) => void; inline?: boolean }) {
+function AutoShelvePicker({ value, saving, onChange, inline, bare }: { value: number | null; saving: boolean; onChange: (d: number | null) => void; inline?: boolean; bare?: boolean }) {
   return (
-    <label className={`${inline ? 'inline-flex' : 'flex'} flex-wrap items-center gap-1.5 text-slate-400`}>
-      <span>Auto-shelve after</span>
+    <label className={`${inline || bare ? 'inline-flex' : 'flex'} flex-wrap items-center gap-1.5 text-slate-400`}>
+      {!bare && <span>Auto-shelve after</span>}
       <ThemedSelect compact value={String(value ?? 0)} disabled={saving} onChange={(v) => onChange(Number(v) || null)} ariaLabel="Auto-shelve after"
         className="inline-block min-w-[9rem]"
         options={[{ value: '0', label: 'off' }, ...AUTO_SHELVE.map((d) => ({ value: String(d), label: `${d} day${d === 1 ? '' : 's'} stopped` }))]} />
@@ -203,6 +203,45 @@ function TierBadge({ shape }: { shape: ShapeInfo }) {
       {t.label}
       <span className="normal-case tracking-normal text-slate-400">{shape.gpuModel} · {shape.vcpus} vCPU</span>
     </span>
+  );
+}
+
+/** Does a change restart the machine? Said plainly next to its button. */
+type RowBadge = { text: string; tone: 'restart' | 'live' | 'later' };
+const BADGE_CLS: Record<RowBadge['tone'], string> = {
+  restart: 'border-neon-amber/50 text-neon-amber',
+  live: 'border-white/15 text-slate-400',
+  later: 'border-neon-purple/50 text-neon-purple',
+};
+const ROW_BTN = 'rounded border border-neon-cyan/40 bg-neon-cyan/[0.04] px-2.5 py-1 text-[0.72rem] text-neon-cyan hover:bg-neon-cyan/10 disabled:opacity-40 whitespace-nowrap';
+
+/**
+ * One row of "Modify this machine": what it is now and the trade-off in
+ * plain words, then the action and whether it restarts the machine. Its
+ * confirmation (with the usual warnings) opens right underneath.
+ */
+function ModifyRow({ icon, label, note, action, badge, panel, children }: {
+  icon: string; label: string; note?: React.ReactNode; action?: React.ReactNode; badge?: RowBadge | null; panel?: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <li className="px-3 py-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 sm:items-center">
+        <span className="flex items-center gap-2 text-[0.66rem] uppercase tracking-label text-slate-500">
+          <span aria-hidden className="w-4 text-center text-xs text-slate-400">{icon}</span>{label}
+        </span>
+        <div className="min-w-0">
+          <div className="text-xs text-slate-100">{children}</div>
+          {note && <p className="mt-0.5 text-[0.7rem] text-slate-500">{note}</p>}
+        </div>
+        {(action || badge) && (
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            {action}
+            {badge && <span className={`text-[0.62rem] uppercase tracking-label border rounded px-1.5 py-0.5 whitespace-nowrap ${BADGE_CLS[badge.tone]}`}>{badge.text}</span>}
+          </div>
+        )}
+      </div>
+      {panel}
+    </li>
   );
 }
 
@@ -307,6 +346,8 @@ function MachineCard({
     try { const r = await apiFetch<{ autoShelveDays: number | null }>(`/machines/${machine.id}/auto-shelve`, { method: 'POST', body: { days } }); setAutoShelve(r.autoShelveDays); }
     catch { /* keep the old value */ } finally { setAutoSaving(false); }
   };
+  const [diskOpen, setDiskOpen] = useState(false);
+  const [diskInfo, setDiskInfo] = useState<DiskInfo | null>(null);
   const [stage, setStage] = useState<ConnectionInfo['setup']['current']>(null);
   const [history, setHistory] = useState<OperationSummary[] | null>(null);
   const [openOp, setOpenOp] = useState<string | null>(null);
@@ -315,6 +356,7 @@ function MachineCard({
   const stale = isStuck(machine, activeOp);
   const placeholderId = /^(pending|shelved):/.test(machine.instance_id);
   const [zone, name] = placeholderId ? ['', ''] : machine.instance_id.split('/');
+  const showModify = !placeholderId && !['failed', 'missing', 'deleting', 'unknown'].includes(machine.status);
 
   useEffect(() => {
     if (tab !== 'activity') return;
@@ -334,10 +376,6 @@ function MachineCard({
             <Nickname machine={machine} onRenamed={onOpFinished} />
             <span className="text-xs text-slate-400 font-mono">{machine.instance_type}</span>
             {shape && <TierBadge shape={shape} />}
-            {canResizeNow && (
-              <button type="button" disabled={busy} onClick={() => { setNewSize(inPlaceSizes.find((s) => s.dev)?.id || inPlaceSizes[0].id); setConfirm('size'); }}
-                className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40" title="Bigger or smaller machine, same disk, games and settings">⇅ change size</button>
-            )}
             {machine.display_driver === 'grid' && (
               <span className="text-[0.66rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"
                 title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">▣ big screen · experimental</span>
@@ -346,18 +384,6 @@ function MachineCard({
             {machine.spot
               ? <span className="text-[0.66rem] uppercase tracking-label text-neon-amber border border-neon-amber/40 rounded px-1.5">spot</span>
               : <span className="text-[0.66rem] uppercase tracking-label text-slate-400 border border-white/15 rounded px-1.5">on-demand</span>}
-            {canSwitchBig && (
-              <button type="button" disabled={busy} onClick={() => setConfirm('big-screen')} className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40"
-                title={isBig ? 'Back to the standard driver (up to 2560×1600)' : 'NVIDIA GRID driver: screens up to 4096×2160 (ultrawide, 4K)'}>
-                ▣ {isBig ? 'switch off big screen' : 'switch to big screen'}
-              </button>
-            )}
-            {canSwitchNow && (
-              <button type="button" disabled={busy} onClick={() => setConfirm('pricing')} className="text-[0.7rem] text-neon-cyan hover:underline disabled:opacity-40"
-                title={machine.spot ? 'Full price, never reclaimed (e.g. for the first setup)' : 'Cheaper, but the cloud can reclaim it'}>
-                ⇄ {machine.spot ? 'switch to on-demand' : 'switch to spot'}
-              </button>
-            )}
           </div>
           <p className="text-xs text-slate-500 mt-1">
             {st.hint}
@@ -365,14 +391,6 @@ function MachineCard({
             {machine.game_title && <> · {machine.game_title}</>}
             {' · '}checked {timeAgo(machine.last_synced_at || machine.created_at)}
           </p>
-          {!placeholderId && machine.status !== 'shelved' && (
-            <div className="mt-2">
-              <DiskMeter machineId={machine.id} status={machine.status} busy={busy}
-                perGbMonth={sd && machine.disk_size_gb ? sd.diskMonthly / machine.disk_size_gb : undefined}
-                onResize={(sizeGb) => onAction(machine, 'disk', { sizeGb })}
-                onUpdateScript={machine.provider === 'gcp' ? (restart) => onAction(machine, 'update-script', { restart }) : undefined} />
-            </div>
-          )}
         </div>
         <div className="flex items-center gap-6 text-xs">
           <div>
@@ -388,15 +406,6 @@ function MachineCard({
             </div>
           )}
           <div><p className="label">IP</p><p className="font-mono text-slate-200">{machine.ip_address || '—'}</p></div>
-          {/* Which NVIDIA driver it runs: the standard one caps the screen at 2560×1600; "Big screen" (GRID) at 4096×2160. */}
-          <div title={machine.display_driver === 'grid'
-            ? 'Big screen (experimental): NVIDIA GRID driver — screens up to 4096×2160, e.g. a 3440×1440 ultrawide at full size.'
-            : 'Standard NVIDIA datacenter driver — screens up to 2560×1600. Launch with “Big screen” for more.'}>
-            <p className="label">Screen</p>
-            {machine.display_driver === 'grid'
-              ? <p className="text-neon-magenta tabular-nums">≤4096×2160 <span className="hidden sm:inline text-[0.64rem] uppercase tracking-label">big · exp</span></p>
-              : <p className="text-slate-400 tabular-nums">≤2560×1600</p>}
-          </div>
         </div>
         {/* ---- Actions that make sense for this state ---- */}
         <div className="flex flex-wrap gap-2">
@@ -433,23 +442,6 @@ function MachineCard({
       )}
 
       {/* ---- Standing cost: what this machine costs while you aren't playing ---- */}
-      {sd && machine.status === 'stopped' && (
-        <div className="mt-3 rounded border border-neon-amber/25 bg-neon-amber/[0.04] px-3 py-2 text-xs text-slate-300 space-y-1.5">
-          <p>
-            <span className="text-neon-amber">Stopped{daysSince(machine.stopped_at) ? ` ${daysSince(machine.stopped_at)} day${daysSince(machine.stopped_at) === 1 ? '' : 's'}` : ''}:</span>{' '}
-            no compute charge, but its {sd.diskGb} GB disk costs <span className="text-slate-100 tabular-nums">{money(sd.diskMonthly)}/month</span>, empty space included.
-            Shelved it would be about <span className="text-slate-100 tabular-nums">{usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}/month</span>{' '}
-            (snapshots bill only the data stored: {money(sd.shelfEstimate.low)} for a fresh install, {money(sd.shelfEstimate.high)} if the disk is full).
-          </p>
-          <AutoShelvePicker value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} />
-        </div>
-      )}
-      {sd && machine.status === 'running' && (
-        <p className="mt-2 text-[0.7rem] text-slate-500">
-          When you stop, the {sd.diskGb} GB disk keeps costing {money(sd.diskMonthly)}/month; shelving cuts that to ≈{usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}.{' '}
-          <AutoShelvePicker value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} inline />
-        </p>
-      )}
       {sd && machine.status === 'shelved' && (
         <div className="mt-3 rounded border border-neon-purple/30 bg-neon-purple/[0.04] px-3 py-2 text-xs text-slate-300">
           Shelved {machine.shelved_at ? timeAgo(machine.shelved_at) : ''}: only its snapshot is billed —{' '}
@@ -510,89 +502,6 @@ function MachineCard({
           </div>
         </div>
       )}
-      {confirm === 'pricing' && (() => {
-        const to = !machine.spot;
-        const now = priceFor(machine.spot);
-        const next = priceFor(to);
-        return (
-          <div className="mt-3 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
-            <p>
-              <strong className="text-slate-100">Switch to {to ? 'spot' : 'on-demand'}?</strong>{' '}
-              {next != null && <>≈{money(next)}/hour while running{now != null && <> (now ≈{money(now)})</>}. </>}
-              {to
-                ? 'Spot is much cheaper, but the cloud can reclaim it at short notice — fine for playing, risky during the first setup. The disk and games are kept when that happens.'
-                : 'On-demand is full price and never reclaimed — the safe choice for the first setup or a long session. It uses your normal GPU quota, not the spot one.'}
-            </p>
-            <p className="text-slate-400">
-              {machine.status === 'shelved' ? 'Applied when you restore it.'
-                : machine.status === 'running' ? 'The cloud only switches a stopped machine: it is stopped, switched and started again (a couple of minutes; setup and games carry on).'
-                : 'Switched in place (same disk); start it when you’re ready.'}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'pricing', { spot: to }); }}>Switch to {to ? 'spot' : 'on-demand'}</button>
-              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
-            </div>
-          </div>
-        );
-      })()}
-      {confirm === 'big-screen' && (() => {
-        const to = !isBig;
-        const base = sizePrice(shape, !!machine.spot, machine.region);
-        const now = base != null ? base : null;
-        const next = base != null ? base - (isBig ? bigExtra : 0) + (to ? (bigScreen?.extraPerHour || 0) : 0) : null;
-        return (
-          <div className="mt-3 rounded border border-neon-magenta/40 p-3 text-xs text-slate-300 space-y-2">
-            <p>
-              <strong className="text-slate-100">{to ? 'Switch to big screen?' : 'Switch off big screen?'}</strong>{' '}
-              {to
-                ? 'NVIDIA’s GRID driver lifts the screen limit from 2560×1600 to 4096×2160 — native ultrawide (3440×1440) and 4K. Experimental.'
-                : 'Back to the standard driver: screens up to 2560×1600 (ultrawide still fills the screen, at 2560 wide).'}
-              {next != null && <> ≈{money(next)}/hour while running{now != null && <> (now ≈{money(now)})</>}.</>}
-            </p>
-            <p className="text-slate-400">
-              {machine.status === 'shelved' ? 'Applied when you restore it.'
-                : <>{machine.status === 'running' ? 'It is stopped, switched and started again. ' : 'Switched in place; '}the next start installs the {to ? 'GRID' : 'standard'} driver (5–10 minutes, one extra restart). Games and settings are kept.
-                  {to && machine.provider === 'gcp' && ' Google needs the "Virtual Workstation" GPU quota for this GPU in this region (the Regions page shows it). If Google refuses the switch on this machine, Shelve and Restore with big screen instead.'}</>}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'big-screen', { on: to }); }}>{to ? 'Switch to big screen' : 'Switch off big screen'}</button>
-              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
-            </div>
-          </div>
-        );
-      })()}
-      {confirm === 'size' && (() => {
-        const to = inPlaceSizes.find((s) => s.id === newSize);
-        const now = sizePrice(shape, !!machine.spot, machine.region);
-        return (
-          <div className="mt-3 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
-            <p><strong className="text-slate-100">Change size</strong> — the same disk, games, dev tools and settings; only the CPU, memory and price change.</p>
-            <div role="radiogroup" aria-label="New size" className="grid sm:grid-cols-2 gap-2">
-              {[...inPlaceSizes].sort((a, b) => a.vcpus - b.vcpus).map((s) => {
-                const p = sizePrice(s, !!machine.spot, machine.region);
-                const t = TIER_STYLE[tierOf(s)];
-                return (
-                  <button key={s.id} type="button" role="radio" aria-checked={newSize === s.id} onClick={() => setNewSize(s.id)}
-                    className={`rounded border px-2.5 py-1.5 text-left ${newSize === s.id ? 'border-neon-cyan bg-neon-cyan/[0.06]' : 'border-white/10 hover:border-white/30'}`}>
-                    <span className="flex justify-between gap-2"><span className="text-slate-100">{s.label}</span><span className={`text-[0.66rem] uppercase tracking-label ${t.cls.split(' ')[0]}`}>{t.label}</span></span>
-                    <span className="block text-slate-500 tabular-nums">{s.vcpus / 2} physical cores{p != null ? ` · ≈${money(p)}/h` : ''}{shape && s.vcpus < shape.vcpus ? ' · smaller' : ''}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-slate-400">
-              {to && now != null && sizePrice(to, !!machine.spot, machine.region) != null && <>≈{money(sizePrice(to, !!machine.spot, machine.region)!)}/hour while running (now ≈{money(now)}). </>}
-              {machine.status === 'running' ? 'It is stopped, changed and started again (a couple of minutes).' : 'Changed in place; start it when you’re ready.'}
-              {to?.defaultDiskGb && (machine.disk_size_gb || 0) < to.defaultDiskGb ? ` This size suggests a ${to.defaultDiskGb} GB disk — use Enlarge under the disk bar afterwards.` : ''}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!to}
-                onClick={() => { setConfirm(null); onAction(machine, 'size', { shapeId: newSize }); }}>Change to {to?.label || '…'}</button>
-              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
-            </div>
-          </div>
-        );
-      })()}
       {confirm === 'restore' && (
         <div className="mt-3 rounded border border-neon-lime/30 p-3 text-xs text-slate-300 space-y-2">
           <p><strong className="text-slate-100">Restore this machine?</strong> A new machine is built from the snapshot (typically 5–15 minutes, then its quick start-up check). Billing then resumes at ≈{money(sizePrice(restoreShape, restoreSpot, restoreRegion) ?? machine.cost_per_hour)}/hour while running, plus the disk.</p>
@@ -669,6 +578,181 @@ function MachineCard({
           </div>
         </div>
       )}
+
+      {/* ---- Modify this machine: every setting that changes it, one row each. Each
+          action still works as before (its confirmation opens under its row). ---- */}
+      {showModify && (() => {
+        const cloud = PROVIDER_LABEL[machine.provider] || machine.provider;
+        const s = machine.status;
+        const inPlaceBadge = (inPlace: boolean): RowBadge | null =>
+          s === 'shelved' ? { text: 'at restore', tone: 'later' }
+          : !inPlace ? null
+          : s === 'running' ? { text: 'needs restart', tone: 'restart' }
+          : s === 'stopped' ? { text: 'no restart', tone: 'live' } : null;
+        const base = sizePrice(shape, !!machine.spot, machine.region);
+        const bigNext = base != null ? base - (isBig ? bigExtra : 0) + (!isBig ? (bigScreen?.extraPerHour || 0) : 0) : null;
+        const after = confirm === 'size' ? sizePrice(inPlaceSizes.find((x) => x.id === newSize), !!machine.spot, machine.region)
+          : confirm === 'pricing' ? priceFor(!machine.spot)
+          : confirm === 'big-screen' ? bigNext : null;
+        const alt = priceFor(!machine.spot);
+        const perGb = sd && machine.disk_size_gb ? sd.diskMonthly / machine.disk_size_gb : undefined;
+        const stoppedDays = s === 'stopped' ? daysSince(machine.stopped_at) : null;
+        return (
+          <section className="mt-4 rounded border border-white/10" aria-label="Modify this machine">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-3 py-2 border-b border-white/5">
+              <h3 className="label">Modify this machine</h3>
+              <p className="text-[0.72rem] text-slate-400 tabular-nums">
+                {s === 'running' ? <>Now <span className="text-neon-lime">≈{money(machine.cost_per_hour)}/h</span> running</>
+                  : <>≈{money(machine.cost_per_hour)}/h when {s === 'shelved' ? 'restored' : 'running'}</>}
+                {after != null && <span className="text-neon-cyan"> · ≈{money(after)}/h after this change</span>}
+              </p>
+            </div>
+            <ul className="divide-y divide-white/5">
+              <ModifyRow icon="⇅" label="Speed"
+                note={<>More cores and memory load and build faster, and cost more per hour. Same disk and games.{!canResizeNow && s !== 'shelved' && !RESIZE_IN_PLACE.has(machine.provider) ? <> On {cloud}, change it with Shelve → Restore.</> : null}</>}
+                action={canResizeNow
+                  ? <button type="button" disabled={busy} className={ROW_BTN} onClick={() => { setNewSize(inPlaceSizes.find((x) => x.dev)?.id || inPlaceSizes[0].id); setConfirm(confirm === 'size' ? null : 'size'); }}>Change</button>
+                  : s === 'shelved' && sizes.length > 1
+                  ? <button type="button" disabled={busy} className={ROW_BTN} onClick={() => setConfirm('restore')}>Change at restore</button>
+                  : null}
+                badge={canResizeNow || (s === 'shelved' && sizes.length > 1) ? inPlaceBadge(true) : null}
+                panel={confirm === 'size' && (() => {
+        const to = inPlaceSizes.find((s) => s.id === newSize);
+        const now = sizePrice(shape, !!machine.spot, machine.region);
+        return (
+          <div className="mt-2.5 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
+            <p><strong className="text-slate-100">Change size</strong> — the same disk, games, dev tools and settings; only the CPU, memory and price change.</p>
+            <div role="radiogroup" aria-label="New size" className="grid sm:grid-cols-2 gap-2">
+              {[...inPlaceSizes].sort((a, b) => a.vcpus - b.vcpus).map((s) => {
+                const p = sizePrice(s, !!machine.spot, machine.region);
+                const t = TIER_STYLE[tierOf(s)];
+                return (
+                  <button key={s.id} type="button" role="radio" aria-checked={newSize === s.id} onClick={() => setNewSize(s.id)}
+                    className={`rounded border px-2.5 py-1.5 text-left ${newSize === s.id ? 'border-neon-cyan bg-neon-cyan/[0.06]' : 'border-white/10 hover:border-white/30'}`}>
+                    <span className="flex justify-between gap-2"><span className="text-slate-100">{s.label}</span><span className={`text-[0.66rem] uppercase tracking-label ${t.cls.split(' ')[0]}`}>{t.label}</span></span>
+                    <span className="block text-slate-500 tabular-nums">{s.vcpus / 2} physical cores{p != null ? ` · ≈${money(p)}/h` : ''}{shape && s.vcpus < shape.vcpus ? ' · smaller' : ''}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-slate-400">
+              {to && now != null && sizePrice(to, !!machine.spot, machine.region) != null && <>≈{money(sizePrice(to, !!machine.spot, machine.region)!)}/hour while running (now ≈{money(now)}). </>}
+              {machine.status === 'running' ? 'It is stopped, changed and started again (a couple of minutes).' : 'Changed in place; start it when you’re ready.'}
+              {to?.defaultDiskGb && (machine.disk_size_gb || 0) < to.defaultDiskGb ? ` This size suggests a ${to.defaultDiskGb} GB disk — use Enlarge under the disk bar afterwards.` : ''}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!to}
+                onClick={() => { setConfirm(null); onAction(machine, 'size', { shapeId: newSize }); }}>Change to {to?.label || '…'}</button>
+              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}>
+                {shape
+                  ? <>{TIER_STYLE[tierOf(shape)].label} · {shape.gpuModel} · {shape.vcpus} vCPU · {shape.memoryGb} GB RAM <span className="font-mono text-slate-500">{machine.instance_type}</span></>
+                  : <span className="font-mono">{machine.instance_type}</span>}
+              </ModifyRow>
+              <ModifyRow icon="⇄" label="Pricing"
+                note={<>{machine.spot
+                  ? <>Spot is cheap but can be taken away; on-demand{alt != null ? ` (≈${money(alt)}/h)` : ''} costs more and stays up.</>
+                  : <>On-demand costs more and stays up; spot{alt != null ? ` (≈${money(alt)}/h)` : ''} is cheap but can be taken away.</>}
+                  {!canSwitchNow && !PRICING_IN_PLACE.has(machine.provider) ? <> On {cloud}, switch it with Shelve → Restore.</> : null}</>}
+                action={canSwitchNow ? <button type="button" disabled={busy} className={ROW_BTN} onClick={() => setConfirm(confirm === 'pricing' ? null : 'pricing')}>Switch to {machine.spot ? 'on-demand' : 'spot'}</button> : null}
+                badge={canSwitchNow ? inPlaceBadge(true) : null}
+                panel={confirm === 'pricing' && (() => {
+        const to = !machine.spot;
+        const now = priceFor(machine.spot);
+        const next = priceFor(to);
+        return (
+          <div className="mt-2.5 rounded border border-neon-cyan/30 p-3 text-xs text-slate-300 space-y-2">
+            <p>
+              <strong className="text-slate-100">Switch to {to ? 'spot' : 'on-demand'}?</strong>{' '}
+              {next != null && <>≈{money(next)}/hour while running{now != null && <> (now ≈{money(now)})</>}. </>}
+              {to
+                ? 'Spot is much cheaper, but the cloud can reclaim it at short notice — fine for playing, risky during the first setup. The disk and games are kept when that happens.'
+                : 'On-demand is full price and never reclaimed — the safe choice for the first setup or a long session. It uses your normal GPU quota, not the spot one.'}
+            </p>
+            <p className="text-slate-400">
+              {machine.status === 'shelved' ? 'Applied when you restore it.'
+                : machine.status === 'running' ? 'The cloud only switches a stopped machine: it is stopped, switched and started again (a couple of minutes; setup and games carry on).'
+                : 'Switched in place (same disk); start it when you’re ready.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'pricing', { spot: to }); }}>Switch to {to ? 'spot' : 'on-demand'}</button>
+              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}>
+                {machine.spot ? 'Spot' : 'On-demand'}{priceFor(!!machine.spot) != null && <span className="text-slate-400 tabular-nums"> · ≈{money(priceFor(!!machine.spot)!)}/h</span>}
+              </ModifyRow>
+              <ModifyRow icon="▣" label="Screen"
+                note={isBig ? <>Native ultrawide and 4K. Normal (up to 2560×1600) is the safest.</>
+                  : bigPossible ? <>Normal is the safest. Big screen fits ultrawide and 4K natively{bigScreen?.extraPerHour ? ` (+${money(bigScreen.extraPerHour)}/h)` : ''}; experimental.</>
+                  : <>Normal is the safest. Big screen isn&apos;t offered for this GPU here.</>}
+                action={canSwitchBig ? <button type="button" disabled={busy} className={ROW_BTN} onClick={() => setConfirm(confirm === 'big-screen' ? null : 'big-screen')}>{isBig ? 'Switch to normal' : 'Switch to big screen'}</button> : null}
+                badge={!canSwitchBig ? null
+                  : s === 'running' ? { text: 'needs restart', tone: 'restart' }
+                  : s === 'stopped' ? { text: 'slower next start', tone: 'later' }
+                  : s === 'shelved' ? { text: 'at restore', tone: 'later' } : null}
+                panel={confirm === 'big-screen' && (() => {
+        const to = !isBig;
+        const base = sizePrice(shape, !!machine.spot, machine.region);
+        const now = base != null ? base : null;
+        const next = base != null ? base - (isBig ? bigExtra : 0) + (to ? (bigScreen?.extraPerHour || 0) : 0) : null;
+        return (
+          <div className="mt-2.5 rounded border border-neon-magenta/40 p-3 text-xs text-slate-300 space-y-2">
+            <p>
+              <strong className="text-slate-100">{to ? 'Switch to big screen?' : 'Switch off big screen?'}</strong>{' '}
+              {to
+                ? 'NVIDIA’s GRID driver lifts the screen limit from 2560×1600 to 4096×2160 — native ultrawide (3440×1440) and 4K. Experimental.'
+                : 'Back to the standard driver: screens up to 2560×1600 (ultrawide still fills the screen, at 2560 wide).'}
+              {next != null && <> ≈{money(next)}/hour while running{now != null && <> (now ≈{money(now)})</>}.</>}
+            </p>
+            <p className="text-slate-400">
+              {machine.status === 'shelved' ? 'Applied when you restore it.'
+                : <>{machine.status === 'running' ? 'It is stopped, switched and started again. ' : 'Switched in place; '}the next start installs the {to ? 'GRID' : 'standard'} driver (5–10 minutes, one extra restart). Games and settings are kept.
+                  {to && machine.provider === 'gcp' && ' Google needs the "Virtual Workstation" GPU quota for this GPU in this region (the Regions page shows it). If Google refuses the switch on this machine, Shelve and Restore with big screen instead.'}</>}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-neon text-xs" onClick={() => { setConfirm(null); onAction(machine, 'big-screen', { on: to }); }}>{to ? 'Switch to big screen' : 'Switch off big screen'}</button>
+              <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}>
+                {isBig
+                  ? <span className="text-neon-magenta">Big screen · up to 4096×2160 · experimental</span>
+                  : <>Normal · up to 2560×1600</>}
+              </ModifyRow>
+              {s !== 'shelved' && (
+                <ModifyRow icon="▤" label="Storage"
+                  note={<>A disk can only grow, never shrink{perGb ? <>. Each extra 100 GB costs about {money(perGb * 100)}/month, also while stopped</> : null}.</>}
+                  action={diskInfo?.canResize ? <button type="button" disabled={busy} className={ROW_BTN} onClick={() => setDiskOpen((o) => !o)}>{diskOpen ? 'Close' : 'Enlarge'}</button> : null}
+                  badge={!diskInfo?.canResize ? null
+                    : diskInfo.resizeWhileRunning || s !== 'running' ? { text: 'no restart', tone: 'live' }
+                    : { text: 'stop it first', tone: 'restart' }}>
+                  {!diskInfo && <span className="tabular-nums">{machine.disk_size_gb ? `${machine.disk_size_gb} GB` : '—'}</span>}
+                  <DiskMeter machineId={machine.id} status={machine.status} busy={busy} perGbMonth={perGb} hideButton
+                    open={diskOpen} onOpenChange={setDiskOpen} onInfo={setDiskInfo}
+                    onResize={(sizeGb) => onAction(machine, 'disk', { sizeGb })}
+                    onUpdateScript={machine.provider === 'gcp' ? (restart) => onAction(machine, 'update-script', { restart }) : undefined} />
+                </ModifyRow>
+              )}
+              {s !== 'shelved' && (
+                <ModifyRow icon="◷" label="When idle"
+                  note={sd
+                    ? <>{s === 'stopped' ? `Stopped${stoppedDays ? ` ${stoppedDays} day${stoppedDays === 1 ? '' : 's'}` : ''}: the` : 'Once stopped, the'} {sd.diskGb} GB disk costs {money(sd.diskMonthly)}/month; shelved ≈{usdRange(sd.shelfEstimate.low, sd.shelfEstimate.high)}/month, but restoring takes longer than starting.</>
+                    : <>Shelving snapshots the disk and deletes it: far cheaper to keep, but restoring takes longer than starting.</>}
+                  action={<AutoShelvePicker bare value={autoShelve} saving={autoSaving} onChange={changeAutoShelve} />}
+                  badge={{ text: 'no restart', tone: 'live' }}>
+                  {autoShelve ? `Auto-shelve after ${autoShelve} day${autoShelve === 1 ? '' : 's'} stopped` : 'Stays stopped (auto-shelve is off)'}
+                </ModifyRow>
+              )}
+            </ul>
+          </section>
+        );
+      })()}
 
       {/* ---- Live log of the action in progress ---- */}
       {activeOp && (
