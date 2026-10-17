@@ -128,20 +128,27 @@ function neverCreated(machine: any): boolean {
  */
 function mergeStages<T extends { percent: number; key: string; message: string; detail?: string }>(saved: T[], live: T[]): T[] {
   if (!saved.length) return live;
+  const id = (x: T) => `${x.percent}|${x.key}|${x.message}`;
   const base = saved.filter((x, i) => !(x.key === 'failed' && i === saved.length - 1));
-  const seen = new Set(base.map((x) => `${x.percent}|${x.key}|${x.message}`));
+  const seen = new Set(base.map(id));
   // A fresh console repeats early stages ("booted"): only append what's new.
-  const fresh = live.filter((x) => !seen.has(`${x.percent}|${x.key}|${x.message}`));
-  // Same console read again (nothing new): keep it as it was, incl. a failure,
-  // but with the live sub-status of the current stage.
+  const fresh = live.filter((x) => !seen.has(id(x)));
+  const lastLive = live[live.length - 1];
+  let merged: T[];
   if (!fresh.length) {
-    const kept = saved.length >= live.length ? [...saved] : [...live];
-    const lastLive = live[live.length - 1];
-    const i = kept.length - 1;
-    if (lastLive && kept[i] && kept[i].key === lastLive.key && kept[i].message === lastLive.message) kept[i] = { ...kept[i], detail: lastLive.detail };
-    return kept;
+    // Same console read again (nothing new): keep it as it was, incl. a failure,
+    // but with the live sub-status of the current stage.
+    merged = saved.length >= live.length ? [...saved] : [...live];
+    const i = merged.length - 1;
+    if (lastLive && merged[i] && merged[i].key === lastLive.key && merged[i].message === lastLive.message) merged[i] = { ...merged[i], detail: lastLive.detail };
+  } else {
+    merged = [...base, ...fresh];
   }
-  return [...base, ...fresh];
+  // After a restart the setup runs stages the history already has: wherever it
+  // is now is the console's newest stage, even one seen on an earlier boot.
+  const last = merged[merged.length - 1];
+  if (lastLive && last && id(last) !== id(lastLive)) merged = [...merged, lastLive];
+  return merged.slice(-60);
 }
 
 /**
