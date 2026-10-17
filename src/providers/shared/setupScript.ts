@@ -539,7 +539,7 @@ CONF
 # Built ON the machine from CloudyPad's image, so there's no registry to
 # publish to. APPS_VERSION names the recipe: bump it when the Dockerfile
 # below changes, and every machine rebuilds on its next boot.
-APPS_VERSION=12
+APPS_VERSION=13
 # UMU (Proton launcher for Lutris) release: github.com/Open-Wine-Components/umu-launcher/releases
 UMU_VERSION=1.4.4
 # KasmVNC release: github.com/kasmtech/KasmVNC/releases (noble = Ubuntu 24.04)
@@ -737,8 +737,12 @@ RUN apt-get update \
       && cat /tmp/kasmvnc.supervisor.conf >> /cloudy/conf/supervisor/supervisord.conf \
       && echo "KasmVNC installed" || echo "WARNING: KasmVNC skipped (no browser desktop)" ) \
  ; rm -f /tmp/kasmvnc.deb /tmp/kasmvnc.supervisor.conf; apt-get clean; rm -rf /var/lib/apt/lists/*
-# "All apps" launcher (Launchpad-style grid). Best-effort.
+# "All apps" launcher (Launchpad-style grid), and archives: Xarchiver plus
+# Thunar's right-click "Extract Here" / "Create Archive" (zip, 7z, tar; RAR
+# through unar). Best-effort.
 RUN apt-get update \
+ && ( apt-get install -y --no-install-recommends unzip zip 7zip unar xarchiver thunar-archive-plugin \
+      || apt-get install -y --no-install-recommends unzip zip || echo "WARNING: archive tools skipped (no Extract Here)" ) \
  && ( apt-get install -y --no-install-recommends xdotool || echo "WARNING: xdotool skipped (Battle.net pre-install can't click prompts)" ) \
  && ( apt-get install -y --no-install-recommends xfce4-terminal || echo "WARNING: xfce4-terminal skipped (the dock keeps xterm)" ) \
  && ( apt-get install -y --no-install-recommends xfdashboard xfdashboard-plugins || apt-get install -y --no-install-recommends xfdashboard \
