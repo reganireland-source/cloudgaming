@@ -1129,7 +1129,8 @@ C=$(printenv XDG_CONFIG_HOME); [ -n "$C" ] || C=$HOME/.config
 if command -v xfce4-terminal >/dev/null && ! grep -q '^TerminalEmulator=' "$C/xfce4/helpers.rc" 2>/dev/null; then
   mkdir -p "$C/xfce4"; echo TerminalEmulator=xfce4-terminal >> "$C/xfce4/helpers.rc"
 fi
-R=$(xrandr -q 2>/dev/null | grep -w connected | grep -oP '\d+x\d+' | head -n1)
+R=$(xrandr -q 2>/dev/null | awk '/^Screen 0:/{gsub(",", ""); for (i = 1; i < NF; i++) if ($i == "current") { print $(i+1) "x" $(i+3); exit }}')
+[ -n "$R" ] || R=$(xrandr -q 2>/dev/null | grep -w connected | grep -oP '\d+x\d+' | head -n1)
 H=$(echo "$R" | cut -dx -f2)
 [ -n "$H" ] || exit 0
 P=$(cat "$F" 2>/dev/null)
