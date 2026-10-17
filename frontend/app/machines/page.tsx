@@ -44,6 +44,7 @@ import LaunchMachineModal from '@/components/LaunchMachineModal';
 import OperationConsole from '@/components/OperationConsole';
 import DiskMeter, { type DiskInfo } from '@/components/DiskMeter';
 import DevAccess from '@/components/DevAccess';
+import LocalMachines from '@/components/LocalMachines';
 import TelemetryPanel from '@/components/TelemetryPanel';
 import { byMachineOrder, isDeadStatus } from '@/lib/machineOrder';
 import FriendlyErrorCard from '@/components/FriendlyErrorCard';
@@ -1015,6 +1016,9 @@ function MachinesPageInner() {
           </div>
         </details>
       )}
+
+      {/* ---- Your own PCs at home (Windows + Sunshine) ---- */}
+      <LocalMachines />
 
       {/* ---- SSH for the developer tools ---- */}
       <DevAccess machines={(machines || []).map((m) => ({

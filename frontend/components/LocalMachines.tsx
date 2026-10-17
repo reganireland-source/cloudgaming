@@ -1,0 +1,443 @@
+'use client';
+
+/**
+ * components/LocalMachines.tsx — YOUR OWN PCs (Windows + Sunshine), on the Machines page
+ *
+ * The cloud machines' sibling for a PC at home. A small agent on the PC connects
+ * out to GGGH (nothing is opened on the PC's side); here you add the PC, run one
+ * command on it, then:
+ *   - see it online / offline, its address, GPU load, whether someone is streaming;
+ *   - pair Moonlight (GGGH picks the PIN, the agent enters it into Sunshine);
+ *   - sleep / restart / shut down, restart Sunshine;
+ *   - match the PC's screen to the device you stream to (done by the Moonlight command);
+ *   - run a PowerShell command (off until switched on per PC; every command is logged);
+ *   - copy or download the terminal command that wakes the PC, matches its screen,
+ *     streams, and puts the screen back (lib/localCommand.ts).
+ * Reads/writes /api/local-machines (src/api/routes/localMachines.ts).
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiFetch, type ApiError } from '@/lib/auth';
+import { SCREENS, detectScreen, fitResolution } from '@/lib/screens';
+import {
+  LOCAL_APPS, buildLaunchScript, localBitrateKbps, pairCommand, plainStreamCommand,
+  type LocalCodec, type LocalLaunch, type LocalOS,
+} from '@/lib/localCommand';
+
+interface LocalMachine {
+  id: string; name: string; lanIp: string | null; mac: string | null;
+  online: boolean; lastSeenAt: string | null; scriptEnabled: boolean;
+  status: {
+    host?: string; os?: string; uptimeHours?: number; cpuPercent?: number; ramGb?: number; ramFreeGb?: number;
+    wired?: boolean; link?: string; streaming?: boolean; sunshine?: string; agentVersion?: string;
+    gpu?: { name: string; util: number; tempC: number; encoders: number; vramUsedMb: number; vramTotalMb: number; driver: string };
+  } | null;
+  createdAt: string;
+}
+interface Cmd { id: string; kind: string; status: string; result: string | null }
+interface CmdLogRow { id: string; kind: string; args: Record<string, unknown>; source: string; status: string; result: string | null; createdAt: string }
+
+const timeAgo = (iso: string | null) => {
+  if (!iso) return 'never';
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : new Date(iso).toLocaleDateString();
+};
+const errText = (e: unknown) => `${(e as ApiError)?.message || 'That didn’t work.'}${(e as ApiError)?.tip ? ` ${(e as ApiError).tip}` : ''}`;
+const detectOS = (): LocalOS => {
+  if (typeof navigator === 'undefined') return 'macos';
+  const p = navigator.userAgent.toLowerCase();
+  return p.includes('mac') ? 'macos' : p.includes('win') ? 'windows' : 'linux';
+};
+
+function CopyBox({ text, tall }: { text: string; tall?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative">
+      <pre className={`whitespace-pre-wrap break-all text-[0.72rem] font-mono text-neon-lime bg-black/40 border border-white/10 rounded p-3 pr-16 ${tall ? 'max-h-72 overflow-y-auto' : ''}`}>{text}</pre>
+      <button type="button" className="absolute top-2 right-2 text-[0.7rem] uppercase tracking-label text-neon-cyan/80 hover:text-neon-cyan border border-neon-cyan/30 rounded px-2 py-0.5"
+        onClick={async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* select by hand */ } }}>
+        {copied ? 'copied ✓' : 'copy'}
+      </button>
+    </div>
+  );
+}
+
+/** Follows one command until the PC has answered (or it gave up). */
+async function followCommand(machineId: string, commandId: string, onUpdate: (c: Cmd) => void, stopRef: { current: boolean }) {
+  for (let i = 0; i < 160 && !stopRef.current; i++) {
+    try {
+      const c = await apiFetch<Cmd>(`/local-machines/${machineId}/commands/${commandId}`);
+      onUpdate(c);
+      if (['done', 'failed', 'expired'].includes(c.status)) return c;
+    } catch { /* try again */ }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return null;
+}
+
+function Stat({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><p className="label">{label}</p><p className="text-xs text-slate-200 tabular-nums">{children}</p></div>;
+}
+
+function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void }) {
+  const stop = useRef(false);
+  // Stop following commands when the card goes away (and start again if React remounts it, as in dev mode).
+  useEffect(() => { stop.current = false; return () => { stop.current = true; }; }, []);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<'sleep' | 'restart' | 'shutdown' | 'remove' | 'token' | null>(null);
+  const [pair, setPair] = useState<{ pin: string; host: string | null; status: string; result: string | null } | null>(null);
+  const [newToken, setNewToken] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'launch' | 'settings' | 'log' | null>(null);
+  const st = m.status;
+
+  const send = async (kind: string, args?: Record<string, unknown>, label?: string) => {
+    setBusy(kind); setNote(null);
+    try {
+      const c = await apiFetch<{ id: string }>(`/local-machines/${m.id}/commands`, { method: 'POST', body: { kind, args } });
+      const done = await followCommand(m.id, c.id, () => undefined, stop);
+      setNote({ ok: done?.status === 'done', text: done ? (done.result || done.status) : `${label || kind}: no answer yet — is the PC on?` });
+      onChanged();
+    } catch (e) { setNote({ ok: false, text: errText(e) }); } finally { setBusy(null); setConfirm(null); }
+  };
+
+  const startPairing = async () => {
+    setBusy('pair'); setNote(null);
+    try {
+      const r = await apiFetch<{ commandId: string; pin: string; host: string | null }>(`/local-machines/${m.id}/pair`, { method: 'POST' });
+      setPair({ pin: r.pin, host: r.host, status: 'sent', result: null });
+      const done = await followCommand(m.id, r.commandId, (c) => setPair((p) => (p ? { ...p, status: c.status, result: c.result } : p)), stop);
+      if (done?.status === 'done') onChanged();
+    } catch (e) { setNote({ ok: false, text: errText(e) }); } finally { setBusy(null); }
+  };
+
+  const remove = async () => {
+    setBusy('remove');
+    try { await apiFetch(`/local-machines/${m.id}`, { method: 'DELETE' }); onChanged(); } catch (e) { setNote({ ok: false, text: errText(e) }); setBusy(null); }
+  };
+  const rotate = async () => {
+    setBusy('token');
+    try { const r = await apiFetch<{ installCommand: string }>(`/local-machines/${m.id}/token`, { method: 'POST' }); setNewToken(r.installCommand); setConfirm(null); }
+    catch (e) { setNote({ ok: false, text: errText(e) }); } finally { setBusy(null); }
+  };
+
+  const off = !m.online;
+  const btn = 'btn-neon text-xs disabled:opacity-40';
+  return (
+    <div className="neon-card rounded-lg border border-white/10 p-4 sm:p-5 space-y-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className={`text-[0.7rem] uppercase tracking-label border rounded px-2 py-0.5 ${m.online ? 'border-neon-lime/60 text-neon-lime' : 'border-white/20 text-slate-400'}`}>{m.online ? 'online' : 'offline'}</span>
+        <span className="text-sm font-semibold text-slate-100">{m.name}</span>
+        {st?.streaming && <span className="text-[0.66rem] uppercase tracking-label border border-neon-magenta/60 text-neon-magenta rounded px-1.5">streaming now</span>}
+        <span className="text-xs text-slate-500">{m.online ? 'connected to GGGH' : `last seen ${timeAgo(m.lastSeenAt)}`}{st?.os ? ` · ${st.os}` : ''}</span>
+      </div>
+
+      {m.lastSeenAt && (
+        <div className="flex flex-wrap gap-x-8 gap-y-2">
+          <Stat label="Address">{m.lanIp || '—'}{st?.wired === false ? <span className="text-neon-amber"> · Wi-Fi</span> : st?.wired ? ' · wired' : ''}</Stat>
+          {st?.gpu && <Stat label="GPU">{st.gpu.name.replace('NVIDIA GeForce ', '')} · {st.gpu.util}% · {st.gpu.tempC}°C</Stat>}
+          {st?.cpuPercent != null && <Stat label="CPU">{st.cpuPercent}%</Stat>}
+          {st?.ramGb != null && <Stat label="Memory">{(st.ramGb - (st.ramFreeGb || 0)).toFixed(1)}/{st.ramGb} GB</Stat>}
+          <Stat label="Sunshine"><span className={st?.sunshine === 'Running' ? 'text-neon-lime' : 'text-neon-amber'}>{st?.sunshine === 'NotInstalled' ? 'not installed' : (st?.sunshine || '—').toLowerCase()}</span></Stat>
+          {st?.uptimeHours != null && <Stat label="Up for">{st.uptimeHours < 48 ? `${st.uptimeHours} h` : `${Math.round(st.uptimeHours / 24)} days`}</Stat>}
+        </div>
+      )}
+      {off && m.lastSeenAt && <p className="text-xs text-slate-500">The PC is off, asleep or can’t reach GGGH. The Moonlight command below can wake it if Wake-on-LAN is on.</p>}
+      {!m.lastSeenAt && <p className="text-xs text-neon-amber">Not connected yet — run the install command on the PC (see “Settings”).</p>}
+
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={btn} disabled={off || !!busy} onClick={startPairing}>Pair Moonlight</button>
+        <button type="button" className={btn} disabled={off || !!busy} onClick={() => send('sunshine-restart', undefined, 'Restart Sunshine')}>Restart Sunshine</button>
+        <button type="button" className={btn} disabled={off || !!busy} onClick={() => send('refresh')}>Refresh</button>
+        <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={off || !!busy} onClick={() => setConfirm('sleep')}>Sleep</button>
+        <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={off || !!busy} onClick={() => setConfirm('restart')}>Restart PC</button>
+        <button type="button" className="btn-neon-pink text-xs disabled:opacity-40" disabled={off || !!busy} onClick={() => setConfirm('shutdown')}>Shut down</button>
+      </div>
+
+      {(confirm === 'sleep' || confirm === 'restart' || confirm === 'shutdown') && (
+        <div className="rounded border border-neon-pink/30 p-3 text-xs text-slate-300 space-y-2">
+          <p>
+            {confirm === 'sleep' && <>Put {m.name} to sleep? Anyone streaming is disconnected. You can wake it with the Moonlight command (Wake-on-LAN).</>}
+            {confirm === 'restart' && <>Restart {m.name}? Anyone streaming is disconnected; it’s back in a minute or two.</>}
+            {confirm === 'shutdown' && <>Shut {m.name} down? It stays off until someone presses its power button. (Sleep keeps it wakeable from here.)</>}
+          </p>
+          <div className="flex gap-2">
+            <button type="button" className="btn-neon-pink text-xs" disabled={!!busy} onClick={() => send(confirm)}>{confirm === 'sleep' ? 'Sleep' : confirm === 'restart' ? 'Restart' : 'Shut down'}</button>
+            <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {pair && (
+        <div className={`rounded border p-3 text-xs space-y-2 ${pair.status === 'done' ? 'border-neon-lime/40' : pair.status === 'failed' || pair.status === 'expired' ? 'border-neon-pink/40' : 'border-neon-cyan/30'}`}>
+          {pair.status === 'done' ? <p className="text-neon-lime">✓ {pair.result}</p>
+            : pair.status === 'failed' || pair.status === 'expired' ? <p className="text-neon-pink">{pair.result || 'Pairing didn’t finish.'} Press “Pair Moonlight” for a fresh PIN.</p>
+            : <>
+              <p className="text-slate-200">Run this on the device you stream to (within about 2 minutes). The PC enters the PIN into Sunshine by itself.</p>
+              <CopyBox text={pairCommand(detectOS(), pair.host || m.lanIp || '<the PC’s address>', pair.pin)} />
+              <p className="text-slate-500 animate-pulse">Waiting for Moonlight to start pairing…</p>
+            </>}
+        </div>
+      )}
+      {note && <p role="status" className={`text-xs ${note.ok ? 'text-neon-lime' : 'text-neon-amber'}`}>{note.ok ? '✓ ' : '⚠ '}{note.text}</p>}
+
+      <div className="flex gap-1 border-b border-white/5">
+        {(['launch', 'settings', 'log'] as const).map((t) => (
+          <button key={t} type="button" onClick={() => setPanel(panel === t ? null : t)}
+            className={`px-3 py-1.5 text-[0.72rem] uppercase tracking-label border-b-2 -mb-px ${panel === t ? 'border-neon-cyan text-neon-cyan' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+            {{ launch: 'Moonlight command', settings: 'Settings', log: 'Command log' }[t]}
+          </button>
+        ))}
+      </div>
+
+      {panel === 'launch' && <LaunchPanel m={m} />}
+      {panel === 'settings' && (
+        <SettingsPanel m={m} onChanged={onChanged} busy={busy} newToken={newToken}
+          askToken={() => setConfirm('token')} askRemove={() => setConfirm('remove')}
+          runScript={(script) => send('script', { script }, 'Script')} />
+      )}
+      {panel === 'log' && <LogPanel id={m.id} />}
+
+      {confirm === 'token' && (
+        <div className="rounded border border-neon-amber/30 p-3 text-xs text-slate-300 space-y-2">
+          <p>Make a new install command? The one on the PC now stops working; run the new one on the PC to reconnect it.</p>
+          <div className="flex gap-2"><button type="button" className="btn-neon text-xs" disabled={!!busy} onClick={rotate}>Make a new one</button><button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button></div>
+        </div>
+      )}
+      {confirm === 'remove' && (
+        <div className="rounded border border-red-600/40 p-3 text-xs text-slate-300 space-y-2">
+          <p><strong className="text-red-400">Remove {m.name} from GGGH?</strong> The PC itself is untouched (its agent just stops being able to connect; uninstall it there with the “GGGH Agent” and “GGGH Display” scheduled tasks if you like).</p>
+          <div className="flex gap-2"><button type="button" className="text-xs border border-red-600 text-red-300 rounded px-3 py-1.5 hover:bg-red-950/40" disabled={!!busy} onClick={remove}>Yes, remove it</button><button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => setConfirm(null)}>Cancel</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LaunchPanel({ m }: { m: LocalMachine }) {
+  const [info, setInfo] = useState<{ launcherToken: string; lanIp: string | null; mac: string | null; api: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { apiFetch<NonNullable<typeof info>>(`/local-machines/${m.id}/launcher`).then(setInfo).catch((e) => setErr(errText(e))); }, [m.id, m.lanIp, m.mac]);
+
+  const [os, setOs] = useState<LocalOS>('macos');
+  useEffect(() => setOs(detectOS()), []);
+  const [app, setApp] = useState(LOCAL_APPS[0]);
+  const [screenId, setScreenId] = useState('this');
+  const [thisScreen, setThisScreen] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => setThisScreen(detectScreen()), []);
+  const [fps, setFps] = useState(60);
+  const [codec, setCodec] = useState<LocalCodec>('HEVC');
+  const [fullscreen, setFullscreen] = useState(true);
+  const [wake, setWake] = useState(true);
+  const [match, setMatch] = useState(true);
+
+  const screen = screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 });
+  const res = fitResolution(screen, screen.w * screen.h, 3840, 2160);
+  const host = info?.lanIp || m.lanIp;
+  const mac = info?.mac || m.mac;
+  const launch: LocalLaunch | null = info && host ? {
+    os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
+    wake: wake && !!mac, matchScreen: match && os !== 'windows', api: info.api, token: info.launcherToken,
+  } : null;
+  const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const download = () => {
+    const safe = `${m.name}-${app}`.replace(/[^\w.-]+/g, '-').toLowerCase();
+    const blob = new Blob([script], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `moonlight-${safe}.${os === 'macos' ? 'command' : 'sh'}`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const sel = 'input-neon px-2 py-1 text-xs';
+  if (err) return <p className="text-xs text-neon-amber">⚠ {err}</p>;
+  if (!host) return <p className="text-xs text-slate-500">Waiting for the PC to report its address (it connects within a few seconds of the install command finishing).</p>;
+  return (
+    <div className="space-y-3 text-xs">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <label className="space-y-1"><span className="label">Stream</span>
+          <select className={`${sel} w-full`} value={app} onChange={(e) => setApp(e.target.value)}>{LOCAL_APPS.map((a) => <option key={a}>{a}</option>)}</select></label>
+        <label className="space-y-1"><span className="label">Your screen</span>
+          <select className={`${sel} w-full`} value={screenId} onChange={(e) => setScreenId(e.target.value)}>
+            <option value="this">This screen ({thisScreen ? `${thisScreen.w}×${thisScreen.h}` : '…'})</option>
+            {SCREENS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select></label>
+        <label className="space-y-1"><span className="label">Frame rate</span>
+          <select className={`${sel} w-full`} value={fps} onChange={(e) => setFps(Number(e.target.value))}>{[30, 60, 90, 120].map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
+        <label className="space-y-1"><span className="label">Video</span>
+          <select className={`${sel} w-full`} value={codec} onChange={(e) => setCodec(e.target.value as LocalCodec)}>
+            <option value="HEVC">HEVC (best for most)</option><option value="H.264">H.264 (oldest, most compatible)</option><option value="AV1">AV1 (RTX 40/50 only)</option></select></label>
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-slate-300">
+        <label className="flex items-center gap-1.5"><input type="checkbox" checked={fullscreen} onChange={(e) => setFullscreen(e.target.checked)} /> Full screen</label>
+        <label className={`flex items-center gap-1.5 ${mac ? '' : 'opacity-50'}`} title={mac ? undefined : 'Needs the PC’s MAC address (Settings)'}><input type="checkbox" checked={wake && !!mac} disabled={!mac} onChange={(e) => setWake(e.target.checked)} /> Wake the PC first</label>
+        <label className={`flex items-center gap-1.5 ${os === 'windows' ? 'opacity-50' : ''}`}><input type="checkbox" checked={match && os !== 'windows'} disabled={os === 'windows'} onChange={(e) => setMatch(e.target.checked)} /> Match the PC’s screen to this one, then put it back</label>
+        <label className="flex items-center gap-1.5">Run it on
+          <select className={sel} value={os} onChange={(e) => setOs(e.target.value as LocalOS)}><option value="macos">macOS</option><option value="linux">Linux</option><option value="windows">Windows</option></select></label>
+      </div>
+      <p className="text-slate-500">Stream {res.w}×{res.h} at {fps} fps, about {Math.round(localBitrateKbps(res.w, res.h, fps) / 1000)} Mbit/s over your home network. Needs Moonlight installed and paired (Pair Moonlight above).</p>
+      {os === 'windows'
+        ? <><CopyBox text={plainStreamCommand(launch!)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and screen matching are for the macOS and Linux command.)</p></>
+        : <>
+          <CopyBox text={script} tall />
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="btn-neon text-xs" onClick={download}>⬇ Download launcher ({os === 'macos' ? '.command' : '.sh'})</button>
+            <span className="text-slate-500">{os === 'macos' ? 'First time: right-click → Open. ' : 'Run with: sh <file>. '}Streaming needs only the PC’s address, so it works even if GGGH is down (the screen matching just gets skipped).</span>
+          </div>
+          <p className="text-slate-500">The file holds a key that can only ask this PC to match its screen: it can’t switch it off or run anything. Keep it to yourself like a password.</p>
+        </>}
+    </div>
+  );
+}
+
+function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runScript }: {
+  m: LocalMachine; onChanged: () => void; busy: string | null; newToken: string | null;
+  askToken: () => void; askRemove: () => void; runScript: (script: string) => void;
+}) {
+  const [name, setName] = useState(m.name);
+  const [ip, setIp] = useState(m.lanIp || '');
+  const [mac, setMac] = useState(m.mac || '');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [script, setScript] = useState('');
+  const dirty = name !== m.name || ip !== (m.lanIp || '') || mac !== (m.mac || '');
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    try { await apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { name, lanIp: ip, mac } }); setMsg('Saved.'); onChanged(); } catch (e) { setMsg(`⚠ ${errText(e)}`); } finally { setSaving(false); }
+  };
+  const [scriptOn, setScriptOn] = useState(m.scriptEnabled);
+  useEffect(() => setScriptOn(m.scriptEnabled), [m.scriptEnabled]);
+  const toggleScript = async (on: boolean) => {
+    setScriptOn(on); // shows at once; goes back if the server says no
+    try { await apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { scriptEnabled: on } }); onChanged(); } catch (e) { setScriptOn(!on); setMsg(`⚠ ${errText(e)}`); }
+  };
+  const inp = 'input-neon px-2 py-1 text-xs w-full';
+  return (
+    <div className="space-y-4 text-xs">
+      <div className="grid sm:grid-cols-3 gap-3">
+        <label className="space-y-1"><span className="label">Name</span><input className={inp} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></label>
+        <label className="space-y-1"><span className="label">Address (the PC fills this in)</span><input className={inp} value={ip} placeholder="192.168.1.20" onChange={(e) => setIp(e.target.value)} /></label>
+        <label className="space-y-1"><span className="label">MAC address (for waking it)</span><input className={inp} value={mac} placeholder="AA:BB:CC:DD:EE:FF" onChange={(e) => setMac(e.target.value)} /></label>
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
+        {msg && <span className={msg.startsWith('⚠') ? 'text-neon-amber' : 'text-neon-lime'}>{msg}</span>}
+      </div>
+
+      <div className="space-y-2 border-t border-white/5 pt-3">
+        <p className="label">Connect the PC</p>
+        <p className="text-slate-400">On the PC (Windows 11), right-click Start → Terminal (Admin), paste the command and press Enter. It installs Sunshine if needed, sets Sunshine’s login (only the PC keeps it), turns on Wake-on-LAN and starts the agent.</p>
+        {newToken ? <CopyBox text={newToken} /> : <p className="text-slate-500">The command is shown once, when the PC is added. Lost it? <button type="button" className="text-neon-cyan hover:underline" onClick={askToken}>Make a new one</button> (the old one stops working).</p>}
+      </div>
+
+      <div className="space-y-2 border-t border-white/5 pt-3">
+        <p className="label">Run a PowerShell command</p>
+        <label className="flex items-start gap-2 text-slate-300">
+          <input type="checkbox" className="mt-0.5" checked={scriptOn} onChange={(e) => toggleScript(e.target.checked)} />
+          <span>Allow it for this PC. Commands run as administrator on the PC. Anyone who gets into your GGGH account could use this, so keep it off unless you need it. Every command is kept in the command log.</span>
+        </label>
+        {scriptOn && (
+          <>
+            <textarea className={`${inp} font-mono h-20`} value={script} maxLength={4000} placeholder="Get-Date" onChange={(e) => setScript(e.target.value)} />
+            <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !script.trim() || !!busy} onClick={() => runScript(script)}>Run on {m.name}</button>
+            <p className="text-slate-500">The answer appears above, and in the command log. It stops after 60 seconds.</p>
+          </>
+        )}
+      </div>
+
+      <div className="border-t border-white/5 pt-3">
+        <button type="button" className="text-red-400 hover:text-red-300" onClick={askRemove}>Remove this PC from GGGH…</button>
+      </div>
+    </div>
+  );
+}
+
+function LogPanel({ id }: { id: string }) {
+  const [rows, setRows] = useState<CmdLogRow[] | null>(null);
+  useEffect(() => { apiFetch<CmdLogRow[]>(`/local-machines/${id}/commands?limit=25`).then(setRows).catch(() => setRows([])); }, [id]);
+  const show = (r: CmdLogRow) => (r.kind === 'script' ? `script: ${String((r.args as any).script || '').slice(0, 160)}` : r.kind === 'sunshine-pin' ? 'pair Moonlight' : r.kind === 'display-set' ? `match screen ${(r.args as any).width}×${(r.args as any).height}` : r.kind.replace('-', ' '));
+  if (!rows) return <p className="text-xs text-slate-500 animate-pulse">&gt; loading…</p>;
+  if (!rows.length) return <p className="text-xs text-slate-500">Nothing has been asked of this PC yet.</p>;
+  return (
+    <ul className="divide-y divide-white/5 text-xs">
+      {rows.map((r) => (
+        <li key={r.id} className="py-1.5 flex gap-3">
+          <span className={r.status === 'done' ? 'text-neon-lime' : r.status === 'queued' || r.status === 'sent' ? 'text-neon-amber' : 'text-neon-pink'}>{r.status === 'done' ? '✓' : r.status === 'queued' || r.status === 'sent' ? '…' : '✗'}</span>
+          <div className="min-w-0 flex-1"><p className="text-slate-200 break-words">{show(r)} <span className="text-slate-500">· from {r.source === 'launcher' ? 'a Moonlight command' : 'the app'}</span></p>{r.result && <p className="text-slate-500 break-words">{r.result}</p>}</div>
+          <span className="text-slate-500 shrink-0">{timeAgo(r.createdAt)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default function LocalMachines() {
+  const [list, setList] = useState<LocalMachine[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [mac, setMac] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [formErr, setFormErr] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ id: string; name: string; installCommand: string } | null>(null);
+
+  const load = useCallback(() => {
+    apiFetch<LocalMachine[]>('/local-machines').then((l) => { setList(l); setLoadError(null); }).catch((e) => setLoadError(errText(e)));
+  }, []);
+  const waiting = !!created && !!list?.find((x) => x.id === created.id && !x.lastSeenAt);
+  useEffect(() => { load(); const t = setInterval(load, waiting ? 3000 : 10000); return () => clearInterval(t); }, [load, waiting]);
+
+  const add = async () => {
+    setSaving(true); setFormErr(null);
+    try {
+      const r = await apiFetch<{ machine: LocalMachine; installCommand: string }>('/local-machines', { method: 'POST', body: { name, mac: mac || undefined } });
+      setCreated({ id: r.machine.id, name: r.machine.name, installCommand: r.installCommand });
+      setAdding(false); setName(''); setMac(''); load();
+    } catch (e) { setFormErr(errText(e)); } finally { setSaving(false); }
+  };
+  const createdMachine = created && list?.find((x) => x.id === created.id);
+  const connected = !!createdMachine?.lastSeenAt;
+
+  return (
+    <section className="space-y-3" aria-label="Local machines">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="label">Local machines <span className="normal-case tracking-normal text-slate-500">— a PC at home that you control from here</span></h2>
+        {!adding && <button type="button" className="btn-neon text-xs" onClick={() => { setAdding(true); setCreated(null); }}>+ Add a PC</button>}
+      </div>
+
+      {loadError && <p className="text-xs text-neon-amber">⚠ {loadError} {loadError.includes('404') || /relation|redeploy/i.test(loadError) ? '' : 'If the app was just updated, redeploy the backend.'}</p>}
+
+      {adding && (
+        <div className="neon-card rounded-lg border border-white/10 p-4 space-y-3 text-xs">
+          <p className="text-slate-300">Add a Windows PC that streams with Sunshine. A small agent on it connects out to GGGH (nothing is opened on your router) so GGGH can see it and control it from here.</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <label className="space-y-1"><span className="label">Name</span><input className="input-neon px-2 py-1 text-xs w-full" value={name} maxLength={40} placeholder="Gaming PC" onChange={(e) => setName(e.target.value)} /></label>
+            <label className="space-y-1"><span className="label">MAC address (optional — the PC reports it itself)</span><input className="input-neon px-2 py-1 text-xs w-full" value={mac} placeholder="AA:BB:CC:DD:EE:FF" onChange={(e) => setMac(e.target.value)} /></label>
+          </div>
+          {formErr && <p className="text-neon-amber">⚠ {formErr}</p>}
+          <div className="flex gap-2">
+            <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!name.trim() || saving} onClick={add}>{saving ? 'Adding…' : 'Add it'}</button>
+            <button type="button" className="text-slate-400 hover:text-slate-200 px-2" onClick={() => { setAdding(false); setFormErr(null); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {created && (
+        <div className={`rounded-lg border p-4 space-y-2 text-xs ${connected ? 'border-neon-lime/40' : 'border-neon-cyan/30'}`}>
+          {connected
+            ? <p className="text-neon-lime">✓ {created.name} is connected. You can use it below.{' '}<button type="button" className="text-slate-400 hover:text-slate-200 underline" onClick={() => setCreated(null)}>Hide this</button></p>
+            : <>
+              <p className="text-slate-100"><strong>Now connect {created.name}.</strong> On the PC (Windows 11): right-click Start → <strong>Terminal (Admin)</strong>, paste this and press Enter. It installs Sunshine if needed and starts the agent.</p>
+              <CopyBox text={created.installCommand} />
+              <p className="text-slate-500">Shown only now: it holds a private key for this PC. This panel updates by itself when the PC connects.</p>
+              <p className="text-slate-500 animate-pulse">Waiting for the PC to connect…</p>
+            </>}
+        </div>
+      )}
+
+      {list && list.length === 0 && !adding && !created && (
+        <p className="text-xs text-slate-500">No local PCs yet. Add one to see it online, wake it, pair Moonlight and get a ready-made terminal command, all from here.</p>
+      )}
+      <div className="space-y-4">{(list || []).map((m) => <LocalCard key={m.id} m={m} onChanged={load} />)}</div>
+    </section>
+  );
+}

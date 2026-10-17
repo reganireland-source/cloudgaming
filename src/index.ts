@@ -100,6 +100,8 @@ import { MLWEB_PAIR_SOURCE } from './providers/shared/mlwebPair';
 import { ADD_APPS_SOURCE } from './providers/shared/addApps';
 import { MAC_CLIPBOARD_SCRIPT } from './providers/shared/macClipboard';
 import { clipboardTarget } from './services/SshAccessService';
+import localMachineRoutes from './api/routes/localMachines';
+import localAgentRoutes from './api/routes/localAgent';
 
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
@@ -208,6 +210,8 @@ app.get('/api/agent/add-apps.py', (_req, res) => { res.type('text/x-python').sen
 app.get('/api/agent/mlweb-pair.py', (_req, res) => { res.type('text/x-python').send(MLWEB_PAIR_SOURCE); });   // PUBLIC: nothing secret in it
 app.get('/api/agent/dev-tools.sh', (_req, res) => { res.type('text/x-shellscript').send(DEV_TOOLS_SCRIPT); });   // PUBLIC: nothing secret in it              // PUBLIC: you can't require login on the login page
 app.use('/api/machines', authMiddleware, machineRoutes);
+app.use('/api/local-machines', authMiddleware, localMachineRoutes); // your own PCs (Windows + Sunshine)
+app.use('/api/local-agent', localAgentRoutes);   // PUBLIC, token-checked: the PC's agent and the Moonlight command
 app.use('/api/credentials', authMiddleware, credentialRoutes);  // your encrypted cloud keys
 app.use('/api/operations', authMiddleware, operationRoutes);    // live progress of cloud actions
 app.use('/api/inventory', authMiddleware, inventoryRoutes);     // what's deployed where (map)
