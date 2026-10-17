@@ -15,6 +15,9 @@
  *   GET    /:id/commands           the audit trail
  *   GET    /:id/commands/:cid      one command's progress
  *   POST   /:id/pair               Moonlight pairing → { commandId, pin, host }
+ *   GET    /:id/reports            what the agent measured (?kind=diagnose|record|logs), newest first
+ *   GET    /:id/reports/:rid       one report with its plain-English findings and a text version to paste
+ *   GET    /:id/live?since=N       live samples while a recording runs
  *
  * The agent's own routes are public (token-checked) in localAgent.ts.
  * ============================================================================
@@ -25,7 +28,7 @@ import { Router, Request, Response } from 'express';
 import { env } from '../../config/env';
 import {
   listLocalMachines, createLocalMachine, updateLocalMachine, deleteLocalMachine, rotateAgentToken,
-  launcherInfo, sendLocalCommand, getLocalCommand, recentLocalCommands,
+  launcherInfo, sendLocalCommand, getLocalCommand, recentLocalCommands, listReports, getReport, getLive,
 } from '../../services/LocalMachineService';
 import { sendRouteError } from './machines';
 
@@ -98,6 +101,18 @@ router.post('/:id/pair', async (req: Request, res: Response) => {
     const info = await launcherInfo(req.userId!, req.params.id);
     res.status(202).json({ commandId: cmd.id, pin, host: info.lanIp });
   } catch (e) { sendRouteError(res, e, 'Failed to start pairing'); }
+});
+
+router.get('/:id/reports', async (req: Request, res: Response) => {
+  try { res.json(await listReports(req.userId!, req.params.id, typeof req.query.kind === 'string' ? req.query.kind : undefined)); } catch (e) { sendRouteError(res, e, 'Failed to list the reports'); }
+});
+
+router.get('/:id/reports/:rid', async (req: Request, res: Response) => {
+  try { noStore(res); res.json(await getReport(req.userId!, req.params.id, req.params.rid)); } catch (e) { sendRouteError(res, e, 'Failed to read the report'); }
+});
+
+router.get('/:id/live', async (req: Request, res: Response) => {
+  try { noStore(res); res.json(await getLive(req.userId!, req.params.id, Number(req.query.since) || 0)); } catch (e) { sendRouteError(res, e, 'Failed to read the live data'); }
 });
 
 export default router;

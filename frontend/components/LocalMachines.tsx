@@ -19,8 +19,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, type ApiError } from '@/lib/auth';
 import { SCREENS, detectScreen, fitResolution } from '@/lib/screens';
+import LocalDiagnose from '@/components/LocalDiagnose';
 import {
-  LOCAL_APPS, buildLaunchScript, localBitrateKbps, pairCommand, plainStreamCommand,
+  LOCAL_APPS, buildCheckScript, buildLaunchScript, localBitrateKbps, pairCommand, plainStreamCommand,
   type LocalCodec, type LocalLaunch, type LocalOS,
 } from '@/lib/localCommand';
 
@@ -88,7 +89,7 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
   const [confirm, setConfirm] = useState<'sleep' | 'restart' | 'shutdown' | 'remove' | 'token' | null>(null);
   const [pair, setPair] = useState<{ pin: string; host: string | null; status: string; result: string | null } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'launch' | 'settings' | 'log' | null>(null);
+  const [panel, setPanel] = useState<'launch' | 'diagnose' | 'settings' | 'log' | null>(null);
   const st = m.status;
 
   const send = async (kind: string, args?: Record<string, unknown>, label?: string) => {
@@ -139,6 +140,7 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
           {st?.cpuPercent != null && <Stat label="CPU">{st.cpuPercent}%</Stat>}
           {st?.ramGb != null && <Stat label="Memory">{(st.ramGb - (st.ramFreeGb || 0)).toFixed(1)}/{st.ramGb} GB</Stat>}
           <Stat label="Sunshine"><span className={st?.sunshine === 'Running' ? 'text-neon-lime' : 'text-neon-amber'}>{st?.sunshine === 'NotInstalled' ? 'not installed' : (st?.sunshine || '—').toLowerCase()}</span></Stat>
+          {st?.agentVersion && <Stat label="Agent">v{st.agentVersion} <span className="text-slate-500">updates itself</span></Stat>}
           {st?.uptimeHours != null && <Stat label="Up for">{st.uptimeHours < 48 ? `${st.uptimeHours} h` : `${Math.round(st.uptimeHours / 24)} days`}</Stat>}
         </div>
       )}
@@ -182,15 +184,16 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
       {note && <p role="status" className={`text-xs ${note.ok ? 'text-neon-lime' : 'text-neon-amber'}`}>{note.ok ? '✓ ' : '⚠ '}{note.text}</p>}
 
       <div className="flex gap-1 border-b border-white/5">
-        {(['launch', 'settings', 'log'] as const).map((t) => (
+        {(['launch', 'diagnose', 'settings', 'log'] as const).map((t) => (
           <button key={t} type="button" onClick={() => setPanel(panel === t ? null : t)}
             className={`px-3 py-1.5 text-[0.72rem] uppercase tracking-label border-b-2 -mb-px ${panel === t ? 'border-neon-cyan text-neon-cyan' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
-            {{ launch: 'Moonlight command', settings: 'Settings', log: 'Command log' }[t]}
+            {{ launch: 'Moonlight command', diagnose: 'Diagnose', settings: 'Settings', log: 'Command log' }[t]}
           </button>
         ))}
       </div>
 
       {panel === 'launch' && <LaunchPanel m={m} />}
+      {panel === 'diagnose' && <LocalDiagnose id={m.id} name={m.name} online={m.online} />}
       {panel === 'settings' && (
         <SettingsPanel m={m} onChanged={onChanged} busy={busy} newToken={newToken}
           askToken={() => setConfirm('token')} askRemove={() => setConfirm('remove')}
@@ -230,6 +233,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   const [fullscreen, setFullscreen] = useState(true);
   const [wake, setWake] = useState(true);
   const [match, setMatch] = useState(true);
+  const [overlay, setOverlay] = useState(true);
 
   const screen = screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 });
   const res = fitResolution(screen, screen.w * screen.h, 3840, 2160);
@@ -237,7 +241,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   const mac = info?.mac || m.mac;
   const launch: LocalLaunch | null = info && host ? {
     os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
-    wake: wake && !!mac, matchScreen: match && os !== 'windows', api: info.api, token: info.launcherToken,
+    wake: wake && !!mac, matchScreen: match && os !== 'windows', overlay, api: info.api, token: info.launcherToken,
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -246,6 +250,12 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
     const blob = new Blob([script], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `moonlight-${safe}.${os === 'macos' ? 'command' : 'sh'}`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const downloadCheck = () => {
+    const blob = new Blob([buildCheckScript(host || '')], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `check-connection-to-${m.name.replace(/[^\w.-]+/g, '-').toLowerCase()}.${os === 'macos' ? 'command' : 'sh'}`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   };
   const sel = 'input-neon px-2 py-1 text-xs';
@@ -271,6 +281,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={fullscreen} onChange={(e) => setFullscreen(e.target.checked)} /> Full screen</label>
         <label className={`flex items-center gap-1.5 ${mac ? '' : 'opacity-50'}`} title={mac ? undefined : 'Needs the PC’s MAC address (Settings)'}><input type="checkbox" checked={wake && !!mac} disabled={!mac} onChange={(e) => setWake(e.target.checked)} /> Wake the PC first</label>
         <label className={`flex items-center gap-1.5 ${os === 'windows' ? 'opacity-50' : ''}`}><input type="checkbox" checked={match && os !== 'windows'} disabled={os === 'windows'} onChange={(e) => setMatch(e.target.checked)} /> Match the PC’s screen to this one, then put it back</label>
+        <label className="flex items-center gap-1.5" title="Moonlight draws decode time, dropped frames and network delay over the stream: the first thing to look at when it lags"><input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} /> Show Moonlight’s performance overlay</label>
         <label className="flex items-center gap-1.5">Run it on
           <select className={sel} value={os} onChange={(e) => setOs(e.target.value as LocalOS)}><option value="macos">macOS</option><option value="linux">Linux</option><option value="windows">Windows</option></select></label>
       </div>
@@ -282,6 +293,10 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="btn-neon text-xs" onClick={download}>⬇ Download launcher ({os === 'macos' ? '.command' : '.sh'})</button>
             <span className="text-slate-500">{os === 'macos' ? 'First time: right-click → Open. ' : 'Run with: sh <file>. '}Streaming needs only the PC’s address, so it works even if GGGH is down (the screen matching just gets skipped).</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="btn-neon text-xs" onClick={downloadCheck}>⬇ Check my side of the connection ({os === 'macos' ? '.command' : '.sh'})</button>
+            <span className="text-slate-500">Laggy? This takes 20 seconds and says whether this computer reaches the PC over Wi-Fi, and whether pings are being lost.</span>
           </div>
           <p className="text-slate-500">The file holds a key that can only ask this PC to match its screen: it can’t switch it off or run anything. Keep it to yourself like a password.</p>
         </>}

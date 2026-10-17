@@ -24,6 +24,8 @@ import crypto from 'crypto';
 import { query } from '../config/database';
 import { MachineRequestError } from './MachineService';
 import { encryptCredentials, decryptCredentials, encryptionReady } from './CredentialService';
+import { SUNSHINE_SETTINGS, evaluateReport, reportText, stats } from './LocalDiagnostics';
+import { AGENT_SHA256, BOOT_SHA256 } from '../providers/shared/localAgent';
 
 const hash = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 const newToken = (prefix: string) => `${prefix}_${crypto.randomBytes(24).toString('base64url')}`;
@@ -36,8 +38,10 @@ const POLL_HOLD_MS = 25_000;         // how long the agent's request waits for a
 const MAX_SCRIPT = 4000;
 
 /** What the app may ask for, and what the launcher token may ask for. */
-export type CommandKind = 'refresh' | 'sleep' | 'restart' | 'shutdown' | 'sunshine-restart' | 'sunshine-pin' | 'display-set' | 'display-restore' | 'script';
-const APP_KINDS: CommandKind[] = ['refresh', 'sleep', 'restart', 'shutdown', 'sunshine-restart', 'sunshine-pin', 'display-set', 'display-restore', 'script'];
+export type CommandKind = 'refresh' | 'sleep' | 'restart' | 'shutdown' | 'sunshine-restart' | 'sunshine-pin' | 'display-set' | 'display-restore' | 'script'
+  | 'diagnose' | 'record' | 'logs' | 'power-plan' | 'gpu-clocks' | 'sunshine-config' | 'sunshine-config-restore';
+const APP_KINDS: CommandKind[] = ['refresh', 'sleep', 'restart', 'shutdown', 'sunshine-restart', 'sunshine-pin', 'display-set', 'display-restore', 'script',
+  'diagnose', 'record', 'logs', 'power-plan', 'gpu-clocks', 'sunshine-config', 'sunshine-config-restore'];
 const LAUNCHER_KINDS: CommandKind[] = ['display-set', 'display-restore'];
 
 const MAC_RE = /^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$/;
@@ -153,6 +157,28 @@ function checkArgs(kind: CommandKind, args: any, scriptEnabled: boolean): Record
       if (!s || s.length > MAX_SCRIPT) throw new MachineRequestError(400, `Type a PowerShell command (up to ${MAX_SCRIPT} characters).`);
       return { script: s };
     }
+    case 'record': {
+      const sec = Math.round(Number(a.seconds || 60));
+      if (!(sec >= 10 && sec <= 300)) throw new MachineRequestError(400, 'A recording is 10–300 seconds.');
+      return { seconds: sec };
+    }
+    case 'logs': {
+      const n = Math.round(Number(a.lines || 300));
+      if (!(n >= 50 && n <= 2000)) throw new MachineRequestError(400, 'Ask for 50–2000 log lines.');
+      return { lines: n };
+    }
+    case 'power-plan':
+      if (a.plan !== 'high' && a.plan !== 'restore') throw new MachineRequestError(400, 'The plan is "high" or "restore".');
+      return { plan: a.plan };
+    case 'gpu-clocks':
+      if (a.action !== 'lock' && a.action !== 'reset') throw new MachineRequestError(400, 'The action is "lock" or "reset".');
+      return { action: a.action };
+    case 'sunshine-config': {
+      const rule = SUNSHINE_SETTINGS[String(a.key)];
+      if (!rule) throw new MachineRequestError(400, 'That Sunshine setting can\'t be changed from here.', `Allowed: ${Object.keys(SUNSHINE_SETTINGS).join(', ')}.`);
+      if (!rule.re.test(String(a.value))) throw new MachineRequestError(400, `That isn't a valid value for ${a.key}.`);
+      return { key: String(a.key), value: String(a.value) };
+    }
     default: return {};
   }
 }
@@ -205,10 +231,24 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * The agent says hello (with its status) and waits up to ~25 s for work.
  * null = unknown token. Returns the commands to run (they are marked "sent").
  */
+/**
+ * Which of the agent's own files differ from what GGGH serves now (it reports
+ * their SHA-256). An agent that can update itself ("canUpdate") is told to
+ * fetch them; it checks the hash again after downloading.
+ */
+export function updatesFor(st: any): Array<{ file: 'agent' | 'boot'; sha256: string }> {
+  if (!st || st.canUpdate !== true) return [];
+  const out: Array<{ file: 'agent' | 'boot'; sha256: string }> = [];
+  if (typeof st.agentSha === 'string' && st.agentSha.toLowerCase() !== AGENT_SHA256) out.push({ file: 'agent', sha256: AGENT_SHA256 });
+  if (typeof st.bootSha === 'string' && st.bootSha.toLowerCase() !== BOOT_SHA256) out.push({ file: 'boot', sha256: BOOT_SHA256 });
+  return out;
+}
+
 export async function agentPoll(token: string, report: any, holdMs = POLL_HOLD_MS, stepMs = 1500) {
   const m = await byToken(token, 'agent_token_hash');
   if (!m) return null;
   const st = report && typeof report === 'object' ? report : {};
+  const update = updatesFor(st);
   const safe = JSON.stringify(st).length <= 20_000 ? st : {};
   await query(
     `UPDATE local_machines SET last_seen_at = NOW(), status = $2,
@@ -226,9 +266,9 @@ export async function agentPoll(token: string, report: any, holdMs = POLL_HOLD_M
         RETURNING id, kind, args, created_at`, [m.id])).rows;
     if (rows.length) {
       rows.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
-      return { commands: rows.map((r) => ({ id: r.id as string, kind: r.kind as string, args: r.args })), pollSeconds: 1 };
+      return { commands: rows.map((r) => ({ id: r.id as string, kind: r.kind as string, args: r.args })), pollSeconds: 1, update };
     }
-    if (Date.now() >= until) return { commands: [], pollSeconds: 1 };
+    if (Date.now() >= until || update.length) return { commands: [], pollSeconds: 1, update };
     await sleep(Math.min(stepMs, Math.max(0, until - Date.now())));
   }
 }
@@ -265,4 +305,83 @@ export async function launcherScreen(token: string, action: 'set' | 'restore', a
     await sleep(400);
   }
   return { online: true, ok: false, message: 'The PC didn\'t answer in time.' };
+}
+
+// ---------------------------------------------------------------------------
+// Reports, live samples and the heartbeat (the agent's long jobs)
+// ---------------------------------------------------------------------------
+
+/** A long job (a recording, pairing) keeps the machine "online" with this. */
+export async function agentHeartbeat(token: string): Promise<boolean> {
+  const m = await byToken(token, 'agent_token_hash');
+  if (!m) return false;
+  await query('UPDATE local_machines SET last_seen_at = NOW() WHERE id = $1', [m.id]);
+  return true;
+}
+
+const MAX_REPORT_CHARS = 450_000;
+const REPORT_KINDS = ['diagnose', 'record', 'logs'];
+
+/** The agent uploads what it measured. Returns the report's id, or null if refused. */
+export async function agentReport(token: string, commandId: string, kind: string, data: unknown): Promise<string | null> {
+  const m = await byToken(token, 'agent_token_hash');
+  if (!m || !REPORT_KINDS.includes(kind) || !/^[0-9a-f-]{36}$/i.test(String(commandId))) return null;
+  const json = JSON.stringify(data ?? {});
+  if (json.length > MAX_REPORT_CHARS) return null;
+  const own = (await query('SELECT 1 FROM local_commands WHERE id = $1 AND machine_id = $2', [commandId, m.id])).rows[0];
+  if (!own) return null;
+  const id = (await query('INSERT INTO local_reports (machine_id, kind, command_id, data) VALUES ($1, $2, $3, $4) RETURNING id', [m.id, kind, commandId, json])).rows[0].id as string;
+  await query(`DELETE FROM local_reports WHERE machine_id = $1 AND kind = $2 AND id NOT IN
+    (SELECT id FROM local_reports WHERE machine_id = $1 AND kind = $2 ORDER BY created_at DESC LIMIT 10)`, [m.id, kind]);
+  return id;
+}
+
+export async function listReports(userId: string, id: string, kind?: string) {
+  await owned(userId, id);
+  const rows = (await query(
+    `SELECT id, kind, command_id, created_at FROM local_reports WHERE machine_id = $1 ${kind ? 'AND kind = $2' : ''} ORDER BY created_at DESC LIMIT 20`,
+    kind ? [id, kind] : [id])).rows;
+  return rows.map((r) => ({ id: r.id, kind: r.kind, commandId: r.command_id, createdAt: r.created_at }));
+}
+
+/** One report, with the plain-English findings worked out now (so rule improvements reach old reports). */
+export async function getReport(userId: string, id: string, reportId: string) {
+  const machine = await owned(userId, id);
+  if (!/^[0-9a-f-]{36}$/i.test(reportId)) throw new MachineRequestError(404, 'No such report.');
+  const r = (await query('SELECT id, kind, data, created_at FROM local_reports WHERE id = $1 AND machine_id = $2', [reportId, id])).rows[0];
+  if (!r) throw new MachineRequestError(404, 'No such report.');
+  const findings = evaluateReport(r.kind, r.data);
+  const series: Record<string, ReturnType<typeof stats>> = {};
+  if (r.kind === 'record') for (const [k, v] of Object.entries(r.data?.series || {})) if (Array.isArray(v)) series[k] = stats(v.filter((x) => typeof x === 'number'));
+  const createdAt = new Date(r.created_at).toISOString();
+  return { id: r.id, kind: r.kind, createdAt, data: r.data, findings, series, text: reportText(machine.name, r.kind, createdAt, r.data, findings) };
+}
+
+// Live samples while a recording runs: kept in memory (they only matter for the next minute).
+const live = new Map<string, { seq: number; samples: Array<Record<string, unknown> & { seq: number }>; at: number }>();
+const LIVE_KEEP = 400;
+
+export async function agentLive(token: string, samples: unknown): Promise<boolean> {
+  const m = await byToken(token, 'agent_token_hash');
+  if (!m) return false;
+  await query('UPDATE local_machines SET last_seen_at = NOW() WHERE id = $1', [m.id]);
+  const buf = live.get(m.id) || { seq: 0, samples: [], at: 0 };
+  for (const x of (Array.isArray(samples) ? samples : []).slice(0, 50)) {
+    if (!x || typeof x !== 'object') continue;
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(x as Record<string, unknown>).slice(0, 20)) if (typeof v === 'number' || typeof v === 'boolean') clean[k] = v;
+    buf.samples.push({ ...clean, seq: ++buf.seq });
+  }
+  if (buf.samples.length > LIVE_KEEP) buf.samples.splice(0, buf.samples.length - LIVE_KEEP);
+  buf.at = Date.now();
+  live.set(m.id, buf);
+  return true;
+}
+
+/** Samples newer than `since` (a sequence number), for the page's live charts. */
+export async function getLive(userId: string, id: string, since = 0) {
+  await owned(userId, id);
+  const buf = live.get(id);
+  if (!buf) return { samples: [], seq: 0, active: false };
+  return { samples: buf.samples.filter((x) => x.seq > since), seq: buf.seq, active: Date.now() - buf.at < 8000 };
 }

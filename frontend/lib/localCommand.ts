@@ -32,6 +32,8 @@ export interface LocalLaunch {
   fullscreen: boolean;
   wake: boolean;
   matchScreen: boolean;
+  /** Moonlight's own overlay: decode time, dropped frames, network delay. The first thing to look at for lag. */
+  overlay?: boolean;
   api: string;
   token: string;
 }
@@ -66,6 +68,7 @@ function streamArgs(l: LocalLaunch): string[] {
     '--game-optimization',
     '--quit-after',
     '--no-multi-controller', // one controller on the PC: with several, one pad can show up twice
+    ...(l.overlay ? ['--performance-overlay'] : []),
   ];
 }
 
@@ -144,4 +147,39 @@ export function buildLaunchScript(l: LocalLaunch): string {
 
   lines.push('', `${exe} ${streamArgs(l).join(' ')}`);
   return lines.join('\n') + '\n';
+}
+
+/**
+ * "Check my side": what the Mac (or Linux box) sees of the network to the PC.
+ * Half of "it's laggy" is on the client's end: Wi-Fi instead of a cable, or
+ * a few lost pings. Prints which kind of link the route to the PC uses and a
+ * 20-second ping summary (loss, average, worst).
+ */
+export function buildCheckScript(host: string): string {
+  return [
+    "#!/bin/bash",
+    "# Gints Global Gaming Hubjob: how does this computer reach the PC?",
+    `HOST=${sq(host)}`,
+    "echo \"Checking the connection from this computer to $HOST (about 20 seconds)...\"",
+    "if [ \"$(uname)\" = Darwin ]; then",
+    "  IF=$(route -n get \"$HOST\" 2>/dev/null | awk '/interface:/{print $2}')",
+    "  KIND=$(networksetup -listallhardwareports 2>/dev/null | awk -v i=\"$IF\" '/Hardware Port/{p=$0} /Device:/{if ($2==i) print p}')",
+    "  case \"$KIND\" in *Wi-Fi*|*AirPort*) LINK=\"Wi-Fi\";; *) LINK=\"a cable or adapter\";; esac",
+    "else",
+    "  IF=$(ip route get \"$HOST\" 2>/dev/null | awk '{for(i=1;i<NF;i++) if ($i==\"dev\") print $(i+1)}' | head -1)",
+    "  if [ -d \"/sys/class/net/$IF/wireless\" ]; then LINK=\"Wi-Fi\"; else LINK=\"a cable or adapter\"; fi",
+    "fi",
+    "echo \"This computer reaches the PC over: $LINK (${IF:-unknown interface})\"",
+    "[ \"$LINK\" = \"Wi-Fi\" ] && echo \"  -> Wi-Fi is the most common cause of stutter, even when the PC itself is on a cable. Try a cable (or at least the 5 GHz band, close to the router).\"",
+    "OUT=$(ping -c 20 \"$HOST\" 2>&1)",
+    "echo \"$OUT\" | tail -3",
+    "if ! echo \"$OUT\" | grep -q \"packet loss\"; then echo; echo \"Could not run the ping test here, so nothing was checked: $(echo \"$OUT\" | head -1)\"; exit 1; fi",
+    "LOSS=$(echo \"$OUT\" | sed -n 's/.* \\([0-9.]*\\)% packet loss.*/\\1/p')",
+    "MAX=$(echo \"$OUT\" | awk -F'/' '/min\\/avg\\/max/{print $6+0}')",
+    "echo",
+    "if [ \"${LOSS:-0}\" != \"0\" ] && [ \"${LOSS:-0}\" != \"0.0\" ]; then echo \"PROBLEM: ${LOSS}% of pings were lost. Streaming cannot be smooth like this.\"",
+    "elif [ -n \"$MAX\" ] && [ \"${MAX%.*}\" -gt 20 ] 2>/dev/null; then echo \"WARNING: the slowest ping was ${MAX} ms. On a good home network it stays under about 5 ms.\"",
+    "else echo \"The route to the PC looks healthy.\"; fi",
+    "echo \"Next: stream with the performance overlay on (the launcher command has an option for it) and note the decode time and dropped frames.\""
+  ].join('\n') + '\n';
 }

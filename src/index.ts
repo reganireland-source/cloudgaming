@@ -133,6 +133,7 @@ app.use(
 // "Body parsing": when the frontend sends data (e.g. a form as JSON), it
 // arrives as raw text. These two lines turn it into a JavaScript object and
 // put it on `req.body`, so route code can just read `req.body.provider`.
+app.use('/api/local-agent/report', express.json({ limit: '1mb' })); // a PC's diagnostic reports are bigger than the 100 kb default
 app.use(express.json());                          // for JSON bodies (what our frontend sends)
 app.use(express.urlencoded({ extended: true }));  // for classic HTML-form bodies
 

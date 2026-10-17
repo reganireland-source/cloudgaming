@@ -16,17 +16,34 @@
  *              "-Mode display" is the second task: it changes the screen (only a user
  *              session may), reading display\request.json and writing display\result.json.
  *
- * Windows PowerShell 5.1 compatible (the one every Windows 11 has). No backticks or
- * "${" anywhere (String.raw template).
+ *              Since version 2 it also: diagnoses (settings, network, GPU, Sunshine log, Windows
+ *              errors), records per-second samples while you stream (sent live), fetches logs, and
+ *              runs a short list of reversible tuning actions (power plan, GPU clock lock, a few
+ *              Sunshine settings with a backup). It updates ITSELF: GGGH tells it when the copy it
+ *              serves differs (by SHA-256); the agent downloads it, checks the hash and that it
+ *              parses, keeps the old one as .bak, and exits so BOOT_PS1 starts the new one.
+ *
+ * BOOT_PS1     the tiny wrapper the "GGGH Agent" task really runs: restarts the agent when it
+ *              stops and, if a freshly updated agent crashes 3 times in a row, puts the previous
+ *              one back. It can be updated the same way.
+ *
+ * Windows PowerShell 5.1 compatible (the one every Windows 11 has). ASCII ONLY (5.1 reads a
+ * download without a byte-order mark as ANSI, which would garble anything else). No backticks
+ * or "${" anywhere (String.raw template).
  */
+
+import crypto from 'crypto';
+
 
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1'
+$AgentVersion = '2'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
+$AgentFile = Join-Path $Dir 'gggh-agent.ps1'
+$BootFile = Join-Path $Dir 'gggh-boot.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Log($m) {
@@ -126,22 +143,94 @@ public static class Disp {
 }
 
 # ---------------------------------------------------------------------------
-# The agent (SYSTEM, at boot)
+# The agent (SYSTEM, at boot, started by gggh-boot.ps1)
 # ---------------------------------------------------------------------------
 $cfg = Get-Content (Join-Path $Dir 'agent.json') -Raw | ConvertFrom-Json
 $Headers = @{ Authorization = ('Bearer ' + $cfg.token) }
-$SunshineExe = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
+$SunshineDir = Join-Path $env:ProgramFiles 'Sunshine'
+$SunshineExe = Join-Path $SunshineDir 'sunshine.exe'
+$SunshineConf = Join-Path $SunshineDir 'config\sunshine.conf'
+$SunshineLog = Join-Path $SunshineDir 'config\sunshine.log'
+$HighPerf = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+$script:lastBeat = Get-Date
 
 function Post($path, $obj, $timeout) {
-  $bytes = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Depth 6 -Compress))
+  $bytes = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Depth 9 -Compress))
   return Invoke-RestMethod -Method Post -Uri ($cfg.api + '/local-agent/' + $path) -Headers $Headers -ContentType 'application/json' -Body $bytes -TimeoutSec $timeout
 }
 
-function Get-Status {
-  $s = @{ agentVersion = $AgentVersion; host = $env:COMPUTERNAME }
+# "Still here", from inside long jobs, so the PC does not show as offline meanwhile.
+function Beat {
+  if (((Get-Date) - $script:lastBeat).TotalSeconds -ge 15) {
+    $script:lastBeat = Get-Date
+    try { [void](Post 'heartbeat' @{} 10) } catch { }
+  }
+}
+
+function Hash-Of($path) { try { return (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLower() } catch { return '' } }
+
+function N($v) {
+  $d = 0.0
+  if ([double]::TryParse([string]$v, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { return $d }
+  return $null
+}
+
+# One nvidia-smi query; the values in the order asked, or $null when the driver rejects a field.
+function Smi($fields) {
+  try {
+    $o = & nvidia-smi ('--query-gpu=' + $fields) --format=csv,noheader,nounits 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $o) { return $null }
+    return @((($o | Select-Object -First 1) -split ',\s*'))
+  } catch { return $null }
+}
+
+# Encoder / decoder load in percent (nvidia-smi dmon prints: gpu sm mem enc dec ...). Takes about a second.
+function Smi-Enc {
+  try {
+    $o = & nvidia-smi dmon -c 1 -s u 2>$null
+    $line = @($o | Where-Object { $_ -and $_.Trim() -notmatch '^#' }) | Select-Object -Last 1
+    if (-not $line) { return $null }
+    $t = @($line.Trim() -split '\s+')
+    if ($t.Count -ge 5) { return @{ enc = (N $t[3]); dec = (N $t[4]) } }
+  } catch { }
+  return $null
+}
+
+function Get-NetInfo {
+  $r = @{}
   try {
     $c = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
-    if ($c) { $s.lanIp = @($c.IPv4Address)[0].IPAddress; $s.mac = $c.NetAdapter.MacAddress; $s.link = ('{0}' -f $c.NetAdapter.LinkSpeed); $s.wired = ($c.NetAdapter.PhysicalMediaType -notmatch 'Native 802.11|Wireless') }
+    if ($c) {
+      $r.name = $c.InterfaceAlias
+      $r.lanIp = @($c.IPv4Address)[0].IPAddress
+      $r.gateway = @($c.IPv4DefaultGateway)[0].NextHop
+      $r.mac = $c.NetAdapter.MacAddress
+      $r.linkMbps = [int]($c.NetAdapter.Speed / 1000000)
+      $r.wired = ($c.NetAdapter.PhysicalMediaType -notmatch 'Native 802.11|Wireless')
+      $r.desc = $c.NetAdapter.InterfaceDescription
+    }
+  } catch { }
+  return $r
+}
+
+function Ping-Gateway($gw, $count) {
+  $res = @{ sent = $count; lost = 0; avgMs = 0; maxMs = 0 }
+  if (-not $gw) { $res.sent = 0; return $res }
+  $p = New-Object Net.NetworkInformation.Ping
+  $times = @()
+  for ($i = 0; $i -lt $count; $i++) {
+    try { $r = $p.Send($gw, 1000); if ($r.Status -eq 'Success') { $times += [int]$r.RoundtripTime } else { $res.lost++ } } catch { $res.lost++ }
+    Start-Sleep -Milliseconds 150
+  }
+  if ($times.Count) { $res.avgMs = [Math]::Round(($times | Measure-Object -Average).Average, 1); $res.maxMs = ($times | Measure-Object -Maximum).Maximum }
+  return $res
+}
+
+function Get-Status {
+  $s = @{ agentVersion = $AgentVersion; host = $env:COMPUTERNAME; canUpdate = $true; agentSha = (Hash-Of $AgentFile); bootSha = (Hash-Of $BootFile) }
+  try {
+    $n = Get-NetInfo
+    if ($n.lanIp) { $s.lanIp = $n.lanIp; $s.mac = $n.mac; $s.wired = $n.wired; $s.link = ('{0} Mbit/s' -f $n.linkMbps) }
   } catch { }
   try {
     $os = Get-CimInstance Win32_OperatingSystem
@@ -154,7 +243,7 @@ function Get-Status {
   try {
     $q = & nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,encoder.stats.sessionCount,memory.used,memory.total,driver_version --format=csv,noheader,nounits 2>$null
     if ($q) {
-      $p = ($q | Select-Object -First 1) -split ',\s*'
+      $p = @(($q | Select-Object -First 1) -split ',\s*')
       $s.gpu = @{ name = $p[0]; util = [int]$p[1]; tempC = [int]$p[2]; encoders = [int]$p[3]; vramUsedMb = [int]$p[4]; vramTotalMb = [int]$p[5]; driver = $p[6] }
       $s.streaming = ([int]$p[3] -gt 0)
     }
@@ -165,6 +254,198 @@ function Get-Status {
 
 function Report($id, $ok, $msg) {
   try { [void](Post 'result' @{ id = $id; ok = $ok; message = $msg } 20) } catch { Log ('could not report a result: ' + $_.Exception.Message) }
+}
+
+function Send-Report($commandId, $kind, $data) {
+  $r = Post 'report' @{ commandId = $commandId; kind = $kind; data = $data } 60
+  return $r.id
+}
+
+# Never send anything that looks like a secret.
+function Scrub($line) {
+  if ([string]$line -match '(?i)(password|passwd|secret|token|authorization|cookie|api[_-]?key)') { return '[line hidden: looks like a secret]' }
+  return [string]$line
+}
+
+function Tail-Lines($path, $n, $maxChars) {
+  if (-not (Test-Path $path)) { return @() }
+  $lines = @(Get-Content -Path $path -Tail $n -ErrorAction SilentlyContinue | ForEach-Object { Scrub $_ })
+  $total = 0; $keep = New-Object System.Collections.ArrayList
+  for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+    $total += $lines[$i].Length + 1
+    if ($total -gt $maxChars) { break }
+    [void]$keep.Insert(0, $lines[$i])
+  }
+  return @($keep)
+}
+
+# ---------------------------------------------------------------------------
+# Diagnose: one snapshot of everything that matters for streaming
+# ---------------------------------------------------------------------------
+function Do-Diagnose($c) {
+  $d = @{ at = (Get-Date).ToUniversalTime().ToString('s') + 'Z'; agentVersion = $AgentVersion }
+  try { $os = Get-CimInstance Win32_OperatingSystem; $d.os = @{ caption = $os.Caption; build = $os.BuildNumber; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1) }; $d.ram = @{ totalGb = [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1); freeGb = [Math]::Round($os.FreePhysicalMemory / 1MB, 1) } } catch { }
+  try { $cp = Get-CimInstance Win32_Processor | Select-Object -First 1; $d.cpu = @{ name = $cp.Name.Trim(); cores = $cp.NumberOfCores; threads = $cp.NumberOfLogicalProcessors; percent = [int]$cp.LoadPercentage } } catch { }
+  try {
+    $line = (& powercfg /getactivescheme) | Out-String
+    $guid = ''; if ($line -match '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})') { $guid = $Matches[1].ToLower() }
+    $nm = ''; if ($line -match '\(([^)]+)\)') { $nm = $Matches[1] }
+    $d.power = @{ active = $nm; guid = $guid }
+  } catch { }
+  try { $d.hags = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' -Name HwSchMode -ErrorAction Stop).HwSchMode } catch { }
+  # Network
+  $n = Get-NetInfo
+  if ($n.name) {
+    $nic = @{ name = $n.name; desc = $n.desc; linkMbps = $n.linkMbps; wired = $n.wired }
+    try { $st = Get-NetAdapterStatistics -Name $n.name; $nic.stats = @{ rxDiscard = [int64]$st.ReceivedDiscardedPackets; rxErr = [int64]$st.ReceivedPacketErrors; txDiscard = [int64]$st.OutboundDiscardedPackets; txErr = [int64]$st.OutboundPacketErrors } } catch { }
+    try { $nic.adv = @(Get-NetAdapterAdvancedProperty -Name $n.name -ErrorAction Stop | Where-Object { $_.DisplayName -match 'Energy|Green|Interrupt|Flow|Speed|Jumbo|Wake' } | ForEach-Object { @{ n = $_.DisplayName; v = [string]$_.DisplayValue } }) } catch { }
+    $d.nic = $nic
+    $d.gateway = Ping-Gateway $n.gateway 12
+  }
+  # GPU
+  $f = 'name,driver_version,pstate,clocks.sm,clocks.max.sm,clocks.mem,clocks.max.mem,power.draw,power.limit,temperature.gpu,utilization.gpu,utilization.memory,pcie.link.gen.current,pcie.link.width.current,memory.used,memory.total,encoder.stats.sessionCount,encoder.stats.averageFps,encoder.stats.averageLatency'
+  $p = Smi ($f + ',clocks_throttle_reasons.active')
+  $hasThrottle = $true
+  if (-not $p) { $p = Smi $f; $hasThrottle = $false }
+  if ($p) {
+    $d.gpu = @{ name = $p[0]; driver = $p[1]; pstate = $p[2]; smClock = (N $p[3]); smClockMax = (N $p[4]); memClock = (N $p[5]); memClockMax = (N $p[6]); powerW = (N $p[7]); powerLimitW = (N $p[8]); tempC = (N $p[9]); util = (N $p[10]); utilMem = (N $p[11]); pcieGen = (N $p[12]); pcieWidth = (N $p[13]); vramUsedMb = (N $p[14]); vramTotalMb = (N $p[15]); encSessions = (N $p[16]); encFps = (N $p[17]); encLatencyMs = (N $p[18]) }
+    if ($hasThrottle) { $d.gpu.throttle = $p[19] }
+    $e = Smi-Enc; if ($e) { $d.gpu.utilEnc = $e.enc; $d.gpu.utilDec = $e.dec }
+  }
+  # Screens
+  try { $d.displays = @(Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution } | ForEach-Object { @{ name = $_.Name; w = [int]$_.CurrentHorizontalResolution; h = [int]$_.CurrentVerticalResolution; hz = [int]$_.CurrentRefreshRate } }) } catch { }
+  try { $d.monitors = @(Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorBasicDisplayParams -ErrorAction Stop).Count } catch { }
+  # Sunshine
+  $sun = @{}
+  try { if (Test-Path $SunshineExe) { $sun.version = [string](& $SunshineExe --version 2>&1 | Select-Object -First 1) } } catch { }
+  try { $sv = Get-CimInstance Win32_Service -Filter "Name='SunshineService'"; if ($sv) { $sun.service = $sv.State; $sun.startType = $sv.StartMode; $sun.account = $sv.StartName } else { $sun.service = 'NotInstalled' } } catch { }
+  if (Test-Path $SunshineConf) { $sun.config = @(Get-Content $SunshineConf -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^#' } | ForEach-Object { Scrub $_ }) }
+  $sun.logTail = Tail-Lines $SunshineLog 250 60000
+  $d.sunshine = $sun
+  # Programs
+  try {
+    $pp = @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object { $_.Name -ne '_Total' -and $_.Name -ne 'Idle' } | Sort-Object PercentProcessorTime -Descending | Select-Object -First 8)
+    $d.procs = @($pp | ForEach-Object { @{ name = ($_.Name -replace '#\d+$', ''); cpu = [int]$_.PercentProcessorTime; memMb = [int]($_.WorkingSetPrivate / 1MB) } })
+  } catch { }
+  try {
+    $watch = @('nvsphelper64', 'nvcontainer', 'nvidia share', 'gamebar', 'gamebarpresencewriter', 'obs64', 'discord', 'rtss')
+    $d.overlays = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessName.ToLower() } | Where-Object { $watch -contains $_ } | Sort-Object -Unique)
+  } catch { }
+  # Windows errors from the last day (graphics, hardware, hangs)
+  try {
+    $ev = @(Get-WinEvent -FilterHashtable @{ LogName = @('System', 'Application'); Level = @(1, 2); StartTime = (Get-Date).AddHours(-24) } -MaxEvents 300 -ErrorAction Stop)
+    $d.events = @($ev | Group-Object { '{0}|{1}' -f $_.ProviderName, $_.Id } | Sort-Object Count -Descending | Select-Object -First 10 | ForEach-Object { @{ provider = $_.Group[0].ProviderName; id = $_.Group[0].Id; count = $_.Count; sample = (([string]$_.Group[0].Message) -replace '\s+', ' ').Trim() } })
+  } catch { $d.events = @() }
+  $id = Send-Report $c.id 'diagnose' $d
+  return @($true, 'Diagnostics collected. Open the Diagnose tab to read them.')
+}
+
+# ---------------------------------------------------------------------------
+# Record: per-second samples while you stream, sent live and saved
+# ---------------------------------------------------------------------------
+function Do-Record($c) {
+  $sec = [int]$c.args.seconds
+  $n = Get-NetInfo
+  $gw = $n.gateway
+  $ping = $null; if ($gw) { $ping = New-Object Net.NetworkInformation.Ping }
+  $S = @{ gpuUtil = @(); encUtil = @(); smClock = @(); powerW = @(); tempC = @(); cpu = @(); rxMbps = @(); txMbps = @(); pingMs = @(); streaming = @() }
+  $throttle = @{}; $lost = 0; $smMax = $null; $batch = @(); $prev = $null; $prevAt = $null
+  $fields = 'utilization.gpu,clocks.sm,power.draw,temperature.gpu,encoder.stats.sessionCount,clocks.max.sm,clocks_throttle_reasons.active'
+  $hasThrottle = $true
+  for ($i = 0; $i -lt $sec; $i++) {
+    $tick = Get-Date
+    $x = @{}
+    $p = Smi $fields
+    if (-not $p -and $hasThrottle) { $hasThrottle = $false; $fields = 'utilization.gpu,clocks.sm,power.draw,temperature.gpu,encoder.stats.sessionCount,clocks.max.sm'; $p = Smi $fields }
+    if ($p) {
+      $x.gpuUtil = N $p[0]; $x.smClock = N $p[1]; $x.powerW = N $p[2]; $x.tempC = N $p[3]
+      $x.streaming = $(if ((N $p[4]) -gt 0) { 1 } else { 0 })
+      if ($null -eq $smMax) { $smMax = N $p[5] }
+      if ($hasThrottle -and $p.Count -gt 6) { $throttle[$p[6]] = $true }
+    }
+    $e = Smi-Enc; if ($e) { $x.encUtil = $e.enc }
+    try { $x.cpu = [int](Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime } catch { }
+    try {
+      $st = Get-NetAdapterStatistics -Name $n.name; $now = Get-Date
+      if ($prev) { $dt = ($now - $prevAt).TotalSeconds; if ($dt -gt 0) { $x.rxMbps = [Math]::Round((($st.ReceivedBytes - $prev.ReceivedBytes) * 8 / 1000000) / $dt, 1); $x.txMbps = [Math]::Round((($st.SentBytes - $prev.SentBytes) * 8 / 1000000) / $dt, 1) } }
+      $prev = $st; $prevAt = $now
+    } catch { }
+    if ($ping) { try { $r = $ping.Send($gw, 800); if ($r.Status -eq 'Success') { $x.pingMs = [int]$r.RoundtripTime } else { $lost++ } } catch { $lost++ } }
+    foreach ($k in @($S.Keys)) { if ($null -ne $x[$k]) { $S[$k] += $x[$k] } }   # a copy of the keys: a hashtable can't be changed while it is walked
+    $x.t = $i
+    $batch += $x
+    if ($batch.Count -ge 2) { try { [void](Post 'live' @{ samples = $batch } 10) } catch { }; $batch = @() }
+    $script:lastBeat = Get-Date
+    $left = 1000 - ((Get-Date) - $tick).TotalMilliseconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]$left) }
+  }
+  if ($batch.Count) { try { [void](Post 'live' @{ samples = $batch } 10) } catch { } }
+  $data = @{ at = (Get-Date).ToUniversalTime().ToString('s') + 'Z'; seconds = $sec; series = $S; throttle = @($throttle.Keys); smClockMax = $smMax; pingLost = $lost; nic = $n.name }
+  [void](Send-Report $c.id 'record' $data)
+  return @($true, ('Recorded {0} seconds. Open the Diagnose tab to read the result.' -f $sec))
+}
+
+function Do-Logs($c) {
+  $n = [int]$c.args.lines
+  $d = @{ at = (Get-Date).ToUniversalTime().ToString('s') + 'Z'; sunshine = (Tail-Lines $SunshineLog $n 150000); agent = (Tail-Lines $Log 200 30000) }
+  [void](Send-Report $c.id 'logs' $d)
+  return @($true, ('Collected {0} Sunshine log lines and the agent log.' -f @($d.sunshine).Count))
+}
+
+# ---------------------------------------------------------------------------
+# Tuning actions (each reversible, each logged by GGGH)
+# ---------------------------------------------------------------------------
+function Do-PowerPlan($plan) {
+  $prevFile = Join-Path $Dir 'power-prev.txt'
+  $cur = ''; if (((& powercfg /getactivescheme) | Out-String) -match '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})') { $cur = $Matches[1].ToLower() }
+  if ($plan -eq 'restore') {
+    $back = '381b4222-f694-41f0-9685-ff5bb260df2e'
+    if (Test-Path $prevFile) { $back = (Get-Content $prevFile -Raw).Trim() }
+    & powercfg /setactive $back | Out-Null
+    return @(($LASTEXITCODE -eq 0), ('Power plan put back ({0}).' -f $back))
+  }
+  if ($cur -eq $HighPerf) { return @($true, 'The power plan is already High performance.') }
+  if ($cur) { Set-Content -Path $prevFile -Value $cur -Encoding ASCII }
+  & powercfg /setactive $HighPerf 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    $dup = (& powercfg -duplicatescheme $HighPerf) | Out-String
+    if ($dup -match '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})') { & powercfg /setactive $Matches[1] | Out-Null }
+  }
+  return @(($LASTEXITCODE -eq 0), 'Power plan set to High performance. Use "Put it back" to undo.')
+}
+
+function Do-GpuClocks($action) {
+  if ($action -eq 'reset') { $o = (& nvidia-smi -rgc 2>&1) | Out-String; return @(($LASTEXITCODE -eq 0), ('GPU clocks unlocked. ' + $o.Trim())) }
+  $p = Smi 'clocks.max.sm'
+  if (-not $p) { return @($false, 'Could not read the GPU maximum clock.') }
+  $max = [int](N $p[0]); $min = [int]($max * 0.85)
+  $o = (& nvidia-smi -lgc ('{0},{1}' -f $min, $max) 2>&1) | Out-String
+  return @(($LASTEXITCODE -eq 0), ('GPU clocks locked to {0}-{1} MHz until the PC restarts (or you unlock them). {2}' -f $min, $max, $o.Trim()))
+}
+
+function Do-SunshineConfig($key, $value) {
+  if (-not (Test-Path $SunshineConf)) { return @($false, 'Sunshine config file not found.') }
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  Copy-Item $SunshineConf ($SunshineConf + '.gggh-' + $stamp) -Force
+  Get-ChildItem -Path ($SunshineConf + '.gggh-*') | Sort-Object Name -Descending | Select-Object -Skip 5 | Remove-Item -Force -ErrorAction SilentlyContinue
+  $lines = @(Get-Content $SunshineConf -ErrorAction SilentlyContinue)
+  $out = @(); $found = $false
+  foreach ($l in $lines) {
+    if ($l -match ('^\s*' + [regex]::Escape($key) + '\s*=')) { if (-not $found) { $out += ('{0} = {1}' -f $key, $value); $found = $true } } else { $out += $l }
+  }
+  if (-not $found) { $out += ('{0} = {1}' -f $key, $value) }
+  [IO.File]::WriteAllLines($SunshineConf, [string[]]$out, (New-Object Text.UTF8Encoding $false))
+  Restart-Service -Name 'SunshineService' -Force
+  return @($true, ('Sunshine setting {0} = {1} saved and Sunshine restarted. The previous config is kept; "Restore previous Sunshine config" undoes it.' -f $key, $value))
+}
+
+function Do-SunshineConfigRestore {
+  $b = Get-ChildItem -Path ($SunshineConf + '.gggh-*') -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+  if (-not $b) { return @($false, 'There is no earlier Sunshine config saved by GGGH.') }
+  Copy-Item $b.FullName $SunshineConf -Force
+  Remove-Item $b.FullName -Force
+  Restart-Service -Name 'SunshineService' -Force
+  return @($true, 'The previous Sunshine config is back and Sunshine restarted.')
 }
 
 # Curl.exe (in every Windows 11) talks to Sunshine's self-signed HTTPS; the login goes in on stdin, not the command line.
@@ -181,6 +462,7 @@ function Do-Pin($pin, $name) {
   $tmp = Join-Path $Dir 'pin.json'
   $last = 'Sunshine did not answer.'
   while ((Get-Date) -lt $deadline) {
+    Beat
     try {
       $pending = Sunshine-Api 'GET' '/api/pin' $null
       $body = @{ pin = $pin; name = $name }
@@ -216,6 +498,7 @@ function Do-Display($c, $action) {
   Start-ScheduledTask -TaskName 'GGGH Display' | Out-Null
   for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 500
+    Beat
     $rp = Join-Path $DispDir 'result.json'
     if (Test-Path $rp) {
       try { $r = Get-Content $rp -Raw | ConvertFrom-Json; if ($r.id -eq $c.id) { return @([bool]$r.ok, [string]$r.message) } } catch { }
@@ -228,10 +511,14 @@ function Do-Script($text) {
   $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
   $o = Join-Path $Dir 'script.out'; $e = Join-Path $Dir 'script.err'
   $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $enc) -RedirectStandardOutput $o -RedirectStandardError $e -PassThru -WindowStyle Hidden
-  if (-not $p.WaitForExit(60000)) { try { $p.Kill() } catch { }; return @($false, 'The script ran for over 60 seconds and was stopped.') }
+  $t0 = Get-Date
+  while (-not $p.WaitForExit(3000)) {
+    Beat
+    if (((Get-Date) - $t0).TotalSeconds -gt 60) { try { $p.Kill() } catch { }; return @($false, 'The script ran for over 60 seconds and was stopped.') }
+  }
   $out = (Get-Content $o -Raw -ErrorAction SilentlyContinue) + (Get-Content $e -Raw -ErrorAction SilentlyContinue)
   Remove-Item $o, $e -Force -ErrorAction SilentlyContinue
-  if ($out.Length -gt 3500) { $out = $out.Substring(0, 3500) + ' …(cut)' }
+  if ($out.Length -gt 3500) { $out = $out.Substring(0, 3500) + ' ...(cut)' }
   return @(($p.ExitCode -eq 0), ('Exit code {0}. {1}' -f $p.ExitCode, $out))
 }
 
@@ -242,8 +529,15 @@ function Run-Command($c) {
       'refresh' { Report $c.id $true 'Status refreshed.' }
       'sunshine-restart' { Restart-Service -Name 'SunshineService' -Force; Report $c.id $true 'Sunshine restarted.' }
       'sunshine-pin' { $r = Do-Pin ([string]$c.args.pin) ([string]$c.args.name); Report $c.id $r[0] $r[1] }
+      'sunshine-config' { $r = Do-SunshineConfig ([string]$c.args.key) ([string]$c.args.value); Report $c.id $r[0] $r[1] }
+      'sunshine-config-restore' { $r = Do-SunshineConfigRestore; Report $c.id $r[0] $r[1] }
       'display-set' { $r = Do-Display $c 'set'; Report $c.id $r[0] $r[1] }
       'display-restore' { $r = Do-Display $c 'restore'; Report $c.id $r[0] $r[1] }
+      'diagnose' { $r = Do-Diagnose $c; Report $c.id $r[0] $r[1] }
+      'record' { $r = Do-Record $c; Report $c.id $r[0] $r[1] }
+      'logs' { $r = Do-Logs $c; Report $c.id $r[0] $r[1] }
+      'power-plan' { $r = Do-PowerPlan ([string]$c.args.plan); Report $c.id $r[0] $r[1] }
+      'gpu-clocks' { $r = Do-GpuClocks ([string]$c.args.action); Report $c.id $r[0] $r[1] }
       'script' { $r = Do-Script ([string]$c.args.script); Report $c.id $r[0] $r[1] }
       'sleep' { Report $c.id $true 'Going to sleep.'; Start-Sleep -Seconds 2; Start-Process -FilePath 'rundll32.exe' -ArgumentList 'powrprof.dll,SetSuspendState 0,1,0' }
       'restart' { Report $c.id $true 'Restarting.'; & shutdown.exe /r /t 5 /c 'Restart requested from GGGH' }
@@ -253,6 +547,45 @@ function Run-Command($c) {
   } catch { Report $c.id $false ('Failed: ' + $_.Exception.Message) }
 }
 
+# ---------------------------------------------------------------------------
+# Updating itself. GGGH says which file differs and what its SHA-256 should be.
+# Safety: the hash must match, the new file must PARSE, the old one is kept as
+# .bak, and gggh-boot.ps1 puts it back if the new one keeps crashing.
+# ---------------------------------------------------------------------------
+function Try-Update($list) {
+  $triedFile = Join-Path $Dir 'update.tried'
+  $changedAgent = $false; $changedBoot = $false
+  foreach ($u in @($list)) {
+    $name = [string]$u.file; $sha = ([string]$u.sha256).ToLower()
+    if ($name -ne 'agent' -and $name -ne 'boot') { continue }
+    if (Test-Path $triedFile) {
+      $t = (Get-Content $triedFile -Raw).Trim() -split '\|'
+      if ($t[0] -eq $sha -and ((Get-Date) - [datetime]::FromBinary([int64]$t[1])).TotalHours -lt 6) { continue }
+    }
+    $target = $(if ($name -eq 'boot') { $BootFile } else { $AgentFile })
+    $tmp = $target + '.new'
+    try {
+      Set-Content -Path $triedFile -Value ('{0}|{1}' -f $sha, (Get-Date).ToBinary()) -Encoding ASCII
+      Invoke-WebRequest -UseBasicParsing -Uri ($cfg.api + '/local-agent/' + $name + '.ps1') -OutFile $tmp -TimeoutSec 60
+      if ((Hash-Of $tmp) -ne $sha) { Log ('update ' + $name + ': the download did not match its fingerprint; ignored'); Remove-Item $tmp -Force -ErrorAction SilentlyContinue; continue }
+      try { [void][scriptblock]::Create((Get-Content $tmp -Raw)) } catch { Log ('update ' + $name + ': the new file does not parse; ignored'); Remove-Item $tmp -Force -ErrorAction SilentlyContinue; continue }
+      Copy-Item $target ($target + '.bak') -Force
+      Move-Item $tmp $target -Force
+      Set-Content -Path (Join-Path $Dir 'update.pending') -Value $sha -Encoding ASCII
+      Log ('updated ' + $name)
+      if ($name -eq 'agent') { $changedAgent = $true } else { $changedBoot = $true }
+    } catch { Log ('update ' + $name + ' failed: ' + $_.Exception.Message); Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+  }
+  if ($changedBoot) {
+    # The running wrapper is the old one: restart the whole task so the new wrapper (and agent) take over.
+    Log 'restarting to use the new wrapper'
+    Stop-ScheduledTask -TaskName 'GGGH Agent'
+    Start-ScheduledTask -TaskName 'GGGH Agent'
+    exit 0
+  }
+  if ($changedAgent) { Log 'restarting to use the new agent'; exit 0 }
+}
+
 Log ('agent ' + $AgentVersion + ' starting')
 $fails = 0
 while ($true) {
@@ -260,6 +593,9 @@ while ($true) {
   try {
     $r = Post 'poll' (Get-Status) 45
     $fails = 0
+    $pending = Join-Path $Dir 'update.pending'
+    if (Test-Path $pending) { Remove-Item $pending -Force -ErrorAction SilentlyContinue }
+    if (@($r.update).Count) { Try-Update $r.update }
     foreach ($c in @($r.commands)) { Run-Command $c }
     if (((Get-Date) - $t0).TotalSeconds -lt 1.5) { Start-Sleep -Seconds 2 }
   } catch {
@@ -268,6 +604,31 @@ while ($true) {
     Log ('poll failed ({0}): {1}' -f $code, $_.Exception.Message)
     if ($code -eq 401) { Start-Sleep -Seconds 60 } else { Start-Sleep -Seconds ([Math]::Min(60, 3 * $fails)) }
   }
+}
+`;
+
+export const BOOT_PS1 = String.raw`# GGGH agent wrapper: keeps the agent running, and puts the previous version back if a fresh update keeps crashing.
+$Dir = Join-Path $env:ProgramData 'GGGH'
+$Agent = Join-Path $Dir 'gggh-agent.ps1'
+$Bak = $Agent + '.bak'
+$Pending = Join-Path $Dir 'update.pending'
+$Log = Join-Path $Dir 'agent.log'
+function Log($m) { try { Add-Content -Path $Log -Value ('{0} boot: {1}' -f (Get-Date -Format 's'), $m) } catch { } }
+$fast = 0
+while ($true) {
+  $t0 = Get-Date
+  try {
+    $p = Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $Agent) -WindowStyle Hidden -PassThru -Wait
+  } catch { Log ('could not start the agent: ' + $_.Exception.Message) }
+  $ran = ((Get-Date) - $t0).TotalSeconds
+  if ($ran -lt 90) { $fast++ } else { $fast = 0 }
+  if ($fast -ge 3 -and (Test-Path $Pending) -and (Test-Path $Bak)) {
+    Copy-Item $Bak $Agent -Force
+    Remove-Item $Pending -Force -ErrorAction SilentlyContinue
+    Log 'the updated agent kept stopping: the previous version was put back'
+    $fast = 0
+  }
+  Start-Sleep -Seconds 5
 }
 `;
 
@@ -288,6 +649,7 @@ New-Item -ItemType Directory -Force -Path $Dir, $DispDir | Out-Null
 
 Write-Host '1/5 Downloading the GGGH agent...'
 Invoke-WebRequest -UseBasicParsing -Uri ($Api + '/local-agent/agent.ps1') -OutFile (Join-Path $Dir 'gggh-agent.ps1')
+Invoke-WebRequest -UseBasicParsing -Uri ($Api + '/local-agent/boot.ps1') -OutFile (Join-Path $Dir 'gggh-boot.ps1')
 
 $SunshineDir = Join-Path $env:ProgramFiles 'Sunshine'
 $SunshineExe = Join-Path $SunshineDir 'sunshine.exe'
@@ -324,7 +686,9 @@ try {
 
 Write-Host '5/5 Starting the agent...'
 $agentPath = Join-Path $Dir 'gggh-agent.ps1'
-$arg = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $agentPath
+$bootPath = Join-Path $Dir 'gggh-boot.ps1'
+$arg = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $bootPath   # the agent runs inside this small wrapper, which can roll back a bad update
+$dispArg = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Mode display' -f $agentPath
 $set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $agentTask = @{
   TaskName = 'GGGH Agent'; Force = $true; Settings = $set
@@ -336,7 +700,7 @@ Register-ScheduledTask @agentTask | Out-Null
 $dset = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $displayTask = @{
   TaskName = 'GGGH Display'; Force = $true; Settings = $dset
-  Action = (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ($arg + ' -Mode display'))
+  Action = (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $dispArg)
   Principal = (New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited)
 }
 Register-ScheduledTask @displayTask | Out-Null
@@ -345,6 +709,12 @@ Start-ScheduledTask -TaskName 'GGGH Agent'
 
 Write-Host ''
 Write-Host 'Done. Go back to GGGH: this PC should show as online within a few seconds.' -ForegroundColor Green
+Write-Host 'The agent keeps itself up to date from GGGH.'
 Write-Host ('Sunshine admin page (on this PC): https://localhost:47990 (user name: {0}; the password is saved in the agent file)' -f $user)
 Write-Host 'For waking this PC from sleep, use a wired network connection.'
 `;
+
+const sha256 = (s: string) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
+/** What GGGH tells agents to compare themselves against (their files are the same text, byte for byte). */
+export const AGENT_SHA256 = sha256(AGENT_PS1);
+export const BOOT_SHA256 = sha256(BOOT_PS1);
