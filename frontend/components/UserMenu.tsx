@@ -59,20 +59,23 @@ export default function UserMenu() {
   };
 
   return (
-    <div className="flex items-center gap-3 flex-shrink-0 min-w-0">
-      {/* "title" shows the full name/email on hover when it's been truncated */}
+    // May shrink (no flex-shrink-0): when the header is tight the name gets
+    // the "…", and Sign out stays on screen.
+    <div className="flex items-center gap-3 min-w-0">
+      {/* "title" shows the full name/email on hover when it's been truncated.
+          Hidden on lg/xl screens, where the page links need the room. */}
       <span
-        className="hidden sm:inline-flex lg:hidden xl:inline-flex items-center gap-2 min-w-0 text-[0.72rem] uppercase tracking-label text-slate-300"
+        className="hidden sm:inline-flex lg:hidden 2xl:inline-flex items-center gap-2 min-w-0 text-[0.72rem] uppercase tracking-label text-slate-300"
         title={user.email}
       >
         <span className="w-1.5 h-1.5 rounded-full bg-neon-lime shadow-[0_0_6px_rgba(143,214,148,0.8)] flex-shrink-0" />
         {/* "truncate" = cut off long text with "…"; max-w stops it pushing the nav */}
-        <span className="truncate max-w-[10rem] lg:max-w-[14rem]">{name}</span>
+        <span className="truncate min-w-0 max-w-[10rem] lg:max-w-[14rem]">{name}</span>
       </span>
       <button
         type="button"
         onClick={handleSignOut}
-        className="text-[0.72rem] uppercase tracking-label text-slate-400 hover:text-neon-pink border border-white/10 hover:border-neon-pink/40 rounded-sm px-2 py-0.5 transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-1 focus-visible:ring-neon-pink/60"
+        className="flex-shrink-0 text-[0.72rem] uppercase tracking-label text-slate-400 hover:text-neon-pink border border-white/10 hover:border-neon-pink/40 rounded-sm px-2 py-0.5 transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-1 focus-visible:ring-neon-pink/60"
       >
         Sign out
       </button>

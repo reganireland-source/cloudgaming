@@ -7,7 +7,8 @@
  * frontend/components/NavLinks.tsx — THE PAGE LINKS IN THE HEADER
  * ============================================================================
  *
- * Shows Dashboard / Machines / Performance / ... and highlights (cyan text
+ * Shows Dashboard / Machines / Performance / ... (plus a Rocjob ↗ link to
+ * the public game page) and highlights (cyan text
  * + a glowing underline) whichever page you're currently on.
  * Used by app/layout.tsx.
  * ============================================================================
@@ -32,6 +33,9 @@ const LINKS = [
   { href: '/map', label: 'Map' },
   { href: '/settings', label: 'Config' },
 ];
+// Not an app page: the public Rocjob game page (public/rocjob/, no sign-in).
+// A plain <a> in a new tab — <Link> only knows the app's own pages.
+const ROCJOB = { href: '/rocjob', label: 'Rocjob' };
 
 export default function NavLinks() {
   // A React HOOK (functions starting with "use" are hooks). When the URL
@@ -73,6 +77,14 @@ export default function NavLinks() {
             </Link>
           );
         })}
+        <a
+          href={ROCJOB.href}
+          target="_blank"
+          rel="noopener"
+          className="px-2 xl:px-3 h-12 inline-flex items-center gap-1 text-[0.72rem] uppercase tracking-label whitespace-nowrap text-neon-amber/80 hover:text-neon-amber transition-colors"
+        >
+          {ROCJOB.label}<span aria-hidden>↗</span>
+        </a>
       </div>
 
       {/* ---- Small screens: current page name + ☰ menu button ---- */}
@@ -103,6 +115,9 @@ export default function NavLinks() {
                 {isActive(href) ? '▸ ' : ''}{label}
               </Link>
             ))}
+            <a href={ROCJOB.href} target="_blank" rel="noopener" className="px-4 py-3.5 text-sm uppercase tracking-label bg-cyber-darker text-neon-amber/90">
+              {ROCJOB.label} <span aria-hidden>↗</span>
+            </a>
           </nav>
         </div>
       )}
