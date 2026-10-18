@@ -888,25 +888,63 @@ Write-Host 'For waking this PC from sleep, use a wired network connection.'
 
 export const VDISPLAY_PS1 = String.raw`# GGGH: install a virtual display on this PC (for Headless / Gaming mode). Run in an ELEVATED PowerShell.
 $ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Host 'Please run this in an elevated PowerShell: right-click Start, then "Terminal (Admin)".' -ForegroundColor Yellow; return }
 $re = 'Virtual|MttVDD|IddSample|IDD|Indirect|Parsec'
 function Has-Virtual { return [bool](@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and $_.FriendlyName -match $re }).Count) }
 function Show-Devices { Write-Host 'Display devices Windows lists:'; Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ('  {0} [{1}]' -f $_.FriendlyName, $_.Status) } }
 if (Has-Virtual) { Write-Host 'A virtual display is already installed. Nothing to do.' -ForegroundColor Green; Show-Devices; return }
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-  Write-Host 'winget was not found. Install "App Installer" from the Microsoft Store, or install the Virtual Display Driver by hand:' -ForegroundColor Yellow
-  Write-Host '  https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
-  return
+
+$tmp = Join-Path $env:TEMP ('gggh-vdd-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+try {
+  Write-Host '1/4 Downloading the tool that adds the driver (NefCon)...'
+  $nefZip = Join-Path $tmp 'nefcon.zip'
+  Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/nefarius/nefcon/releases/download/v1.14.0/nefcon_v1.14.0.zip' -OutFile $nefZip
+  Expand-Archive -Path $nefZip -DestinationPath (Join-Path $tmp 'nefcon') -Force
+  $nef = Get-ChildItem -Path (Join-Path $tmp 'nefcon') -Recurse -Filter 'nefconw.exe' | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+  if (-not $nef) { throw 'nefconw.exe was not in the NefCon download.' }
+
+  Write-Host '2/4 Finding the latest Virtual Display Driver release...'
+  $rel = Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/VirtualDrivers/Virtual-Display-Driver/releases/latest' -Headers @{ 'User-Agent' = 'gggh' }
+  $inf = $null
+  foreach ($a in @($rel.assets | Where-Object { $_.name -match '\.zip$' -and $_.name -notmatch '(?i)arm' })) {
+    $z = Join-Path $tmp ('asset-' + $a.id + '.zip'); $d = Join-Path $tmp ('asset-' + $a.id)
+    Write-Host ('   trying ' + $a.name)
+    Invoke-WebRequest -UseBasicParsing -Uri $a.browser_download_url -OutFile $z
+    Expand-Archive -Path $z -DestinationPath $d -Force
+    $inf = Get-ChildItem -Path $d -Recurse -Filter 'MttVDD.inf' | Select-Object -First 1
+    if ($inf) { break }
+  }
+  if (-not $inf) { throw 'No driver (MttVDD.inf) was found in the latest release downloads.' }
+
+  Write-Host '3/4 Trusting the driver publisher and adding the driver...'
+  $cat = Get-ChildItem -Path $inf.DirectoryName -Filter '*.cat' | Select-Object -First 1
+  if ($cat) {
+    $cert = (Get-AuthenticodeSignature -FilePath $cat.FullName).SignerCertificate
+    if ($cert) {
+      $cer = Join-Path $tmp 'publisher.cer'
+      [IO.File]::WriteAllBytes($cer, $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+      Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPublisher' | Out-Null
+    }
+  }
+  $class = '4d36e968-e325-11ce-bfc1-08002be10318'
+  & $nef.FullName --create-device-node --hardware-id 'Root\MttVDD' --class-name 'Display' --class-guid $class
+  & $nef.FullName --install-driver --inf-path $inf.FullName
+  Start-Sleep -Seconds 4
+  Write-Host '4/4 Checking...'
+} catch {
+  Write-Host ('Something went wrong: ' + $_.Exception.Message) -ForegroundColor Yellow
+} finally {
+  Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
-Write-Host 'Installing the Virtual Display Driver (Windows may ask you to trust the driver publisher)...'
-& winget install --id VirtualDrivers.Virtual-Display-Driver -e --silent --accept-package-agreements --accept-source-agreements
-Start-Sleep -Seconds 5
+Write-Host ''
 if (Has-Virtual) {
   Write-Host 'Done. The virtual display is installed; GGGH will see it within a few minutes (press Refresh on the PC card).' -ForegroundColor Green
-  Write-Host 'Tip: its resolution list is in the driver''s own settings (vdd_settings.xml). Add your TV and screen sizes there if Headless says a mode is missing.'
+  Write-Host 'Its list of resolutions is in C:\VirtualDisplayDriver\vdd_settings.xml. Add your TV and screen sizes there if Headless says a mode is missing.'
 } else {
-  Write-Host 'The virtual display did not show up. Install it by hand from https://github.com/VirtualDrivers/Virtual-Display-Driver/releases and restart the PC, then press Refresh in GGGH.' -ForegroundColor Yellow
+  Write-Host 'The virtual display did not show up. Copy everything above and paste it to Claude. By hand: github.com/VirtualDrivers/Virtual-Display-Driver (Virtual Driver Control, then click Install).' -ForegroundColor Yellow
 }
 Show-Devices
 `;
