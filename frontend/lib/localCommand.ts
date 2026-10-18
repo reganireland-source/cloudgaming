@@ -197,3 +197,19 @@ export function buildCheckScript(host: string): string {
     "echo \"Next: stream with the performance overlay on (the launcher command has an option for it) and note the decode time and dropped frames.\""
   ].join('\n') + '\n';
 }
+
+/**
+ * One paste into Terminal that saves a script as a file and runs it. A file
+ * made in Terminal isn't quarantined, so it runs where a downloaded
+ * .command file is blocked by macOS. Later runs: the saved path.
+ */
+export function saveAndRunCommand(fileName: string, script: string): string {
+  const safe = fileName.replace(/[^\w.-]+/g, '-').toLowerCase();
+  const path = `$HOME/gggh/${safe}`;
+  return [
+    `mkdir -p "$HOME/gggh" && cat > "${path}" <<'GGGH_SCRIPT_END'`,
+    script.replace(/\n$/, ''),
+    'GGGH_SCRIPT_END',
+    `chmod +x "${path}" && echo "Saved. Next time, just run: ${path}" && "${path}"`,
+  ].join('\n') + '\n';
+}

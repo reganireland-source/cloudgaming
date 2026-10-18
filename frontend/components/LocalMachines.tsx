@@ -21,7 +21,7 @@ import { apiFetch, type ApiError } from '@/lib/auth';
 import { SCREENS, detectScreen, fitResolution } from '@/lib/screens';
 import LocalDiagnose from '@/components/LocalDiagnose';
 import {
-  LOCAL_APPS, buildCheckScript, buildLaunchScript, localBitrateKbps, pairCommand, plainStreamCommand,
+  LOCAL_APPS, buildCheckScript, buildLaunchScript, saveAndRunCommand, localBitrateKbps, pairCommand, plainStreamCommand,
   type LocalCodec, type LocalLaunch, type LocalMode, type LocalOS,
 } from '@/lib/localCommand';
 
@@ -253,19 +253,6 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const download = () => {
-    const safe = `${m.name}-${app}`.replace(/[^\w.-]+/g, '-').toLowerCase();
-    const blob = new Blob([script], { type: 'text/plain' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `moonlight-${safe}.${os === 'macos' ? 'command' : 'sh'}`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  };
-  const downloadCheck = () => {
-    const blob = new Blob([buildCheckScript(host || '')], { type: 'text/plain' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `check-connection-to-${m.name.replace(/[^\w.-]+/g, '-').toLowerCase()}.${os === 'macos' ? 'command' : 'sh'}`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  };
   const sel = 'input-neon px-2 py-1 text-xs';
   if (err) return <p className="text-xs text-neon-amber">⚠ {err}</p>;
   if (!host || !launch) return <p className="text-xs text-slate-500">{host ? 'Loading…' : 'Waiting for the PC to report its address (it connects within a few seconds of the install command finishing).'}</p>;
@@ -310,15 +297,11 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
       {os === 'windows'
         ? <><CopyBox text={plainStreamCommand(launch)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and the Mirror / Headless switch are for the macOS and Linux command.)</p></>
         : <>
-          <CopyBox text={script} tall />
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="btn-neon text-xs" onClick={download}>⬇ Download launcher ({os === 'macos' ? '.command' : '.sh'})</button>
-            <span className="text-slate-500">{os === 'macos' ? 'First time: right-click → Open. ' : 'Run with: sh <file>. '}Streaming needs only the PC’s address, so it works even if GGGH is down (the screen matching just gets skipped).</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="btn-neon text-xs" onClick={downloadCheck}>⬇ Check my side of the connection ({os === 'macos' ? '.command' : '.sh'})</button>
-            <span className="text-slate-500">Laggy? This takes 20 seconds and says whether this computer reaches the PC over Wi-Fi, and whether pings are being lost.</span>
-          </div>
+          <p className="text-slate-300">Paste this into Terminal. It saves the launcher as a file on this computer and runs it. (A downloaded file is blocked by macOS, but one made in Terminal isn’t.)</p>
+          <CopyBox text={saveAndRunCommand(`moonlight-${m.name}-${app}.sh`, script)} tall />
+          <p className="text-slate-500">After that, start it any time with the path it prints. Streaming needs only the PC’s address, so it works even if GGGH is down (the screen steps just get skipped).</p>
+          <p className="text-slate-300 pt-1">Laggy? Check this computer’s side of the connection (20 seconds: Wi-Fi or cable, lost pings):</p>
+          <CopyBox text={saveAndRunCommand(`check-connection-to-${m.name}.sh`, buildCheckScript(host || ''))} />
           <p className="text-slate-500">The file holds a key that can only ask this PC to match its screen: it can’t switch it off or run anything. Keep it to yourself like a password.</p>
         </>}
     </div>
