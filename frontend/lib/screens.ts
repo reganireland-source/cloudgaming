@@ -78,7 +78,9 @@ export function detectScreen(): { w: number; h: number } | null {
   return { w: Math.max(a, b), h: Math.min(a, b) }; // landscape
 }
 
-export interface AttachedScreen { key: string; label: string; w: number; h: number; primary: boolean; current: boolean }
+/** Where a display sits on the desktop (browser pixels = points on a Mac, origin at the main display's top-left). */
+export interface ScreenTarget { left: number; top: number; width: number; height: number }
+export interface AttachedScreen { key: string; label: string; w: number; h: number; primary: boolean; current: boolean; target: ScreenTarget }
 
 /**
  * Every display attached to this computer, via the browser's Window
@@ -109,6 +111,7 @@ export async function detectAllScreens(ask: boolean): Promise<AttachedScreen[] |
         w: Math.max(a, b), h: Math.min(a, b),
         primary: !!sc.isPrimary,
         current: sc === details.currentScreen,
+        target: { left: Math.round(sc.left), top: Math.round(sc.top), width: Math.round(sc.width), height: Math.round(sc.height) },
       };
     });
   } catch {

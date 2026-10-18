@@ -19,6 +19,8 @@
  * screen to match / be put back, never power off or run anything.
  */
 
+import type { ScreenTarget } from '@/lib/screens';
+
 export type LocalMode = 'mirror' | 'headless';
 export type LocalOS = 'macos' | 'linux' | 'windows';
 export type LocalCodec = 'H.264' | 'HEVC' | 'AV1';
@@ -40,6 +42,8 @@ export interface LocalLaunch {
   mode: LocalMode;
   /** Moonlight's own overlay: decode time, dropped frames, network delay. The first thing to look at for lag. */
   overlay?: boolean;
+  /** macOS: open Moonlight on this display (the Terminal window is moved there first). */
+  target?: ScreenTarget | null;
   api: string;
   token: string;
 }
@@ -92,6 +96,31 @@ export function pairCommand(os: LocalOS, host: string, pin: string): string {
 export function broadcastFor(host: string): string | null {
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/);
   return m ? `${m[1]}.${m[2]}.${m[3]}.255` : null;
+}
+
+/**
+ * Moonlight has no option for which monitor to use: its window opens on the
+ * display where the program that started it is (the Terminal window). So on a
+ * Mac the script first moves that Terminal window onto the chosen display
+ * (Terminal.app and iTerm2 can be moved by script, without any permission
+ * prompt for the app itself), and moves it back when the stream ends.
+ * Defines tmove / tback; calls tmove.
+ */
+export function terminalMoveLines(t: ScreenTarget): string[] {
+  const l = Math.round(t.left) + 60, tp = Math.round(t.top) + 80;
+  return [
+    '',
+    '# Moonlight opens on the display where this Terminal window is, so put the Terminal on the chosen display first.',
+    'case "$TERM_PROGRAM" in Apple_Terminal) TAPP=Terminal; TWIN="front window";; iTerm.app) TAPP=iTerm2; TWIN="current window";; *) TAPP=;; esac',
+    'tmove() {',
+    '  [ -n "$TAPP" ] || { echo "Note: this Terminal can\'t be moved by script (use Terminal or iTerm2), so Moonlight opens on the display this window is on."; return; }',
+    '  OLDB=$(osascript -e "tell application \\"$TAPP\\" to get bounds of $TWIN" 2>/dev/null | tr -d \' \')',
+    `  osascript -e "tell application \\"$TAPP\\" to set bounds of $TWIN to {${l}, ${tp}, ${l + 640}, ${tp + 380}}" >/dev/null 2>&1 || echo "Note: could not move the Terminal window (is it full screen?), so Moonlight opens on its display."`,
+    '  sleep 1',
+    '}',
+    'tback() { [ -n "$OLDB" ] && osascript -e "tell application \\"$TAPP\\" to set bounds of $TWIN to {$OLDB}" >/dev/null 2>&1; }',
+    'tmove',
+  ];
 }
 
 export function buildLaunchScript(l: LocalLaunch): string {
@@ -159,7 +188,9 @@ export function buildLaunchScript(l: LocalLaunch): string {
     );
   }
 
+  if (l.os === 'macos' && l.target) lines.push(...terminalMoveLines(l.target));
   lines.push('', `${exe} ${streamArgs(l).join(' ')}`);
+  if (l.os === 'macos' && l.target) lines.push('tback');
   return lines.join('\n') + '\n';
 }
 

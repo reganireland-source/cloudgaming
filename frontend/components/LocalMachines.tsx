@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, type ApiError } from '@/lib/auth';
-import { SCREENS, detectScreen, fitResolution } from '@/lib/screens';
+import { SCREENS, detectScreen, detectAllScreens, canListScreens, fitResolution, type AttachedScreen } from '@/lib/screens';
 import LocalDiagnose from '@/components/LocalDiagnose';
 import {
   LOCAL_APPS, buildCheckScript, buildLaunchScript, saveAndRunCommand, localBitrateKbps, pairCommand, plainStreamCommand,
@@ -229,6 +229,10 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   useEffect(() => setOs(detectOS()), []);
   const [app, setApp] = useState(LOCAL_APPS[0]);
   const [screenId, setScreenId] = useState('this');
+  const [attached, setAttached] = useState<AttachedScreen[] | null>(null);
+  const [listTried, setListTried] = useState(false);
+  const findScreens = async () => { setListTried(true); setAttached(await detectAllScreens(true)); };
+  useEffect(() => { detectAllScreens(false).then((l) => l && setAttached(l)); }, []);
   const [thisScreen, setThisScreen] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => setThisScreen(detectScreen()), []);
   const [fps, setFps] = useState(60);
@@ -243,13 +247,14 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   };
   const [overlay, setOverlay] = useState(true);
 
-  const screen = screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 });
+  const picked = screenId.startsWith('attached:') ? attached?.find((x) => `attached:${x.key}` === screenId) : undefined;
+  const screen = picked || (screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 }));
   const res = fitResolution(screen, screen.w * screen.h, 3840, 2160);
   const host = info?.lanIp || m.lanIp;
   const mac = info?.mac || m.mac;
   const launch: LocalLaunch | null = info && host ? {
     os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
-    wake: wake && !!mac, mode, overlay, api: info.api, token: info.launcherToken,
+    wake: wake && !!mac, mode, overlay, target: picked?.target ?? null, api: info.api, token: info.launcherToken,
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -264,6 +269,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
         <label className="space-y-1"><span className="label">Your screen</span>
           <select className={`${sel} w-full`} value={screenId} onChange={(e) => setScreenId(e.target.value)}>
             <option value="this">This screen ({thisScreen ? `${thisScreen.w}×${thisScreen.h}` : '…'})</option>
+            {(attached || []).length > 0 && <optgroup label="Your displays">{(attached || []).map((x) => <option key={x.key} value={`attached:${x.key}`}>{x.label} ({x.w}×{x.h}){x.primary ? ' · main' : ''}</option>)}</optgroup>}
             {SCREENS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select></label>
         <label className="space-y-1"><span className="label">Frame rate</span>
@@ -293,6 +299,12 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
       {mode === 'headless' && os !== 'windows' && m.status?.display && !m.status.display.virtual && (
         <p className="text-neon-amber">⚠ This PC has no virtual display yet, so Headless can’t switch its screens off. Install one under Settings → Virtual display first (until then it streams as Mirror).{m.status.display.seen?.length ? ` Windows lists these display devices: ${m.status.display.seen.join(', ')}.` : ''}</p>
       )}
+      <p className="text-slate-500">
+        More than one monitor? Moonlight opens on the display where Terminal is, so pick the display you’ll play on: on a Mac (Terminal or iTerm2) the command moves the Terminal window there first, then moves it back.
+        {attached ? <> {attached.length} display{attached.length === 1 ? '' : 's'} found.</>
+          : canListScreens() ? <> <button type="button" className="text-neon-cyan hover:underline" onClick={findScreens}>Find my other displays</button>{listTried && ' (permission refused: allow “window management” for this site in the browser)'}</>
+          : <> This browser can only see its own screen; Chrome or Edge can list every display.</>}
+      </p>
       <p className="text-slate-500">Stream {res.w}×{res.h} at {fps} fps, about {Math.round(localBitrateKbps(res.w, res.h, fps) / 1000)} Mbit/s over your home network. Needs Moonlight installed and paired (Pair Moonlight above).</p>
       {os === 'windows'
         ? <><CopyBox text={plainStreamCommand(launch)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and the Mirror / Headless switch are for the macOS and Linux command.)</p></>

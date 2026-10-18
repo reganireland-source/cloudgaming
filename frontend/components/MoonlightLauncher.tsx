@@ -44,6 +44,7 @@ import { apiFetch, ApiError } from '@/lib/auth';
 import OperationConsole from './OperationConsole';
 import ThemedSelect from './ThemedSelect';
 import FriendlyErrorCard from './FriendlyErrorCard';
+import { saveAndRunCommand, terminalMoveLines } from '@/lib/localCommand';
 import { SCREENS, fitResolution, detectScreen, detectAllScreens, canListScreens, MAX_W, MAX_H, GRID_MAX, type AttachedScreen } from '@/lib/screens';
 
 type OS = 'windows' | 'macos' | 'linux';
@@ -192,6 +193,12 @@ export default function MoonlightLauncher({
     '--no-multi-controller',
   ].join(' '), [exe, host, app, os, p, fullscreen]);
 
+  // macOS with a chosen display: move the Terminal window there first (Moonlight opens where Terminal is), then stream.
+  const target = os === 'macos' && screenId.startsWith('attached:') ? attached?.find((x) => `attached:${x.key}` === screenId)?.target : undefined;
+  const macMoveCommand = useMemo(() => (target
+    ? saveAndRunCommand(`moonlight-${app}.sh`, ['#!/bin/bash', `# Gints Global Gaming Hubjob: stream "${app.replace(/["\r\n]/g, ' ')}" from ${host}`, ...terminalMoveLines(target), streamCommand, 'tback', ''].join('\n'))
+    : null), [target, app, host, streamCommand]);
+
   const pairCommand = pairing ? `${exe} pair ${pairing.host} --pin ${pairing.pin}` : '';
 
   const launcherFile = () => {
@@ -304,15 +311,16 @@ export default function MoonlightLauncher({
             {Math.abs(screen.w / screen.h - 1.543) < 0.008 && <> Using the whole screen puts the top strip behind the notch; pick “below the notch” if the menu bar of games gets hidden.</>}
           </p>
         )}
-        <CopyBox text={streamCommand} />
+        <CopyBox text={macMoveCommand || streamCommand} />
+        {macMoveCommand && <p className="text-[0.7rem] text-slate-500 leading-relaxed">Moonlight opens on the display where Terminal is, so this saves a small script under ~/gggh that moves the Terminal window onto the display you picked, streams, then moves it back (Terminal or iTerm2 only).</p>}
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={launcherFile} className="btn-neon-magenta text-xs">
-            ⬇ Download launcher ({os === 'windows' ? '.bat' : os === 'macos' ? '.command' : '.sh'})
-          </button>
+          {os !== 'macos' && <button type="button" onClick={launcherFile} className="btn-neon-magenta text-xs">
+            ⬇ Download launcher ({os === 'windows' ? '.bat' : '.sh'})
+          </button>}
         </div>
         <p className="text-[0.7rem] text-slate-500 leading-relaxed">
           {os === 'windows' && 'Double-click the .bat file, or paste the command into Command Prompt. '}
-          {os === 'macos' && 'Paste the command into Terminal, or double-click the .command file (first time: right-click → Open, or run "chmod +x" on it). '}
+          {os === 'macos' && 'Paste the command into Terminal (macOS blocks downloaded launcher files, so there is no download). '}
           {os === 'linux' && 'Paste the command into a terminal, or run: sh <file>.sh. Using the Flatpak? Replace "moonlight" with "flatpak run com.moonlight_stream.Moonlight". '}
           Settings match the machine&apos;s {PRESETS[quality] ? `"${quality}"` : ''} preset; the stream uses about {Math.round((p.bitrateKbps * 3600) / 8 / 1000 / 100) / 10} GB per hour, billed by the cloud as data out.
         </p>
