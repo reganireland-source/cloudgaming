@@ -220,7 +220,8 @@ p { margin: 0; }
 .shots { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
 .shot { margin: 0; background: var(--black); border: 2px solid var(--black); box-shadow: 0 0 0 2px var(--line); }
 .shot button { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
-.shot img { display: block; width: 100%; height: auto; aspect-ratio: 1600 / 865; object-fit: cover; }
+/* Keeps the top of each capture and trims the bottom strip, where the debug FPS readout sits. The bigger view shows the whole picture. */
+.shot img { display: block; width: 100%; height: auto; aspect-ratio: 1600 / 840; object-fit: cover; object-position: top; }
 .shot button:hover img { filter: brightness(1.08); }
 
 /* ---- Stages ---- */

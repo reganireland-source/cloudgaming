@@ -133,6 +133,16 @@ Move with the stick or keys, hit on the beat, grab, jump and use your special. T
 - 12_s11_p1.jpg | Lights on the Crowd: the hotel corridor
 - 13_s15_p9.jpg | Floods: the Rattlesnake arena
 - 14_s18_p1.jpg | Y2K: The Last Show
+- 15_chinatown-dragon-fight.jpg | Chinatown: the Dragon fight
+- 16_void-silhouettes-perfect.jpg | Void silhouettes: PERFECT, twice over
+- 17_lagoon-man-arena.jpg | The Lagoon Man arena
+- 18_mr-monolith-contract-boss.jpg | Mr Monolith, the contract boss
+- 19_tempo-drag-crowd-brawl.jpg | Tempo drag: the crowd brawl
+- 20_knockin-on-heavens-door-fest.jpg | Knockin' on Heaven's Door: the festival
+- 21_big-ace-sepia-showdown.jpg | Big Ace: the sepia showdown
+- 22_perfect-band-falls-duel.jpg | The Perfect Band Falls: the duel
+- 23_hotel-corridor-junket.jpg | The hotel corridor junket
+- 24_emerald-camp-fight.jpg | Emerald camp fight
 
 
 [Credits]
