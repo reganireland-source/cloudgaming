@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '4'
+$AgentVersion = '5'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -131,7 +131,7 @@ public static class Disp {
       $dm = New-Mode
       [void][Disp]::EnumDisplaySettings($dd.DeviceName, -1, [ref]$dm)
       $list += [pscustomobject]@{
-        name = $dd.DeviceName; desc = $dd.DeviceString
+        name = $dd.DeviceName; desc = $dd.DeviceString; devid = $dd.DeviceID
         attached = (($dd.StateFlags -band 1) -ne 0); primary = (($dd.StateFlags -band 4) -ne 0)
         x = $dm.dmPositionX; y = $dm.dmPositionY; w = $dm.dmPelsWidth; h = $dm.dmPelsHeight; f = $dm.dmDisplayFrequency
       }
@@ -155,7 +155,7 @@ public static class Disp {
   # Headless: the virtual display becomes the only screen, at the receiver's size.
   function Do-Headless($w, $h, $fps) {
     $screens = @(Get-Screens)
-    $v = $screens | Where-Object { $_.desc -match $VirtRe } | Select-Object -First 1
+    $v = $screens | Where-Object { $_.desc -match $VirtRe -or $_.devid -match 'ROOT.DISPLAY|MttVDD' } | Select-Object -First 1
     if (-not $v) { return @($false, 'This PC has no virtual display yet. Install one from GGGH (Settings, "Virtual display"), then try again.') }
     $others = @($screens | Where-Object { $_.name -ne $v.name -and $_.attached })
     if (-not (Test-Path $topoPath)) {
@@ -405,7 +405,7 @@ function Do-Diagnose($c) {
     $e = Smi-Enc; if ($e) { $d.gpu.utilEnc = $e.enc; $d.gpu.utilDec = $e.dec }
   }
   # Screens
-  try { $d.pnpDisplay = @(Get-PnpDevice -Class Display -ErrorAction Stop | ForEach-Object { @{ name = $_.FriendlyName; status = [string]$_.Status } }) } catch { }
+  try { $d.pnpDisplay = @(Get-PnpDevice -Class Display -ErrorAction Stop | ForEach-Object { @{ name = $_.FriendlyName; id = $_.InstanceId; status = [string]$_.Status } }) } catch { }
   try { $d.displays = @(Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution } | ForEach-Object { @{ name = $_.Name; w = [int]$_.CurrentHorizontalResolution; h = [int]$_.CurrentVerticalResolution; hz = [int]$_.CurrentRefreshRate } }) } catch { }
   try { $d.monitors = @(Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorBasicDisplayParams -ErrorAction Stop).Count } catch { }
   # Sunshine
@@ -617,8 +617,9 @@ function Get-VirtualInfo {
     $info = @{ virtual = $false; state = ''; seen = @() }
     try {
       $disp = @(Get-PnpDevice -Class Display -ErrorAction Stop)
-      $info.seen = @($disp | ForEach-Object { ('{0} [{1}]' -f $_.FriendlyName, $_.Status) } | Select-Object -First 8)
-      $v = @($disp | Where-Object { $_.FriendlyName -match $VirtRe })
+      $info.seen = @($disp | ForEach-Object { ('{0} [{1}]' -f $(if ($_.FriendlyName) { $_.FriendlyName } else { $_.InstanceId }), $_.Status) } | Select-Object -First 8)
+      # The driver's device can have no friendly name at all: a device that is not on the PCI bus (ROOT\DISPLAY) is the software one.
+      $v = @($disp | Where-Object { $_.InstanceId -like 'ROOT\DISPLAY*' -or $_.FriendlyName -match $VirtRe })
       if ($v.Count) {
         $ok = @($v | Where-Object { $_.Status -eq 'OK' })
         if ($ok.Count) { $info.virtual = $true; $info.state = 'OK' } else { $info.state = [string]$v[0].Status }
@@ -892,8 +893,8 @@ $ErrorActionPreference = 'Stop'
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Host 'Please run this in an elevated PowerShell: right-click Start, then "Terminal (Admin)".' -ForegroundColor Yellow; return }
 $re = 'Virtual|MttVDD|IddSample|IDD|Indirect|Parsec'
-function Has-Virtual { return [bool](@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and $_.FriendlyName -match $re }).Count) }
-function Show-Devices { Write-Host 'Display devices Windows lists:'; Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ('  {0} [{1}]' -f $_.FriendlyName, $_.Status) } }
+function Has-Virtual { return [bool](@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and ($_.InstanceId -like 'ROOT\DISPLAY*' -or $_.FriendlyName -match $re) }).Count) }
+function Show-Devices { Write-Host 'Display devices Windows lists:'; Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ('  {0} {1} [{2}]' -f $_.FriendlyName, $_.InstanceId, $_.Status) } }
 if (Has-Virtual) { Write-Host 'A virtual display is already installed. Nothing to do.' -ForegroundColor Green; Show-Devices; return }
 
 $tmp = Join-Path $env:TEMP ('gggh-vdd-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
