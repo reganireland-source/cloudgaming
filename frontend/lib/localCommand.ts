@@ -5,10 +5,13 @@
  * home network). On macOS / Linux it:
  *   1. wakes the PC if it's asleep (Wake-on-LAN, then waits for Sunshine),
  *   2. asks GGGH (through the agent) to set the PC up for the chosen mode:
- *        Mirror    the PC's own screens stay on, at their own resolution; the
- *                  desktop appears on this device (setup work, nothing fast).
- *        Headless  the PC's screens go off and a virtual display takes over at
- *                  THIS device's resolution and refresh rate (gaming);
+ *        Mirror    ("Control") the PC's own screens stay on, at their own
+ *                  resolution, and its sound keeps coming out of the PC's own
+ *                  speakers; the desktop appears on this device and this
+ *                  device is muted. For setup work, nothing fast.
+ *        Headless  the PC's screens go off, its speakers are muted, and a
+ *                  virtual display takes over at THIS device's resolution and
+ *                  refresh rate; the sound plays here (gaming);
  *   3. runs `moonlight stream` for the chosen app,
  *   4. puts the PC's screens back when the stream ends (headless only).
  * Streaming itself needs only the PC's address: if GGGH can't be reached the
@@ -40,6 +43,8 @@ export interface LocalLaunch {
   wake: boolean;
   /** mirror: PC screens stay as they are. headless: PC screens off, a virtual display at width x height. */
   mode: LocalMode;
+  /** Mirror on a Mac: mute this computer while streaming (the PC's own speakers play instead). */
+  muteHere?: boolean;
   /** Moonlight's own overlay: decode time, dropped frames, network delay. The first thing to look at for lag. */
   overlay?: boolean;
   /** macOS: open Moonlight on this display (the Terminal window is moved there first). */
@@ -78,6 +83,8 @@ function streamArgs(l: LocalLaunch): string[] {
     '--game-optimization',
     '--quit-after',
     '--no-multi-controller', // one controller on the PC: with several, one pad can show up twice
+    // Control (mirror): sound plays on the PC and the mouse suits desktop work. Headless: sound plays here only.
+    ...(l.mode === 'mirror' ? ['--audio-on-host', '--absolute-mouse'] : ['--no-audio-on-host']),
     ...(l.overlay ? ['--performance-overlay'] : []),
   ];
 }
@@ -188,6 +195,16 @@ export function buildLaunchScript(l: LocalLaunch): string {
     );
   }
 
+  if (l.os === 'macos' && l.mode === 'mirror' && l.muteHere) {
+    lines.push(
+      '',
+      '# Control mode: the PC plays its own sound, so keep this computer quiet (and put the sound back afterwards).',
+      `WASMUTED=$(osascript -e 'output muted of (get volume settings)' 2>/dev/null)`,
+      `osascript -e 'set volume output muted true' >/dev/null 2>&1`,
+      `unmute() { [ "$WASMUTED" = false ] && osascript -e 'set volume output muted false' >/dev/null 2>&1; }`,
+      'trap unmute EXIT',
+    );
+  }
   if (l.os === 'macos' && l.target) lines.push(...terminalMoveLines(l.target));
   lines.push('', `${exe} ${streamArgs(l).join(' ')}`);
   if (l.os === 'macos' && l.target) lines.push('tback');

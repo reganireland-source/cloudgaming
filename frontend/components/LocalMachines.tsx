@@ -246,6 +246,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
     apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { displayMode: v } }).catch(() => undefined);
   };
   const [overlay, setOverlay] = useState(true);
+  const [muteHere, setMuteHere] = useState(true);
 
   const picked = screenId.startsWith('attached:') ? attached?.find((x) => `attached:${x.key}` === screenId) : undefined;
   const screen = picked || (screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 }));
@@ -254,7 +255,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   const mac = info?.mac || m.mac;
   const launch: LocalLaunch | null = info && host ? {
     os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
-    wake: wake && !!mac, mode, overlay, target: picked?.target ?? null, api: info.api, token: info.launcherToken,
+    wake: wake && !!mac, mode, muteHere, overlay, target: picked?.target ?? null, api: info.api, token: info.launcherToken,
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -281,14 +282,15 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-slate-300">
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={fullscreen} onChange={(e) => setFullscreen(e.target.checked)} /> Full screen</label>
         <label className={`flex items-center gap-1.5 ${mac ? '' : 'opacity-50'}`} title={mac ? undefined : 'Needs the PC’s MAC address (Settings)'}><input type="checkbox" checked={wake && !!mac} disabled={!mac} onChange={(e) => setWake(e.target.checked)} /> Wake the PC first</label>
+        {mode === 'mirror' && os === 'macos' && <label className="flex items-center gap-1.5" title="The PC plays its own sound in Mirror mode; Moonlight still sends a copy here, so this computer is muted for the stream and un-muted afterwards"><input type="checkbox" checked={muteHere} onChange={(e) => setMuteHere(e.target.checked)} /> Mute this computer while streaming</label>}
         <label className="flex items-center gap-1.5" title="Moonlight draws decode time, dropped frames and network delay over the stream: the first thing to look at when it lags"><input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} /> Show Moonlight’s performance overlay</label>
         <label className="flex items-center gap-1.5">Run it on
           <select className={sel} value={os} onChange={(e) => setOs(e.target.value as LocalOS)}><option value="macos">macOS</option><option value="linux">Linux</option><option value="windows">Windows</option></select></label>
       </div>
       <div className={`grid sm:grid-cols-2 gap-3 ${os === 'windows' ? 'opacity-50' : ''}`}>
         {([
-          ['mirror', 'Mirror', 'The PC’s own screens stay on at their own resolution, and its desktop shows here too. For setting things up. Speed matters less.'],
-          ['headless', 'Headless (gaming)', 'The PC’s screens switch off and a virtual display takes over at this screen’s size and refresh rate, with the stream tuned for play. The screens come back when you stop.'],
+          ['mirror', 'Mirror (control)', 'The PC’s own screens stay on at their own resolution, its sound keeps playing from the PC’s own speakers, and its desktop shows here (this computer is muted). For setting things up. Speed matters less.'],
+          ['headless', 'Headless (gaming)', 'The PC’s screens switch off and a virtual display takes over at this screen’s size and refresh rate, with the stream tuned for play. The PC’s speakers are muted and the sound plays here. Everything comes back when you stop.'],
         ] as const).map(([v, title, text]) => (
           <label key={v} className={`flex items-start gap-2 rounded border p-3 cursor-pointer ${mode === v ? 'border-neon-cyan/60 bg-neon-cyan/5' : 'border-white/10 hover:border-white/25'}`}>
             <input type="radio" name={`mode-${m.id}`} className="mt-0.5" checked={mode === v} disabled={os === 'windows'} onChange={() => chooseMode(v)} />
