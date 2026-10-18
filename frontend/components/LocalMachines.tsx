@@ -299,6 +299,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
         : <>
           <p className="text-slate-300">Paste this into Terminal. It saves the launcher as a file on this computer and runs it. (A downloaded file is blocked by macOS, but one made in Terminal isn’t.)</p>
           <CopyBox text={saveAndRunCommand(`moonlight-${m.name}-${app}.sh`, script)} tall />
+          <details className="text-slate-500"><summary className="cursor-pointer">What does that command contain?</summary><div className="pt-2"><CopyBox text={script} tall /></div></details>
           <p className="text-slate-500">After that, start it any time with the path it prints. Streaming needs only the PC’s address, so it works even if GGGH is down (the screen steps just get skipped).</p>
           <p className="text-slate-300 pt-1">Laggy? Check this computer’s side of the connection (20 seconds: Wi-Fi or cable, lost pings):</p>
           <CopyBox text={saveAndRunCommand(`check-connection-to-${m.name}.sh`, buildCheckScript(host || ''))} />

@@ -198,18 +198,23 @@ export function buildCheckScript(host: string): string {
   ].join('\n') + '\n';
 }
 
+/** Base64 of the script's UTF-8 bytes (browser or node). */
+function b64(text: string): string {
+  if (typeof Buffer !== 'undefined') return Buffer.from(text, 'utf8').toString('base64');
+  let bin = '';
+  new TextEncoder().encode(text).forEach((b) => { bin += String.fromCharCode(b); });
+  return btoa(bin);
+}
+
 /**
- * One paste into Terminal that saves a script as a file and runs it. A file
- * made in Terminal isn't quarantined, so it runs where a downloaded
- * .command file is blocked by macOS. Later runs: the saved path.
+ * One line to paste into Terminal that saves a script as a file and runs it.
+ * A file made in Terminal isn't quarantined, so it runs where a downloaded
+ * .command file is blocked by macOS. The script travels as base64 on a single
+ * line, so zsh can't mangle it (quotes, `$`, pasted multi-line input).
+ * Later runs: the saved path.
  */
 export function saveAndRunCommand(fileName: string, script: string): string {
   const safe = fileName.replace(/[^\w.-]+/g, '-').toLowerCase();
-  const path = `$HOME/gggh/${safe}`;
-  return [
-    `mkdir -p "$HOME/gggh" && cat > "${path}" <<'GGGH_SCRIPT_END'`,
-    script.replace(/\n$/, ''),
-    'GGGH_SCRIPT_END',
-    `chmod +x "${path}" && echo "Saved. Next time, just run: ${path}" && "${path}"`,
-  ].join('\n') + '\n';
+  const path = `"$HOME/gggh/${safe}"`;
+  return `mkdir -p "$HOME/gggh" && echo '${b64(script)}' | openssl base64 -d -A > ${path} && chmod +x ${path} && echo "Saved. Next time, just run: $HOME/gggh/${safe}" && ${path}\n`;
 }
