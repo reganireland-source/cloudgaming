@@ -17,6 +17,7 @@
  *   POST   /:id/pair               Moonlight pairing → { commandId, pin, host }
  *   GET    /:id/reports            what the agent measured (?kind=diagnose|record|logs), newest first
  *   GET    /:id/reports/:rid       one report with its plain-English findings and a text version to paste
+ *   GET    /:id/telemetry?minutes=  trend-line samples + alerts, same shape as a cloud machine's (Performance page)
  *   GET    /:id/live?since=N       live samples while a recording runs
  *
  * The agent's own routes are public (token-checked) in localAgent.ts.
@@ -28,7 +29,7 @@ import { Router, Request, Response } from 'express';
 import { env } from '../../config/env';
 import {
   listLocalMachines, createLocalMachine, updateLocalMachine, deleteLocalMachine, rotateAgentToken,
-  launcherInfo, sendLocalCommand, getLocalCommand, recentLocalCommands, listReports, getReport, getLive,
+  launcherInfo, sendLocalCommand, getLocalCommand, recentLocalCommands, listReports, getReport, getLive, localTelemetry,
 } from '../../services/LocalMachineService';
 import { sendRouteError } from './machines';
 
@@ -109,6 +110,10 @@ router.get('/:id/reports', async (req: Request, res: Response) => {
 
 router.get('/:id/reports/:rid', async (req: Request, res: Response) => {
   try { noStore(res); res.json(await getReport(req.userId!, req.params.id, req.params.rid)); } catch (e) { sendRouteError(res, e, 'Failed to read the report'); }
+});
+
+router.get('/:id/telemetry', async (req: Request, res: Response) => {
+  try { noStore(res); res.json(await localTelemetry(req.userId!, req.params.id, Number(req.query.minutes) || 60)); } catch (e) { sendRouteError(res, e, 'Failed to read the PC\'s telemetry'); }
 });
 
 router.get('/:id/live', async (req: Request, res: Response) => {

@@ -249,6 +249,40 @@ export function updatesFor(st: any): Array<{ file: 'agent' | 'boot'; sha256: str
   return out;
 }
 
+const SAMPLE_EVERY_MS = 25_000;
+const SAMPLE_KEEP_MS = 25 * 3600_000;
+const lastSampleAt = new Map<string, number>();
+const numOr = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** The agent's status as one trend-line sample, in the shape the Performance page's telemetry panel reads. */
+export function sampleFromStatus(st: any): Record<string, unknown> {
+  const gpu = st?.gpu && typeof st.gpu === 'object' ? st.gpu : null;
+  const out: Record<string, unknown> = { t: Math.round(Date.now() / 1000) };
+  const c = numOr(st?.cpuPercent); if (c !== undefined) out.c = c;
+  const ram = numOr(st?.ramGb), free = numOr(st?.ramFreeGb);
+  if (ram !== undefined && free !== undefined) out.m = [Math.round((ram - free) * 10) / 10, ram];
+  const du = numOr(st?.diskUsedGb), dt = numOr(st?.diskTotalGb); if (du !== undefined && dt !== undefined) out.d = [du, dt];
+  const no = numOr(st?.txMbps), ni = numOr(st?.rxMbps); if (no !== undefined) out.no = no; if (ni !== undefined) out.ni = ni;
+  const up = numOr(st?.uptimeHours); if (up !== undefined) out.up = Math.round(up * 3600);
+  if (gpu) {
+    const g: Record<string, unknown> = {};
+    const pairs: Array<[string, unknown]> = [['u', gpu.util], ['tp', gpu.tempC], ['vu', gpu.vramUsedMb], ['vt', gpu.vramTotalMb], ['pw', gpu.powerW], ['pl', gpu.powerLimitW], ['es', gpu.encoders]];
+    for (const [k, v] of pairs) { const n = numOr(v); if (n !== undefined) g[k] = n; }
+    out.g = g;
+  }
+  return out;
+}
+
+async function recordSample(machineId: string, st: any) {
+  const now = Date.now();
+  if (now - (lastSampleAt.get(machineId) || 0) < SAMPLE_EVERY_MS) return;
+  lastSampleAt.set(machineId, now);
+  try {
+    await query('INSERT INTO local_samples (machine_id, data) VALUES ($1, $2)', [machineId, JSON.stringify(sampleFromStatus(st))]);
+    if (Math.random() < 0.02) await query('DELETE FROM local_samples WHERE machine_id = $1 AND at < $2', [machineId, new Date(now - SAMPLE_KEEP_MS)]);
+  } catch (e) { console.error('local sample not saved:', (e as Error).message); }
+}
+
 export async function agentPoll(token: string, report: any, holdMs = POLL_HOLD_MS, stepMs = 1500) {
   const m = await byToken(token, 'agent_token_hash');
   if (!m) return null;
@@ -260,6 +294,7 @@ export async function agentPoll(token: string, report: any, holdMs = POLL_HOLD_M
        lan_ip = COALESCE($3, lan_ip), mac_address = COALESCE($4, mac_address) WHERE id = $1`,
     [m.id, JSON.stringify(safe), cleanIp(st.lanIp), normalizeMac(st.mac)],
   );
+  await recordSample(m.id, safe);
   // Tidy up: commands nobody picked up, or that were picked up and never answered.
   await query(`UPDATE local_commands SET status = 'expired', finished_at = NOW() WHERE machine_id = $1 AND status = 'queued' AND created_at < $2`, [m.id, new Date(Date.now() - QUEUE_TTL_MS)]);
   await query(`UPDATE local_commands SET status = 'failed', result = 'The PC never answered.', finished_at = NOW() WHERE machine_id = $1 AND status = 'sent' AND sent_at < $2`, [m.id, new Date(Date.now() - SENT_TTL_MS)]);
@@ -389,4 +424,32 @@ export async function getLive(userId: string, id: string, since = 0) {
   const buf = live.get(id);
   if (!buf) return { samples: [], seq: 0, active: false };
   return { samples: buf.samples.filter((x) => x.seq > since), seq: buf.seq, active: Date.now() - buf.at < 8000 };
+}
+
+// ---------------------------------------------------------------------------
+// Trend lines for the Performance page (same shape as a cloud machine's telemetry)
+// ---------------------------------------------------------------------------
+
+export async function localTelemetry(userId: string, id: string, minutes = 60) {
+  const row = await owned(userId, id);
+  const mins = Math.min(Math.max(Math.round(minutes) || 60, 5), 1440);
+  const samples = (await query(
+    'SELECT data FROM local_samples WHERE machine_id = $1 AND at > $2 ORDER BY at ASC LIMIT 3000',
+    [id, new Date(Date.now() - mins * 60_000)],
+  )).rows.map((r) => r.data);
+  const latest = samples.length ? samples[samples.length - 1] : null;
+  const st = row.status || {};
+  const alerts: Array<{ level: 'critical' | 'warning' | 'info'; key: string; text: string }> = [];
+  const online = !!row.last_seen_at && Date.now() - new Date(row.last_seen_at).getTime() < ONLINE_WITHIN_MS;
+  if (online) {
+    const temp = numOr(st.gpu?.tempC);
+    if (temp !== undefined && temp >= 87) alerts.push({ level: 'critical', key: 'gpu-hot', text: `The GPU is at ${temp} °C and will slow itself down.` });
+    else if (temp !== undefined && temp >= 80) alerts.push({ level: 'warning', key: 'gpu-warm', text: `The GPU is running hot (${temp} °C).` });
+    if (st.wired === false) alerts.push({ level: 'warning', key: 'wifi', text: 'The PC is on Wi-Fi, the most common cause of stutter. Use a network cable.' });
+    if (st.sunshine && st.sunshine !== 'Running') alerts.push({ level: 'warning', key: 'sunshine', text: st.sunshine === 'NotInstalled' ? 'Sunshine is not installed on the PC.' : `Sunshine is ${String(st.sunshine).toLowerCase()}, so nobody can stream.` });
+    const ram = numOr(st.ramGb), free = numOr(st.ramFreeGb);
+    if (ram && free !== undefined && 1 - free / ram >= 0.92) alerts.push({ level: 'warning', key: 'ram', text: 'The PC is almost out of memory.' });
+  }
+  const note = online ? undefined : (row.last_seen_at ? 'The PC is off, asleep or cannot reach GGGH. The charts show its last readings.' : 'This PC has not connected to GGGH yet.');
+  return { samples, latest, alerts, readAt: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : null, note };
 }

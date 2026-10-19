@@ -100,14 +100,16 @@ function Tile({ label, value, sub, tone, children }: { label: string; value: str
   );
 }
 
-export default function TelemetryPanel({ machineId, status, compact = false }: { machineId: string; status: string; compact?: boolean }) {
+/** `basePath` points it at another source with the same shape (a local PC: /local-machines/:id). */
+export default function TelemetryPanel({ machineId, status, compact = false, basePath }: { machineId: string; status: string; compact?: boolean; basePath?: string }) {
+  const local = !!basePath;
   const [range, setRange] = useState(compact ? 60 : 15);
   const [data, setData] = useState<Telemetry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    try { setData(await apiFetch<Telemetry>(`/machines/${machineId}/telemetry?minutes=${range}`)); setError(null); }
+    try { setData(await apiFetch<Telemetry>(`${basePath || `/machines/${machineId}`}/telemetry?minutes=${range}`)); setError(null); }
     catch (e: any) { setError(e?.message || 'Couldn’t read telemetry.'); }
-  }, [machineId, range]);
+  }, [machineId, range, basePath]);
   useEffect(() => {
     load();
     if (status !== 'running') return;
@@ -126,7 +128,7 @@ export default function TelemetryPanel({ machineId, status, compact = false }: {
     const ram = s.m?.[1] ? s.m[0] / s.m[1] : 0, disk = s.d?.[1] ? s.d[0] / s.d[1] : 0;
     return (
       <div className={`grid gap-2 ${compact ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 md:grid-cols-4'}`}>
-        <Tile label="GPU load" value={g ? `${fmt(num(g.u))}%` : 'no GPU data'} sub={g ? `peak ${fmt(num(g.um))}% · ${g.ps || ''}${num(g.eu) != null ? ` · encoder ${fmt(num(g.eu))}%` : ''}` : 'driver not loaded yet?'}>
+        <Tile label="GPU load" value={g ? `${fmt(num(g.u))}%` : 'no GPU data'} sub={g ? (local ? (num(g.pw) != null ? `${fmt(num(g.pw))} W` : '') : `peak ${fmt(num(g.um))}% · ${g.ps || ''}${num(g.eu) != null ? ` · encoder ${fmt(num(g.eu))}%` : ''}`) : 'driver not loaded yet?'}>
           <Spark samples={samples} pick={(x) => num(x.g?.u)} unit="%" max={100} />
         </Tile>
         <Tile label="GPU temp" value={tp != null ? `${tp} °C` : '—'} tone={tp != null && tp >= 87 ? 'bad' : tp != null && tp >= 80 ? 'warn' : undefined}
@@ -143,12 +145,12 @@ export default function TelemetryPanel({ machineId, status, compact = false }: {
             <Spark samples={samples} pick={(x) => x.gf?.f ?? null} unit=" fps" />
           </Tile>
         ) : (
-          <Tile label="Stream encoder" value={es ? `${fmt(num(g?.ef))} fps` : 'not streaming'}
-            sub={es ? `${es} session${es === 1 ? '' : 's'} · ${fmt((num(g?.el) ?? 0) / 1000, 1)} ms encode · no game fps yet` : 'starts when Moonlight connects'}>
+          <Tile label="Stream encoder" value={es ? (num(g?.ef) != null ? `${fmt(num(g?.ef))} fps` : 'streaming') : 'not streaming'}
+            sub={es ? `${es} session${es === 1 ? '' : 's'}${local ? '' : ` · ${fmt((num(g?.el) ?? 0) / 1000, 1)} ms encode · no game fps yet`}` : 'starts when Moonlight connects'}>
             <Spark samples={samples} pick={(x) => (num(x.g?.es) ? num(x.g?.ef) : 0)} unit=" fps" />
           </Tile>
         )}
-        <Tile label="CPU" value={`${fmt(s.c ?? null)}%`} tone={(s.cm ?? 0) >= 97 ? 'warn' : undefined} sub={`peak ${fmt(s.cm ?? null)}% · load ${fmt(s.l ?? null, 1)}${s.ct != null ? ` · ${s.ct} °C` : ''}`}>
+        <Tile label="CPU" value={`${fmt(s.c ?? null)}%`} tone={(s.cm ?? 0) >= 97 ? 'warn' : undefined} sub={local ? '' : `peak ${fmt(s.cm ?? null)}% · load ${fmt(s.l ?? null, 1)}${s.ct != null ? ` · ${s.ct} °C` : ''}`}>
           <Spark samples={samples} pick={(x) => x.c ?? null} unit="%" max={100} />
         </Tile>
         <Tile label="RAM" value={s.m ? `${s.m[0]} / ${s.m[1]} GB` : '—'} tone={ram >= 0.92 ? 'warn' : undefined} sub={s.sw ? `swap ${s.sw} GB` : `${Math.round(ram * 100)}% used`}>
@@ -158,12 +160,12 @@ export default function TelemetryPanel({ machineId, status, compact = false }: {
           <Spark samples={samples} pick={(x) => x.no ?? null} unit=" Mbit/s" digits={1} />
         </Tile>
         <Tile label="Disk" value={s.d ? `${s.d[0].toFixed(0)} / ${s.d[1].toFixed(0)} GB` : '—'} tone={disk >= 0.9 ? 'warn' : undefined}
-          sub={`read ${fmt(s.dr ?? null, 1)} · write ${fmt(s.dw ?? null, 1)} MB/s`}>
-          <Spark samples={samples} pick={(x) => (x.dr ?? 0) + (x.dw ?? 0)} unit=" MB/s" digits={1} />
+          sub={local ? `${s.d ? Math.round((s.d[0] / s.d[1]) * 100) : 0}% used` : `read ${fmt(s.dr ?? null, 1)} · write ${fmt(s.dw ?? null, 1)} MB/s`}>
+          {local ? <Spark samples={samples} pick={(x) => x.d?.[0] ?? null} unit=" GB" max={s.d?.[1]} /> : <Spark samples={samples} pick={(x) => (x.dr ?? 0) + (x.dw ?? 0)} unit=" MB/s" digits={1} />}
         </Tile>
       </div>
     );
-  }, [s, g, samples, compact]);
+  }, [s, g, samples, compact, local]);
 
   if (!data && !error) return <p className="text-xs text-slate-500 animate-pulse">Reading telemetry…</p>;
   return (

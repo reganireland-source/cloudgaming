@@ -39,6 +39,11 @@ const STATUS_CLASS: Record<string, string> = {
   error: 'border-neon-pink/60 text-neon-pink', missing: 'border-neon-pink/60 text-neon-pink',
 };
 
+interface LocalPc {
+  id: string; name: string; lanIp: string | null; online: boolean; lastSeenAt: string | null;
+  status: { wired?: boolean; link?: string; sunshine?: string; agentVersion?: string; streaming?: boolean; display?: { mode: string; virtual: boolean } } | null;
+}
+
 function since(iso: string | null): string {
   if (!iso) return '—';
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -59,11 +64,13 @@ export default function PerformancePage() {
   const [metrics, setMetrics] = useState<Record<string, Metric | null>>({});
   const [me, setMe] = useState<{ lat: number; lng: number; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [locals, setLocals] = useState<LocalPc[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const [list, opts] = await Promise.all([apiFetch<Machine[]>('/machines'), apiFetch<Options>('/machines/options').catch(() => null)]);
+      const [list, opts, pcs] = await Promise.all([apiFetch<Machine[]>('/machines'), apiFetch<Options>('/machines/options').catch(() => null), apiFetch<LocalPc[]>('/local-machines').catch(() => [] as LocalPc[])]);
       setMachines(list);
+      setLocals(pcs);
       if (opts) {
         const map: Record<string, Region & { cloud: string }> = {};
         for (const p of opts.providers) for (const r of p.regions) map[`${p.provider}:${r.id}`] = { ...r, cloud: p.label };
@@ -123,7 +130,7 @@ export default function PerformancePage() {
 
       {!machines ? (
         <p className="font-mono text-sm text-neon-cyan animate-pulse">&gt; READING_MACHINES…</p>
-      ) : shown.length === 0 ? (
+      ) : shown.length === 0 && locals.length === 0 ? (
         <div className="rounded-lg border border-dashed border-white/15 p-6 text-sm text-slate-400">
           No machines yet. <Link href="/recommendations" className="text-neon-cyan hover:underline">Find the best region</Link> or <Link href="/machines" className="text-neon-cyan hover:underline">launch one</Link>.
         </div>
@@ -173,6 +180,32 @@ export default function PerformancePage() {
             })}
           </ul>
         </>
+      )}
+
+      {locals.length > 0 && (
+        <section aria-label="Your own PCs" className="space-y-3">
+          <h2 className="label">Your own PCs · at home, reported by the GGGH agent</h2>
+          <ul className="grid gap-3 grid-cols-[minmax(0,1fr)]">
+            {locals.map((pc) => (
+              <li key={pc.id} className="min-w-0 rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm text-slate-100 truncate">{pc.name}</p>
+                    <p className="text-[0.7rem] text-slate-500">Local PC · {pc.lanIp || 'address unknown'}{pc.status?.wired === false ? ' · Wi-Fi' : pc.status?.wired ? ' · wired' : ''}{pc.status?.link ? ` · ${pc.status.link}` : ''}</p>
+                  </div>
+                  <span className={`shrink-0 rounded border px-1.5 text-[0.7rem] uppercase tracking-label ${pc.online ? STATUS_CLASS.running : 'border-white/20 text-slate-400'}`}>{pc.online ? 'online' : 'offline'}</span>
+                </div>
+                <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <Stat label="Sunshine" value={pc.status?.sunshine === 'NotInstalled' ? 'not installed' : (pc.status?.sunshine || '—').toLowerCase()} />
+                  <Stat label="Screens" value={pc.status?.display ? (pc.status.display.mode === 'headless' ? 'headless' : 'mirror') : '—'} />
+                  <Stat label="Streaming" value={pc.online ? (pc.status?.streaming ? 'yes' : 'no') : '—'} />
+                  <Stat label="Last seen" value={pc.online ? 'now' : pc.lastSeenAt ? `${since(pc.lastSeenAt)} ago` : 'never'} />
+                </dl>
+                <TelemetryPanel machineId={pc.id} basePath={`/local-machines/${pc.id}`} status={pc.online ? 'running' : 'stopped'} compact />
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '5'
+$AgentVersion = '6'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -331,13 +331,26 @@ function Get-Status {
     $s.cpuPercent = [int](Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
   } catch { }
   try {
-    $q = & nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,encoder.stats.sessionCount,memory.used,memory.total,driver_version --format=csv,noheader,nounits 2>$null
+    $q = & nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,encoder.stats.sessionCount,memory.used,memory.total,driver_version,power.draw,power.limit --format=csv,noheader,nounits 2>$null
     if ($q) {
       $p = @(($q | Select-Object -First 1) -split ',\s*')
-      $s.gpu = @{ name = $p[0]; util = [int]$p[1]; tempC = [int]$p[2]; encoders = [int]$p[3]; vramUsedMb = [int]$p[4]; vramTotalMb = [int]$p[5]; driver = $p[6] }
+      $s.gpu = @{ name = $p[0]; util = [int]$p[1]; tempC = [int]$p[2]; encoders = [int]$p[3]; vramUsedMb = [int]$p[4]; vramTotalMb = [int]$p[5]; driver = $p[6]; powerW = (N $p[7]); powerLimitW = (N $p[8]) }
       $s.streaming = ([int]$p[3] -gt 0)
     }
   } catch { }
+  # Network rate since the last status (physical adapters that are up), and the system drive.
+  try {
+    $ad = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' } | Get-NetAdapterStatistics -ErrorAction Stop)
+    $tx = [double]($ad | Measure-Object -Property SentBytes -Sum).Sum; $rx = [double]($ad | Measure-Object -Property ReceivedBytes -Sum).Sum
+    $now = Get-Date
+    if ($script:netAt -and ($now - $script:netAt).TotalSeconds -ge 5) {
+      $secs = ($now - $script:netAt).TotalSeconds
+      if ($tx -ge $script:netTx) { $s.txMbps = [Math]::Round((($tx - $script:netTx) * 8 / 1e6) / $secs, 2) }
+      if ($rx -ge $script:netRx) { $s.rxMbps = [Math]::Round((($rx - $script:netRx) * 8 / 1e6) / $secs, 2) }
+    }
+    if (-not $script:netAt -or ($now - $script:netAt).TotalSeconds -ge 5) { $script:netAt = $now; $script:netTx = $tx; $script:netRx = $rx }
+  } catch { }
+  try { $dr = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':')) -ErrorAction Stop; $s.diskUsedGb = [Math]::Round($dr.Used / 1GB, 0); $s.diskTotalGb = [Math]::Round(($dr.Used + $dr.Free) / 1GB, 0) } catch { }
   $vi = Get-VirtualInfo
   $s.display = @{ mode = $(if (Test-Path $HeadlessFile) { 'headless' } else { 'mirror' }); virtual = [bool]$vi.virtual; virtualState = [string]$vi.state; seen = @($vi.seen) }
   try { $sv = Get-Service -Name 'SunshineService' -ErrorAction Stop; $s.sunshine = $sv.Status.ToString() } catch { $s.sunshine = 'NotInstalled' }
