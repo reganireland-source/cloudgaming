@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22)
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '9'
+$AgentVersion = '10'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -850,6 +850,38 @@ function Do-AwayPrepare {
   return @($ok, ($msgs -join ' '))
 }
 
+# What the router and the network say about reaching this PC from outside.
+function Do-AwayDiagnose {
+  $o = @()
+  try {
+    $nat = New-Object -ComObject HNetCfg.NATUPnP
+    $m = $nat.StaticPortMappingCollection
+    if ($null -eq $m) { $o += 'UPnP: the router did not answer, so it is off or not supported. Ports have to be forwarded by hand.' }
+    else {
+      $items = @($m | ForEach-Object { ('{0}/{1} to {2}:{3}' -f $_.ExternalPort, $_.Protocol, $_.InternalClient, $_.InternalPort) })
+      if ($items.Count) { $o += ('UPnP: the router answered and holds {0} port mapping(s): {1}' -f $items.Count, ($items -join ', ')) }
+      else { $o += 'UPnP: the router answered but Sunshine has no port mappings in it (restart Sunshine, then check again).' }
+    }
+  } catch { $o += ('UPnP check failed: ' + $_.Exception.Message) }
+  try {
+    $ul = @(Select-String -Path $SunshineLog -Pattern 'upnp' -ErrorAction Stop | Select-Object -Last 5 | ForEach-Object { Scrub $_.Line })
+    if ($ul.Count) { $o += ('Sunshine log, UPnP lines: ' + ($ul -join ' || ')) } else { $o += 'Sunshine log: no UPnP lines at all (is upnp set and Sunshine restarted?).' }
+  } catch { $o += 'Sunshine log: could not read it.' }
+  try {
+    $tr = @(& tracert.exe -d -h 4 -w 800 1.1.1.1 2>&1 | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -match '^\d+\s' })
+    $o += ('First hops to the internet: ' + ($tr -join ' | '))
+  } catch { $o += 'Route check failed.' }
+  try {
+    $v6 = @(Get-NetIPAddress -AddressFamily IPv6 -ErrorAction Stop | Where-Object { $_.IPAddress -notmatch '^(fe80|::1|fd|fc)' } | ForEach-Object { $_.IPAddress })
+    if ($v6.Count) { $o += ('IPv6 addresses: ' + ($v6 -join ', ')) } else { $o += 'IPv6: none.' }
+  } catch { }
+  try {
+    $fw = @(Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow -ErrorAction Stop | Where-Object { $_.DisplayName -match 'Sunshine' } | ForEach-Object { $_.DisplayName })
+    $o += ('Windows firewall rules for Sunshine: ' + $(if ($fw.Count) { $fw -join ', ' } else { 'none found' }))
+  } catch { }
+  return @($true, ($o -join [Environment]::NewLine))
+}
+
 function Do-Script($text) {
   $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
   $o = Join-Path $Dir 'script.out'; $e = Join-Path $Dir 'script.err'
@@ -886,6 +918,7 @@ function Run-Command($c) {
       'ssh-setup' { $r = Do-SshSetup @($c.args.keys); Report $c.id $r[0] $r[1] }
       'tunnel-open' { $r = Do-TunnelOpen ([string]$c.args.sid) ([int]$c.args.port); Report $c.id $r[0] $r[1] }
       'away-prepare' { $r = Do-AwayPrepare; Report $c.id $r[0] $r[1] }
+      'away-diagnose' { $r = Do-AwayDiagnose; Report $c.id $r[0] $r[1] }
       'sleep' { Report $c.id $true 'Going to sleep.'; Start-Sleep -Seconds 2; Start-Process -FilePath 'rundll32.exe' -ArgumentList 'powrprof.dll,SetSuspendState 0,1,0' }
       'restart' { Report $c.id $true 'Restarting.'; & shutdown.exe /r /t 5 /c 'Restart requested from GGGH' }
       'shutdown' { Report $c.id $true 'Shutting down.'; & shutdown.exe /s /t 5 /c 'Shutdown requested from GGGH' }

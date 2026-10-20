@@ -189,7 +189,7 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
             </>}
         </div>
       )}
-      {note && <p role="status" className={`text-xs ${note.ok ? 'text-neon-lime' : 'text-neon-amber'}`}>{note.ok ? '✓ ' : '⚠ '}{note.text}</p>}
+      {note && <p role="status" className={`text-xs whitespace-pre-wrap break-words ${note.ok ? 'text-neon-lime' : 'text-neon-amber'}`}>{note.ok ? '✓ ' : '⚠ '}{note.text}</p>}
 
       <div className="flex gap-1 border-b border-white/5">
         {(['launch', 'diagnose', 'settings', 'log'] as const).map((t) => (
@@ -402,7 +402,8 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
         <p className="text-slate-400">Moonlight streams straight from the PC, so away from home your router has to let it in. 1) Prepare the PC (this restarts Sunshine, so it ends any stream in progress; Sunshine then asks the router to open its ports with UPnP; its admin page stays home-only). 2) Test from the internet. When that passes, the Moonlight command tries the home address first and otherwise asks GGGH for the current internet address, with a lower bitrate.</p>
         <div className="flex flex-wrap gap-2 items-center">
           <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} title="Restarts Sunshine, which ends any stream in progress" onClick={() => runCommand('away-prepare', undefined, 'Prepare for away access')}>1. Prepare the PC</button>
-          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={awayBusy || !(m.wanHost || m.status?.publicIp)} onClick={testAway}>{awayBusy ? 'Testing…' : '2. Test from the internet'}</button>
+          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} title="Asks the PC what its router and network say (UPnP, route, IPv6, firewall)" onClick={() => runCommand('away-diagnose', undefined, 'Away diagnostics')}>Diagnose</button>
+          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={awayBusy || !(m.wanHost || m.status?.myIp || m.status?.publicIp)} onClick={testAway}>{awayBusy ? 'Testing…' : '2. Test from the internet'}</button>
           {m.awayOk && <span className="text-neon-lime">✓ reachable{m.awayCheckedAt ? ` (tested ${timeAgo(m.awayCheckedAt)})` : ''}</span>}
         </div>
         <p className="text-slate-500">

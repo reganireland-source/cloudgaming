@@ -43,9 +43,9 @@ const MAX_SCRIPT = 4000;
 
 /** What the app may ask for, and what the launcher token may ask for. */
 export type CommandKind = 'refresh' | 'sleep' | 'restart' | 'shutdown' | 'sunshine-restart' | 'sunshine-pin' | 'display-set' | 'display-headless' | 'display-restore' | 'script'
-  | 'diagnose' | 'record' | 'logs' | 'power-plan' | 'gpu-clocks' | 'sunshine-config' | 'sunshine-config-restore' | 'away-prepare' | 'ssh-setup' | 'tunnel-open';
+  | 'diagnose' | 'record' | 'logs' | 'power-plan' | 'gpu-clocks' | 'sunshine-config' | 'sunshine-config-restore' | 'away-prepare' | 'away-diagnose' | 'ssh-setup' | 'tunnel-open';
 const APP_KINDS: CommandKind[] = ['refresh', 'sleep', 'restart', 'shutdown', 'sunshine-restart', 'sunshine-pin', 'display-set', 'display-headless', 'display-restore', 'script',
-  'diagnose', 'record', 'logs', 'power-plan', 'gpu-clocks', 'sunshine-config', 'sunshine-config-restore', 'away-prepare', 'ssh-setup'];
+  'diagnose', 'record', 'logs', 'power-plan', 'gpu-clocks', 'sunshine-config', 'sunshine-config-restore', 'away-prepare', 'away-diagnose', 'ssh-setup'];
 const LAUNCHER_KINDS: CommandKind[] = ['display-set', 'display-headless', 'display-restore'];
 
 const MAC_RE = /^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$/;
@@ -191,7 +191,8 @@ function checkArgs(kind: CommandKind, args: any, scriptEnabled: boolean): Record
     case 'gpu-clocks':
       if (a.action !== 'lock' && a.action !== 'reset') throw new MachineRequestError(400, 'The action is "lock" or "reset".');
       return { action: a.action };
-    case 'away-prepare': return {};
+    case 'away-prepare':
+    case 'away-diagnose': return {};
     case 'ssh-setup': {
       const keys = (Array.isArray(a.keys) ? a.keys : []).map((k: unknown) => String(k).trim()).filter((k: string) => /^(ssh-(rsa|ed25519)|ecdsa-sha2-[a-z0-9]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+/=]+( [^\r\n]*)?$/.test(k) && k.length <= 1000).slice(0, 20);
       return { keys };
