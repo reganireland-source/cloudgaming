@@ -103,6 +103,7 @@ import { clipboardTarget } from './services/SshAccessService';
 import localMachineRoutes from './api/routes/localMachines';
 import localAgentRoutes from './api/routes/localAgent';
 
+import { attachLocalTunnel } from './services/LocalTunnel';
 // Create the Express application. Everything below configures this object.
 const app: Express = express();
 
@@ -268,13 +269,15 @@ failOrphanedOperations();
 // Begin accepting connections. The callback runs once the server is ready;
 // these log lines are the first thing to look for in Railway's logs to
 // confirm a deploy succeeded.
-app.listen(PORT, () => {
+const httpServer = app.listen(PORT, () => {
   prewarmSpotPrices(); // fetch AWS's live spot data now, so the first Recon page is quick
   loadOfferings();     // re-apply GPU-per-region corrections learned by earlier live checks
   console.log(`Gints Global Gaming Hubjob backend running on port ${PORT}`);
   console.log(`Environment: ${env.NODE_ENV}`);
   console.log(`Log level: ${env.LOG_LEVEL}`);
 });
+
+attachLocalTunnel(httpServer); // SSH to a home PC through GGGH (WebSockets)
 
 // Exporting `app` lets other code (e.g. automated tests) import the server
 // without starting it a second time.

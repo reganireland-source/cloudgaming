@@ -47,6 +47,8 @@ export interface LocalLaunch {
   muteHere?: boolean;
   /** Moonlight's own overlay: decode time, dropped frames, network delay. The first thing to look at for lag. */
   overlay?: boolean;
+  /** Away access is set up for this PC: if it isn't reachable at home, ask GGGH for its internet address and use that (with a lower bitrate). */
+  away?: boolean;
   /** macOS: open Moonlight on this display (the Terminal window is moved there first). */
   target?: ScreenTarget | null;
   api: string;
@@ -71,12 +73,12 @@ export function localBitrateKbps(w: number, h: number, fps: number): number {
 /** Single-quote for sh. */
 const sq = (v: string) => `'${v.replace(/'/g, `'\\''`)}'`;
 
-function streamArgs(l: LocalLaunch): string[] {
+function streamArgs(l: LocalLaunch, bitrate?: string, host?: string): string[] {
   return [
-    'stream', l.host, l.os === 'windows' ? `"${l.app}"` : sq(l.app),
+    'stream', host ?? l.host, l.os === 'windows' ? `"${l.app}"` : sq(l.app),
     '--resolution', `${l.width}x${l.height}`,
     '--fps', String(l.fps),
-    '--bitrate', String(l.bitrateKbps),
+    '--bitrate', bitrate ?? String(l.bitrateKbps),
     '--video-codec', l.codec,
     '--display-mode', l.fullscreen ? 'fullscreen' : 'windowed',
     '--audio-config', 'stereo',
@@ -142,7 +144,20 @@ export function buildLaunchScript(l: LocalLaunch): string {
   ];
   if (wake) lines.push(`MAC=${sq(l.mac!)}`);
   if (l.mode) lines.push(`API=${sq(l.api)}`, `TOKEN=${sq(l.token)}`);
-  lines.push(`up() { nc -z -w 2 "$HOST" 47989 >/dev/null 2>&1; }`);
+  lines.push(`up() { nc -z -w 2 "${'$'}{1:-$HOST}" 47989 >/dev/null 2>&1; }`);
+  if (l.away) {
+    lines.push(
+      '',
+      '# Not at home? GGGH knows the PC\'s internet address (it changes with the provider), so ask it.',
+      'AWAY=',
+      'if ! up; then',
+      '  W=$(curl -fsS -m 6 -H "Authorization: Bearer $TOKEN" "$API/local-agent/address" 2>/dev/null | sed -n \'s/.*"host":"\\([^"]*\\)".*/\\1/p\')',
+      '  if [ -n "$W" ] && up "$W"; then HOST=$W; AWAY=1; echo "Away from home: streaming over the internet from $W."; fi',
+      'fi',
+      `BITRATE=${l.bitrateKbps}`,
+      '[ -n "$AWAY" ] && [ "$BITRATE" -gt 25000 ] && BITRATE=25000',
+    );
+  }
 
   if (wake) {
     lines.push(
@@ -206,7 +221,7 @@ export function buildLaunchScript(l: LocalLaunch): string {
     );
   }
   if (l.os === 'macos' && l.target) lines.push(...terminalMoveLines(l.target));
-  lines.push('', `${exe} ${streamArgs(l).join(' ')}`);
+  lines.push('', `${exe} ${streamArgs(l, l.away ? '"$BITRATE"' : undefined, l.away ? '"$HOST"' : undefined).join(' ')}`);
   if (l.os === 'macos' && l.target) lines.push('tback');
   return lines.join('\n') + '\n';
 }

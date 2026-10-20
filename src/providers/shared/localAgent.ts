@@ -36,9 +36,9 @@ import crypto from 'crypto';
 
 
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
-param([string]$Mode = 'service')
+param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22)
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '6'
+$AgentVersion = '7'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -52,6 +52,59 @@ function Log($m) {
     Add-Content -Path $Log -Value ('{0} {1}' -f (Get-Date -Format 's'), $m)
     if ((Get-Item $Log).Length -gt 400KB) { Move-Item $Log ($Log + '.old') -Force }
   } catch { }
+}
+
+# ---------------------------------------------------------------------------
+# One SSH connection through GGGH (runs as its own small process: -Mode tunnel).
+# Dials out to GGGH over a WebSocket and joins it to this PC's own SSH server.
+# ---------------------------------------------------------------------------
+if ($Mode -eq 'tunnel') {
+  Add-Type -ReferencedAssemblies 'System.dll' -TypeDefinition @'
+using System;
+using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Threading;
+using System.Threading.Tasks;
+public static class GgghTunnel {
+  public static int Run(string url, string bearer, string host, int port) {
+    ClientWebSocket ws = new ClientWebSocket();
+    TcpClient tcp = new TcpClient();
+    try {
+      ws.Options.SetRequestHeader("Authorization", "Bearer " + bearer);
+      if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(15000)) return 2;
+      tcp.Connect(host, port);
+      NetworkStream ns = tcp.GetStream();
+      Task up = Task.Run(() => {
+        byte[] buf = new byte[16384];
+        while (ws.State == WebSocketState.Open) {
+          WebSocketReceiveResult r = ws.ReceiveAsync(new ArraySegment<byte>(buf), CancellationToken.None).Result;
+          if (r.MessageType == WebSocketMessageType.Close) break;
+          ns.Write(buf, 0, r.Count);
+        }
+      });
+      Task down = Task.Run(() => {
+        byte[] buf = new byte[16384];
+        int n;
+        while ((n = ns.Read(buf, 0, buf.Length)) > 0) {
+          ws.SendAsync(new ArraySegment<byte>(buf, 0, n), WebSocketMessageType.Binary, true, CancellationToken.None).Wait();
+        }
+      });
+      Task.WaitAny(up, down);
+      return 0;
+    } catch (Exception) {
+      return 3;
+    } finally {
+      try { tcp.Close(); } catch (Exception) { }
+      try { ws.Abort(); } catch (Exception) { }
+    }
+  }
+}
+'@
+  $cfg0 = Get-Content (Join-Path $Dir 'agent.json') -Raw | ConvertFrom-Json
+  $wsUrl = ($cfg0.api -replace '^http', 'ws') + '/local-agent/tunnel/' + $Sid
+  $rc = [GgghTunnel]::Run($wsUrl, [string]$cfg0.token, '127.0.0.1', $Port)
+  Log ('ssh tunnel ended (code ' + $rc + ')')
+  exit 0
 }
 
 # ---------------------------------------------------------------------------
@@ -351,6 +404,18 @@ function Get-Status {
     if (-not $script:netAt -or ($now - $script:netAt).TotalSeconds -ge 5) { $script:netAt = $now; $script:netTx = $tx; $script:netRx = $rx }
   } catch { }
   try { $dr = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':')) -ErrorAction Stop; $s.diskUsedGb = [Math]::Round($dr.Used / 1GB, 0); $s.diskTotalGb = [Math]::Round(($dr.Used + $dr.Free) / 1GB, 0) } catch { }
+  $s.ssh = Get-SshInfo
+  try {
+    $s.away = @{ upnp = ''; webUi = ''; profile = '' }
+    if (Test-Path $SunshineConf) {
+      foreach ($l in @(Get-Content $SunshineConf -ErrorAction SilentlyContinue)) {
+        if ($l -match '^\s*upnp\s*=\s*(\S+)') { $s.away.upnp = $Matches[1] }
+        if ($l -match '^\s*origin_web_ui_allowed\s*=\s*(\S+)') { $s.away.webUi = $Matches[1] }
+      }
+    }
+    $np = @(Get-NetConnectionProfile -ErrorAction Stop | Where-Object { $_.IPv4Connectivity -ne 'Disconnected' } | Select-Object -First 1)
+    if ($np.Count) { $s.away.profile = [string]$np[0].NetworkCategory }
+  } catch { }
   $vi = Get-VirtualInfo
   $s.display = @{ mode = $(if (Test-Path $HeadlessFile) { 'headless' } else { 'mirror' }); virtual = [bool]$vi.virtual; virtualState = [string]$vi.state; seen = @($vi.seen) }
   try { $sv = Get-Service -Name 'SunshineService' -ErrorAction Stop; $s.sunshine = $sv.Status.ToString() } catch { $s.sunshine = 'NotInstalled' }
@@ -688,6 +753,97 @@ function Watch-Headless($st) {
   if ($r[0]) { $script:idleSince = $null }
 }
 
+# ---------------------------------------------------------------------------
+# SSH: make sure this PC has an SSH server and the account's keys, and open
+# connections through GGGH (no router changes). Nothing already there is changed
+# except adding missing keys.
+# ---------------------------------------------------------------------------
+function Get-ConsoleUser {
+  try { $u = [string](Get-CimInstance Win32_ComputerSystem).UserName; if ($u) { return $u } } catch { }
+  return ''
+}
+
+function Get-SshInfo {
+  $i = @{ installed = $false; running = $false; port = 22; user = '' }
+  try {
+    $sv = Get-Service -Name 'sshd' -ErrorAction Stop
+    $i.installed = $true; $i.running = ($sv.Status -eq 'Running')
+    $cf = Join-Path $env:ProgramData 'ssh\sshd_config'
+    if (Test-Path $cf) { $m = Select-String -Path $cf -Pattern '^\s*Port\s+(\d+)' | Select-Object -First 1; if ($m) { $i.port = [int]$m.Matches[0].Groups[1].Value } }
+  } catch { }
+  $cu = Get-ConsoleUser
+  if ($cu) { $i.user = ($cu -split '\\')[-1] }
+  return $i
+}
+
+function Do-SshSetup($keys) {
+  $msgs = @()
+  $sv = Get-Service -Name 'sshd' -ErrorAction SilentlyContinue
+  if (-not $sv) {
+    $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cap) { return @($false, 'This Windows has no OpenSSH Server to add (needs Windows 10 1809 or newer).') }
+    $job = Start-Job -ScriptBlock { param($n) Add-WindowsCapability -Online -Name $n | Out-Null } -ArgumentList $cap.Name
+    $t0 = Get-Date
+    while ($job.State -eq 'Running' -and ((Get-Date) - $t0).TotalMinutes -lt 8) { Start-Sleep -Seconds 3; Beat }
+    $sv = Get-Service -Name 'sshd' -ErrorAction SilentlyContinue
+    if (-not $sv) { return @($false, 'Windows did not add the OpenSSH Server. Add it in Settings > System > Optional features, then try again.') }
+    $msgs += 'OpenSSH Server added.'
+  } else { $msgs += 'OpenSSH Server was already there.' }
+  try { Set-Service -Name 'sshd' -StartupType Automatic } catch { }
+  if ((Get-Service -Name 'sshd').Status -ne 'Running') { Start-Service -Name 'sshd'; $msgs += 'Started it.' }
+  if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue) -and -not (Get-NetFirewallRule -DisplayName 'GGGH SSH (home network)' -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName 'GGGH SSH (home network)' -Direction Inbound -Protocol TCP -LocalPort 22 -RemoteAddress LocalSubnet -Action Allow | Out-Null
+    $msgs += 'Allowed SSH from the home network only.'
+  }
+  $cu = Get-ConsoleUser
+  $name = ($cu -split '\\')[-1]
+  $list = @($keys | Where-Object { $_ })
+  if (-not $list.Count) { $msgs += 'No SSH keys are saved in GGGH yet (Machines page, SSH access), so none were added.' }
+  elseif (-not $name) { $msgs += 'Nobody is signed in to Windows, so the keys could not be added yet; try again once signed in.' }
+  else {
+    $admin = $false
+    try { $admin = [bool](Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop | Where-Object { ($_.Name -split '\\')[-1] -ieq $name }) } catch { }
+    if ($admin) { $file = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys' }
+    else {
+      $prof = (Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -like ('*\' + $name) } | Select-Object -First 1).LocalPath
+      if (-not $prof) { $prof = Join-Path 'C:\Users' $name }
+      New-Item -ItemType Directory -Force -Path (Join-Path $prof '.ssh') | Out-Null
+      $file = Join-Path $prof '.ssh\authorized_keys'
+    }
+    $have = @(); if (Test-Path $file) { $have = @(Get-Content $file | ForEach-Object { $_.Trim() }) }
+    $add = @($list | Where-Object { $have -notcontains $_.Trim() })
+    if ($add.Count) { Add-Content -Path $file -Value ($add | ForEach-Object { $_.Trim() }) -Encoding ASCII }
+    if ($admin) { & icacls.exe $file '/inheritance:r' '/grant' 'Administrators:F' '/grant' 'SYSTEM:F' | Out-Null }
+    $msgs += ('{0} key(s) added for {1} ({2} already there).' -f $add.Count, $name, ($list.Count - $add.Count))
+  }
+  return @($true, ($msgs -join ' '))
+}
+
+function Do-TunnelOpen($sid, $port) {
+  if ($sid -notmatch '^[0-9a-f-]{36}$' -or $port -lt 1 -or $port -gt 65535) { return @($false, 'Bad tunnel request.') }
+  Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $AgentFile, '-Mode', 'tunnel', '-Sid', $sid, '-Port', [string]$port) -WindowStyle Hidden
+  return @($true, 'SSH connection opened.')
+}
+
+# ---------------------------------------------------------------------------
+# Away access: let the router open Sunshine's ports and keep its admin page off the internet.
+# ---------------------------------------------------------------------------
+function Do-AwayPrepare {
+  $msgs = @(); $ok = $true
+  try {
+    $n = 0
+    Get-NetConnectionProfile -ErrorAction Stop | Where-Object { $_.NetworkCategory -eq 'Public' -and $_.IPv4Connectivity -ne 'Disconnected' } | ForEach-Object { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private; $n++ }
+    if ($n) { $msgs += 'Network set to Private (Public blocks Sunshine).' }
+  } catch { $msgs += ('Could not check the network type: ' + $_.Exception.Message) }
+  $r = Do-SunshineConfig 'origin_web_ui_allowed' 'lan'
+  if (-not $r[0]) { $ok = $false; $msgs += [string]$r[1] } else { $msgs += 'Sunshine admin page limited to the home network.' }
+  if ($ok) {
+    $r = Do-SunshineConfig 'upnp' 'enabled'
+    if (-not $r[0]) { $ok = $false; $msgs += [string]$r[1] } else { $msgs += 'Sunshine will ask the router to open its ports (UPnP).' }
+  }
+  return @($ok, ($msgs -join ' '))
+}
+
 function Do-Script($text) {
   $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
   $o = Join-Path $Dir 'script.out'; $e = Join-Path $Dir 'script.err'
@@ -721,6 +877,9 @@ function Run-Command($c) {
       'power-plan' { $r = Do-PowerPlan ([string]$c.args.plan); Report $c.id $r[0] $r[1] }
       'gpu-clocks' { $r = Do-GpuClocks ([string]$c.args.action); Report $c.id $r[0] $r[1] }
       'script' { $r = Do-Script ([string]$c.args.script); Report $c.id $r[0] $r[1] }
+      'ssh-setup' { $r = Do-SshSetup @($c.args.keys); Report $c.id $r[0] $r[1] }
+      'tunnel-open' { $r = Do-TunnelOpen ([string]$c.args.sid) ([int]$c.args.port); Report $c.id $r[0] $r[1] }
+      'away-prepare' { $r = Do-AwayPrepare; Report $c.id $r[0] $r[1] }
       'sleep' { Report $c.id $true 'Going to sleep.'; Start-Sleep -Seconds 2; Start-Process -FilePath 'rundll32.exe' -ArgumentList 'powrprof.dll,SetSuspendState 0,1,0' }
       'restart' { Report $c.id $true 'Restarting.'; & shutdown.exe /r /t 5 /c 'Restart requested from GGGH' }
       'shutdown' { Report $c.id $true 'Shutting down.'; & shutdown.exe /s /t 5 /c 'Shutdown requested from GGGH' }

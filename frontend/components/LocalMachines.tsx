@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, type ApiError } from '@/lib/auth';
 import { SCREENS, detectScreen, detectAllScreens, canListScreens, fitResolution, type AttachedScreen } from '@/lib/screens';
 import LocalDiagnose from '@/components/LocalDiagnose';
+import { sshAlias, sshSetupCommand } from '@/lib/sshHelper';
 import {
   LOCAL_APPS, buildCheckScript, buildLaunchScript, saveAndRunCommand, localBitrateKbps, pairCommand, plainStreamCommand,
   type LocalCodec, type LocalLaunch, type LocalMode, type LocalOS,
@@ -28,7 +29,11 @@ import {
 interface LocalMachine {
   id: string; name: string; lanIp: string | null; mac: string | null;
   online: boolean; lastSeenAt: string | null; scriptEnabled: boolean; displayMode: LocalMode;
+  wanHost: string | null; awayOk: boolean; awayCheckedAt: string | null; sshEnabled: boolean;
   status: {
+    publicIp?: string;
+    ssh?: { installed: boolean; running: boolean; port: number; user: string };
+    away?: { upnp: string; webUi: string; profile: string };
     display?: { mode: LocalMode; virtual: boolean; virtualState?: string; seen?: string[] };
     host?: string; os?: string; uptimeHours?: number; cpuPercent?: number; ramGb?: number; ramFreeGb?: number;
     wired?: boolean; link?: string; streaming?: boolean; sunshine?: string; agentVersion?: string;
@@ -200,7 +205,8 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
       {panel === 'settings' && (
         <SettingsPanel m={m} onChanged={onChanged} busy={busy} newToken={newToken}
           askToken={() => setConfirm('token')} askRemove={() => setConfirm('remove')}
-          runScript={(script) => send('script', { script }, 'Script')} />
+          runScript={(script) => send('script', { script }, 'Script')}
+          runCommand={(kind, args, label) => send(kind, args, label)} />
       )}
       {panel === 'log' && <LogPanel id={m.id} />}
 
@@ -255,7 +261,7 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   const mac = info?.mac || m.mac;
   const launch: LocalLaunch | null = info && host ? {
     os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
-    wake: wake && !!mac, mode, muteHere, overlay, target: picked?.target ?? null, api: info.api, token: info.launcherToken,
+    wake: wake && !!mac, mode, muteHere, overlay, away: m.awayOk, target: picked?.target ?? null, api: info.api, token: info.launcherToken,
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -323,9 +329,10 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   );
 }
 
-function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runScript }: {
+function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runScript, runCommand }: {
   m: LocalMachine; onChanged: () => void; busy: string | null; newToken: string | null;
   askToken: () => void; askRemove: () => void; runScript: (script: string) => void;
+  runCommand: (kind: string, args?: Record<string, unknown>, label?: string) => void;
 }) {
   const [name, setName] = useState(m.name);
   const [ip, setIp] = useState(m.lanIp || '');
@@ -339,7 +346,25 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
     try { await apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { name, lanIp: ip, mac } }); setMsg('Saved.'); onChanged(); } catch (e) { setMsg(`⚠ ${errText(e)}`); } finally { setSaving(false); }
   };
   const [vdCmd, setVdCmd] = useState<string | null>(null);
-  useEffect(() => { apiFetch<{ api: string }>(`/local-machines/${m.id}/launcher`).then((i) => setVdCmd(`irm '${i.api}/local-agent/virtual-display.ps1' | iex`)).catch(() => undefined); }, [m.id]);
+  const [launcher, setLauncher] = useState<{ api: string; launcherToken: string } | null>(null);
+  useEffect(() => { apiFetch<{ api: string; launcherToken: string }>(`/local-machines/${m.id}/launcher`).then((i) => { setLauncher(i); setVdCmd(`irm '${i.api}/local-agent/virtual-display.ps1' | iex`); }).catch(() => undefined); }, [m.id]);
+  const [wan, setWan] = useState(m.wanHost || '');
+  useEffect(() => setWan(m.wanHost || ''), [m.wanHost]);
+  const [awayBusy, setAwayBusy] = useState(false);
+  const [awayMsg, setAwayMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const saveWan = async () => {
+    try { await apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { wanHost: wan } }); setAwayMsg({ ok: true, text: 'Saved. Test it again.' }); onChanged(); } catch (e) { setAwayMsg({ ok: false, text: errText(e) }); }
+  };
+  const testAway = async () => {
+    setAwayBusy(true); setAwayMsg(null);
+    try { const r = await apiFetch<{ ok: boolean; message: string }>(`/local-machines/${m.id}/away-check`, { method: 'POST' }); setAwayMsg({ ok: r.ok, text: r.message }); onChanged(); } catch (e) { setAwayMsg({ ok: false, text: errText(e) }); } finally { setAwayBusy(false); }
+  };
+  const [sshOn, setSshOn] = useState(m.sshEnabled);
+  useEffect(() => setSshOn(m.sshEnabled), [m.sshEnabled]);
+  const toggleSsh = async (on: boolean) => {
+    setSshOn(on);
+    try { await apiFetch(`/local-machines/${m.id}`, { method: 'PATCH', body: { sshEnabled: on } }); onChanged(); } catch (e) { setSshOn(!on); setMsg(`⚠ ${errText(e)}`); }
+  };
   const [scriptOn, setScriptOn] = useState(m.scriptEnabled);
   useEffect(() => setScriptOn(m.scriptEnabled), [m.scriptEnabled]);
   const toggleScript = async (on: boolean) => {
@@ -370,6 +395,54 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
         <p className="text-slate-400">Headless mode switches the PC’s own screens off, and Windows still needs <em>a</em> screen to stream from. This installs a software one (the open-source Virtual Display Driver). Same place as before: Terminal (Admin) on the PC.</p>
         {vdCmd ? <CopyBox text={vdCmd} /> : <p className="text-slate-500">Loading…</p>}
         <p className="text-slate-500">{m.status?.display?.virtual ? '✓ The PC reports a virtual display.' : `The PC does not report one yet. After installing, press Refresh on the PC card.${m.status?.display?.virtualState ? ` (State: ${m.status.display.virtualState}.)` : ''}${m.status?.display?.seen?.length ? ` Windows lists these display devices: ${m.status.display.seen.join(', ')}.` : ''}`} Safety net: if GGGH can’t be reached for 5 minutes, nobody has streamed for 10, or the PC restarts, the agent puts the screens back by itself. “Screens back on” on the PC card does it at once.</p>
+      </div>
+
+      <div className="space-y-2 border-t border-white/5 pt-3">
+        <p className="label">Away from home: Moonlight over the internet</p>
+        <p className="text-slate-400">Moonlight streams straight from the PC, so away from home your router has to let it in. 1) Prepare the PC (Sunshine asks the router to open its ports with UPnP; its admin page stays home-only). 2) Test from the internet. When that passes, the Moonlight command tries the home address first and otherwise asks GGGH for the current internet address, with a lower bitrate.</p>
+        <div className="flex flex-wrap gap-2 items-center">
+          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} onClick={() => runCommand('away-prepare', undefined, 'Prepare for away access')}>1. Prepare the PC</button>
+          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={awayBusy || !(m.wanHost || m.status?.publicIp)} onClick={testAway}>{awayBusy ? 'Testing…' : '2. Test from the internet'}</button>
+          {m.awayOk && <span className="text-neon-lime">✓ reachable{m.awayCheckedAt ? ` (tested ${timeAgo(m.awayCheckedAt)})` : ''}</span>}
+        </div>
+        <p className="text-slate-500">
+          Internet address GGGH sees for this PC: <span className="text-slate-300 tabular-nums">{m.status?.publicIp || 'not known yet'}</span>.
+          {m.status?.away && <> UPnP in Sunshine: <span className="text-slate-300">{m.status.away.upnp || 'off'}</span> · admin page: <span className="text-slate-300">{m.status.away.webUi || 'default'}</span> · network type: <span className="text-slate-300">{m.status.away.profile || '?'}</span>.</>}
+          {' '}Compare that address with the “internet / WAN address” on your router’s status page: if they differ (or the router’s starts with 100.64 to 100.127) your provider shares one address between customers and a stream can’t reach you.
+        </p>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input className={`${inp} max-w-xs`} value={wan} placeholder="Use another address or name (optional)" onChange={(e) => setWan(e.target.value)} aria-label="Another internet address or name" />
+          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={wan.trim().toLowerCase() === (m.wanHost || '')} onClick={saveWan}>Save</button>
+          <span className="text-slate-500">For a dynamic-DNS name or an IPv6 address.</span>
+        </div>
+        {awayMsg && <p role="status" className={awayMsg.ok ? 'text-neon-lime' : 'text-neon-amber'}>{awayMsg.ok ? '✓ ' : '⚠ '}{awayMsg.text}</p>}
+        <p className="text-slate-500">If the router has no UPnP, forward these to the PC by hand: TCP 47984, 47989, 48010 and UDP 47998, 47999, 48000, 48002, 48010. Never forward 47990 (the admin page).</p>
+      </div>
+
+      <div className="space-y-2 border-t border-white/5 pt-3">
+        <p className="label">SSH from anywhere</p>
+        <label className="flex items-start gap-2 text-slate-300">
+          <input type="checkbox" className="mt-0.5" checked={sshOn} onChange={(e) => toggleSsh(e.target.checked)} />
+          <span>Allow SSH to this PC through GGGH. No router changes, and it works even if your provider shares one address. The PC dials out to GGGH; GGGH only relays the encrypted SSH traffic, and the PC’s own SSH server still checks your key.</span>
+        </label>
+        {sshOn && (
+          <>
+            <p className="text-slate-500">
+              The PC reports: {m.status?.ssh ? (m.status.ssh.running ? `SSH server running on port ${m.status.ssh.port}` : m.status.ssh.installed ? 'SSH server installed but stopped' : 'no SSH server yet') : 'nothing yet (update the agent first)'}{m.status?.ssh?.user ? ` · signed-in user ${m.status.ssh.user}` : ''}.
+            </p>
+            <div className="flex flex-wrap gap-2 items-center">
+              <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} onClick={() => runCommand('ssh-setup', undefined, 'Set up SSH')}>Set up SSH on the PC</button>
+              <span className="text-slate-500">Adds the OpenSSH server if it’s missing, starts it, and adds the public keys saved on the Machines page (SSH access). Anything already there is left alone.</span>
+            </div>
+            {launcher
+              ? <>
+                <p className="text-slate-300">Then paste this into Terminal on the computer you’ll connect from. It saves a small helper and an entry in ~/.ssh/config:</p>
+                <CopyBox text={sshSetupCommand({ api: launcher.api, token: launcher.launcherToken, name: m.name, user: m.status?.ssh?.user || '' })} />
+                <p className="text-slate-500">After that: <span className="font-mono text-slate-300">ssh {sshAlias(m.name)}</span>, at home or away. The helper holds this PC’s key (it can only open SSH to this PC), so keep it private.</p>
+              </>
+              : <p className="text-slate-500">Loading…</p>}
+          </>
+        )}
       </div>
 
       <div className="space-y-2 border-t border-white/5 pt-3">

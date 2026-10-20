@@ -7,7 +7,7 @@
  *
  *   GET    /                       my local machines (status as the agent last reported)
  *   POST   /                       add one  { name, lanIp?, mac? } → { machine, agentToken, installCommand }
- *   PATCH  /:id                    { name?, lanIp?, mac?, scriptEnabled?, displayMode? }
+ *   PATCH  /:id                    { name?, lanIp?, mac?, scriptEnabled?, displayMode?, wanHost? }
  *   DELETE /:id
  *   POST   /:id/token              new agent token (the old one stops) → { agentToken, installCommand }
  *   GET    /:id/launcher           what the generated Moonlight command needs → { launcherToken, lanIp, mac, api }
@@ -17,6 +17,7 @@
  *   POST   /:id/pair               Moonlight pairing → { commandId, pin, host }
  *   GET    /:id/reports            what the agent measured (?kind=diagnose|record|logs), newest first
  *   GET    /:id/reports/:rid       one report with its plain-English findings and a text version to paste
+ *   POST   /:id/away-check         from GGGH's server: does Sunshine answer at the PC's internet address? → { host, ok, message }
  *   GET    /:id/telemetry?minutes=  trend-line samples + alerts, same shape as a cloud machine's (Performance page)
  *   GET    /:id/live?since=N       live samples while a recording runs
  *
@@ -29,7 +30,7 @@ import { Router, Request, Response } from 'express';
 import { env } from '../../config/env';
 import {
   listLocalMachines, createLocalMachine, updateLocalMachine, deleteLocalMachine, rotateAgentToken,
-  launcherInfo, sendLocalCommand, getLocalCommand, recentLocalCommands, listReports, getReport, getLive, localTelemetry,
+  launcherInfo, sendLocalCommand, getLocalCommand, recentLocalCommands, listReports, getReport, getLive, localTelemetry, awayCheck,
 } from '../../services/LocalMachineService';
 import { sendRouteError } from './machines';
 
@@ -110,6 +111,10 @@ router.get('/:id/reports', async (req: Request, res: Response) => {
 
 router.get('/:id/reports/:rid', async (req: Request, res: Response) => {
   try { noStore(res); res.json(await getReport(req.userId!, req.params.id, req.params.rid)); } catch (e) { sendRouteError(res, e, 'Failed to read the report'); }
+});
+
+router.post('/:id/away-check', async (req: Request, res: Response) => {
+  try { noStore(res); res.json(await awayCheck(req.userId!, req.params.id)); } catch (e) { sendRouteError(res, e, 'Failed to test the internet address'); }
 });
 
 router.get('/:id/telemetry', async (req: Request, res: Response) => {

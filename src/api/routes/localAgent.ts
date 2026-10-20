@@ -15,12 +15,13 @@
  *   POST /live          agent: { samples: [...] } during a recording
  *   POST /poll          agent: "here is my status; any work?" — waits up to ~25 s → { commands, pollSeconds }
  *   POST /result        agent: { id, ok, message }
+ *   GET  /address      generated Moonlight command (launcher token): { host } to try from outside the home network
  *   POST /screen        generated Moonlight command (launcher token): { action: 'set'|'headless'|'restore', width?, height?, fps? }
  * ============================================================================
  */
 
 import { Router, Request, Response } from 'express';
-import { agentPoll, agentResult, launcherScreen, agentHeartbeat, agentReport, agentLive } from '../../services/LocalMachineService';
+import { agentPoll, agentResult, launcherScreen, agentHeartbeat, agentReport, agentLive, launcherAddress } from '../../services/LocalMachineService';
 import { AGENT_PS1, BOOT_PS1, INSTALL_PS1, VDISPLAY_PS1 } from '../../providers/shared/localAgent';
 
 const router = Router();
@@ -34,7 +35,7 @@ router.get('/boot.ps1', (_req, res) => { res.type('text/plain').send(BOOT_PS1); 
 router.post('/poll', async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
   try {
-    const out = await agentPoll(bearer(req), req.body);
+    const out = await agentPoll(bearer(req), req.body, undefined, undefined, req.ip);
     if (!out) return res.status(401).json({ error: 'Unknown token. Run the install command from GGGH again.' });
     res.json(out);
   } catch (e) {
@@ -66,6 +67,15 @@ router.post('/report', async (req: Request, res: Response) => {
 
 router.post('/live', async (req: Request, res: Response) => {
   try { res.status((await agentLive(bearer(req), req.body?.samples)) ? 200 : 401).json({ ok: true }); } catch { res.status(500).json({ error: 'Try again shortly.' }); }
+});
+
+router.get('/address', async (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const out = await launcherAddress(bearer(req));
+    if (!out) return res.status(401).json({ error: 'Unknown token.' });
+    res.json(out);
+  } catch { res.status(500).json({ error: 'Try again shortly.' }); }
 });
 
 router.post('/screen', async (req: Request, res: Response) => {

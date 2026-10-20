@@ -21,6 +21,10 @@
  */
 
 import crypto from 'crypto';
+import dns from 'dns';
+import http from 'http';
+import net from 'net';
+import { getSshKeys } from './SshAccessService';
 import { query } from '../config/database';
 import { MachineRequestError } from './MachineService';
 import { encryptCredentials, decryptCredentials, encryptionReady } from './CredentialService';
@@ -39,9 +43,9 @@ const MAX_SCRIPT = 4000;
 
 /** What the app may ask for, and what the launcher token may ask for. */
 export type CommandKind = 'refresh' | 'sleep' | 'restart' | 'shutdown' | 'sunshine-restart' | 'sunshine-pin' | 'display-set' | 'display-headless' | 'display-restore' | 'script'
-  | 'diagnose' | 'record' | 'logs' | 'power-plan' | 'gpu-clocks' | 'sunshine-config' | 'sunshine-config-restore';
+  | 'diagnose' | 'record' | 'logs' | 'power-plan' | 'gpu-clocks' | 'sunshine-config' | 'sunshine-config-restore' | 'away-prepare' | 'ssh-setup' | 'tunnel-open';
 const APP_KINDS: CommandKind[] = ['refresh', 'sleep', 'restart', 'shutdown', 'sunshine-restart', 'sunshine-pin', 'display-set', 'display-headless', 'display-restore', 'script',
-  'diagnose', 'record', 'logs', 'power-plan', 'gpu-clocks', 'sunshine-config', 'sunshine-config-restore'];
+  'diagnose', 'record', 'logs', 'power-plan', 'gpu-clocks', 'sunshine-config', 'sunshine-config-restore', 'away-prepare', 'ssh-setup'];
 const LAUNCHER_KINDS: CommandKind[] = ['display-set', 'display-headless', 'display-restore'];
 
 const MAC_RE = /^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$/;
@@ -53,15 +57,17 @@ const cleanIp = (v: unknown): string | null => (typeof v === 'string' && IPV4_RE
 export interface LocalMachineView {
   id: string; name: string; lanIp: string | null; mac: string | null;
   online: boolean; lastSeenAt: string | null; scriptEnabled: boolean; displayMode: 'mirror' | 'headless';
+  wanHost: string | null; awayOk: boolean; awayCheckedAt: string | null; sshEnabled: boolean;
   status: Record<string, any> | null; createdAt: string;
 }
 
-const COLUMNS = 'id, name, lan_ip, mac_address, script_enabled, display_mode, status, last_seen_at, created_at';
+const COLUMNS = 'id, name, lan_ip, mac_address, script_enabled, display_mode, wan_host, away_ok, away_checked_at, ssh_enabled, status, last_seen_at, created_at';
 const view = (r: any): LocalMachineView => ({
   id: r.id, name: r.name, lanIp: r.lan_ip, mac: r.mac_address,
   online: !!r.last_seen_at && Date.now() - new Date(r.last_seen_at).getTime() < ONLINE_WITHIN_MS,
   lastSeenAt: r.last_seen_at ? new Date(r.last_seen_at).toISOString() : null,
-  scriptEnabled: !!r.script_enabled, displayMode: r.display_mode === 'headless' ? 'headless' : 'mirror', status: r.status || null, createdAt: new Date(r.created_at).toISOString(),
+  scriptEnabled: !!r.script_enabled, displayMode: r.display_mode === 'headless' ? 'headless' : 'mirror',
+  wanHost: r.wan_host || null, awayOk: !!r.away_ok, awayCheckedAt: r.away_checked_at ? new Date(r.away_checked_at).toISOString() : null, sshEnabled: !!r.ssh_enabled, status: r.status || null, createdAt: new Date(r.created_at).toISOString(),
 });
 
 async function owned(userId: string, id: string) {
@@ -93,14 +99,14 @@ export async function createLocalMachine(userId: string, input: { name?: unknown
   const agentToken = newToken('cgl'), launcherToken = newToken('cgm');
   const id = crypto.randomUUID();
   const row = (await query(
-    `INSERT INTO local_machines (id, user_id, name, lan_ip, mac_address, agent_token_hash, launcher_token_hash, launcher_token_enc)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${COLUMNS}`,
+    `INSERT INTO local_machines (id, user_id, name, lan_ip, mac_address, agent_token_hash, launcher_token_hash, launcher_token_enc, ssh_enabled)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE) RETURNING ${COLUMNS}`,
     [id, userId, name, cleanIp(input.lanIp), normalizeMac(input.mac), hash(agentToken), hash(launcherToken), encryptCredentials(userId, `local:${id}`, { launcherToken })],
   )).rows[0];
   return { machine: view(row), agentToken };
 }
 
-export async function updateLocalMachine(userId: string, id: string, patch: { name?: unknown; lanIp?: unknown; mac?: unknown; scriptEnabled?: unknown; displayMode?: unknown }) {
+export async function updateLocalMachine(userId: string, id: string, patch: { name?: unknown; lanIp?: unknown; mac?: unknown; scriptEnabled?: unknown; displayMode?: unknown; wanHost?: unknown; sshEnabled?: unknown }) {
   await owned(userId, id);
   const sets: string[] = []; const vals: any[] = [id, userId];
   const add = (col: string, v: unknown) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
@@ -117,6 +123,13 @@ export async function updateLocalMachine(userId: string, id: string, patch: { na
   if (patch.displayMode !== undefined) {
     if (patch.displayMode !== 'mirror' && patch.displayMode !== 'headless') throw new MachineRequestError(400, 'The screen mode is "mirror" or "headless".');
     add('display_mode', patch.displayMode);
+  }
+  if (patch.sshEnabled !== undefined) add('ssh_enabled', patch.sshEnabled === true);
+  if (patch.wanHost !== undefined) {
+    const h = typeof patch.wanHost === 'string' ? patch.wanHost.trim().toLowerCase() : '';
+    if (h && !(net.isIP(h) || /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(h))) throw new MachineRequestError(400, 'That isn\'t an internet address or name.', 'Like 203.0.113.7 or myhome.example.com. Leave it empty to use the address GGGH sees.');
+    add('wan_host', h || null);
+    sets.push('away_ok = FALSE'); // a new address has not been tested yet
   }
   if (!sets.length) throw new MachineRequestError(400, 'Nothing to change.');
   const row = (await query(`UPDATE local_machines SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2 RETURNING ${COLUMNS}`, vals)).rows[0];
@@ -140,7 +153,7 @@ export async function rotateAgentToken(userId: string, id: string): Promise<stri
 export async function launcherInfo(userId: string, id: string) {
   const row = await owned(userId, id);
   const { launcherToken } = decryptCredentials(userId, `local:${id}`, row.launcher_token_enc);
-  return { launcherToken: launcherToken as string, lanIp: row.lan_ip as string | null, mac: row.mac_address as string | null };
+  return { launcherToken: launcherToken as string, lanIp: row.lan_ip as string | null, mac: row.mac_address as string | null, awayOk: !!row.away_ok };
 }
 
 function checkArgs(kind: CommandKind, args: any, scriptEnabled: boolean): Record<string, unknown> {
@@ -178,6 +191,16 @@ function checkArgs(kind: CommandKind, args: any, scriptEnabled: boolean): Record
     case 'gpu-clocks':
       if (a.action !== 'lock' && a.action !== 'reset') throw new MachineRequestError(400, 'The action is "lock" or "reset".');
       return { action: a.action };
+    case 'away-prepare': return {};
+    case 'ssh-setup': {
+      const keys = (Array.isArray(a.keys) ? a.keys : []).map((k: unknown) => String(k).trim()).filter((k: string) => /^(ssh-(rsa|ed25519)|ecdsa-sha2-[a-z0-9]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+/=]+( [^\r\n]*)?$/.test(k) && k.length <= 1000).slice(0, 20);
+      return { keys };
+    }
+    case 'tunnel-open': {
+      const port = Math.round(Number(a.port));
+      if (!/^[0-9a-f-]{36}$/i.test(String(a.sid)) || !(port >= 1 && port <= 65535)) throw new MachineRequestError(400, 'Bad tunnel request.');
+      return { sid: String(a.sid), port };
+    }
     case 'sunshine-config': {
       const rule = SUNSHINE_SETTINGS[String(a.key)];
       if (!rule) throw new MachineRequestError(400, 'That Sunshine setting can\'t be changed from here.', `Allowed: ${Object.keys(SUNSHINE_SETTINGS).join(', ')}.`);
@@ -200,6 +223,7 @@ async function enqueue(row: any, kind: CommandKind, args: unknown, source: 'app'
 export async function sendLocalCommand(userId: string, id: string, kind: unknown, args?: unknown) {
   const row = await owned(userId, id);
   if (!APP_KINDS.includes(kind as CommandKind)) throw new MachineRequestError(400, 'That isn\'t something this PC can be asked to do.');
+  if (kind === 'ssh-setup') args = { keys: await getSshKeys(userId) }; // the account's saved public keys; never typed here
   return enqueue(row, kind as CommandKind, args, 'app');
 }
 
@@ -283,18 +307,21 @@ async function recordSample(machineId: string, st: any) {
   } catch (e) { console.error('local sample not saved:', (e as Error).message); }
 }
 
-export async function agentPoll(token: string, report: any, holdMs = POLL_HOLD_MS, stepMs = 1500) {
+export async function agentPoll(token: string, report: any, holdMs = POLL_HOLD_MS, stepMs = 1500, clientIp?: string) {
   const m = await byToken(token, 'agent_token_hash');
   if (!m) return null;
   const st = report && typeof report === 'object' ? report : {};
   const update = updatesFor(st);
-  const safe = JSON.stringify(st).length <= 20_000 ? st : {};
+  const safe: any = JSON.stringify(st).length <= 20_000 ? { ...st } : {};
+  const seenIp = clientIp ? clientIp.replace(/^::ffff:/, '') : '';
+  if (seenIp && net.isIP(seenIp)) safe.publicIp = seenIp; // what the internet sees of the PC's home connection
   await query(
     `UPDATE local_machines SET last_seen_at = NOW(), status = $2,
        lan_ip = COALESCE($3, lan_ip), mac_address = COALESCE($4, mac_address) WHERE id = $1`,
     [m.id, JSON.stringify(safe), cleanIp(st.lanIp), normalizeMac(st.mac)],
   );
   await recordSample(m.id, safe);
+  await maybeSetupSsh(m, safe);
   // Tidy up: commands nobody picked up, or that were picked up and never answered.
   await query(`UPDATE local_commands SET status = 'expired', finished_at = NOW() WHERE machine_id = $1 AND status = 'queued' AND created_at < $2`, [m.id, new Date(Date.now() - QUEUE_TTL_MS)]);
   await query(`UPDATE local_commands SET status = 'failed', result = 'The PC never answered.', finished_at = NOW() WHERE machine_id = $1 AND status = 'sent' AND sent_at < $2`, [m.id, new Date(Date.now() - SENT_TTL_MS)]);
@@ -452,4 +479,109 @@ export async function localTelemetry(userId: string, id: string, minutes = 60) {
   }
   const note = online ? undefined : (row.last_seen_at ? 'The PC is off, asleep or cannot reach GGGH. The charts show its last readings.' : 'This PC has not connected to GGGH yet.');
   return { samples, latest, alerts, readAt: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : null, note };
+}
+
+// ---------------------------------------------------------------------------
+// Away access: is the PC's Sunshine reachable from the internet?
+// ---------------------------------------------------------------------------
+
+/** Only the open internet: never a private, loopback, link-local or shared (CGNAT) address. */
+export function isPublicAddress(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    return true;
+  }
+  if (net.isIPv6(ip)) {
+    const l = ip.toLowerCase();
+    return !(l === '::1' || l === '::' || l.startsWith('fc') || l.startsWith('fd') || l.startsWith('fe8') || l.startsWith('fe9') || l.startsWith('fea') || l.startsWith('feb'));
+  }
+  return false;
+}
+
+/** The address a travelling Moonlight command should try: the typed one, else what GGGH saw the agent connect from. */
+export function awayAddress(row: any): string | null {
+  return row.wan_host || row.status?.publicIp || null;
+}
+
+const tcpOpen = (host: string, port: number, ms = 5000) => new Promise<boolean>((resolve) => {
+  const s = net.connect({ host, port });
+  const done = (ok: boolean) => { s.destroy(); resolve(ok); };
+  s.setTimeout(ms, () => done(false));
+  s.once('connect', () => done(true));
+  s.once('error', () => done(false));
+});
+
+const sunshineAnswers = (host: string) => new Promise<boolean>((resolve) => {
+  const req = http.get({ host, port: 47989, path: '/serverinfo', timeout: 6000 }, (r) => {
+    let body = '';
+    r.on('data', (d) => { if (body.length < 4000) body += d; });
+    r.on('end', () => resolve((r.statusCode || 0) < 500 && /<root|HostName|uniqueid/i.test(body)));
+  });
+  req.on('timeout', () => { req.destroy(); resolve(false); });
+  req.on('error', () => resolve(false));
+});
+
+/** From GGGH's server: does anything answer like Sunshine at the PC's internet address? */
+export async function awayCheck(userId: string, id: string) {
+  const row = await owned(userId, id);
+  const host = awayAddress(row);
+  if (!host) throw new MachineRequestError(400, 'GGGH does not know this PC\'s internet address yet.', 'It learns it when the agent next connects.');
+  let ip = host;
+  if (!net.isIP(host)) {
+    try { ip = (await dns.promises.lookup(host)).address; } catch { return { host, ok: false, httpOk: false, httpsOk: false, message: `The name ${host} does not resolve to an address.` }; }
+  }
+  if (!isPublicAddress(ip)) {
+    return { host, ok: false, httpOk: false, httpsOk: false, message: `${host} is a private address, not one the internet can reach. If it starts with 100.64 to 100.127 your provider shares one address between customers (CGNAT).` };
+  }
+  const [httpsOk, httpOk] = await Promise.all([tcpOpen(ip, 47984), sunshineAnswers(ip)]);
+  const ok = httpOk || httpsOk;
+  await query('UPDATE local_machines SET away_ok = $2, away_checked_at = NOW() WHERE id = $1', [id, ok]);
+  const message = ok
+    ? `Sunshine answers at ${host}. Away streaming should work.`
+    : `Nothing answered at ${host}. Usual causes: the router is not forwarding the ports (UPnP off or unsupported), the provider shares one address between customers (CGNAT: the address your router shows differs from ${host}), or a firewall in between.`;
+  return { host, ok, httpOk, httpsOk, message };
+}
+
+/** For the generated command (launcher token): where to find the PC from outside. */
+export async function launcherAddress(token: string) {
+  const m = await byToken(token, 'launcher_token_hash');
+  if (!m) return null;
+  const host = m.away_ok ? awayAddress(m) : null;
+  return { host };
+}
+
+// ---------------------------------------------------------------------------
+// SSH through GGGH
+// ---------------------------------------------------------------------------
+
+/** A PC with SSH switched on whose agent reports no running SSH server is told to set one up (at most every 30 minutes). */
+async function maybeSetupSsh(row: any, st: any) {
+  if (!row.ssh_enabled || !st?.ssh || st.ssh.running === true) return;
+  const recent = (await query(`SELECT 1 FROM local_commands WHERE machine_id = $1 AND kind = 'ssh-setup' AND created_at > $2 LIMIT 1`, [row.id, new Date(Date.now() - 30 * 60_000)])).rows[0];
+  if (recent) return;
+  try { await enqueue(row, 'ssh-setup', { keys: await getSshKeys(row.user_id) }, 'app'); } catch { /* try again later */ }
+}
+
+/** A launcher-token holder asks for an SSH connection: returns what the tunnel hub needs, or why not. */
+export async function sshTunnelRequest(launcherToken: string): Promise<{ ok: true; machineId: string; sid: string } | { ok: false; status: number; message: string }> {
+  const m = await byToken(launcherToken, 'launcher_token_hash');
+  if (!m) return { ok: false, status: 401, message: 'Unknown token.' };
+  if (!m.ssh_enabled) return { ok: false, status: 403, message: 'SSH through GGGH is switched off for this PC.' };
+  const online = !!m.last_seen_at && Date.now() - new Date(m.last_seen_at).getTime() < ONLINE_WITHIN_MS;
+  if (!online) return { ok: false, status: 503, message: 'The PC is off or not connected to GGGH.' };
+  const sid = crypto.randomUUID();
+  const port = Number(m.status?.ssh?.port) || 22;
+  await enqueue(m, 'tunnel-open', { sid, port }, 'launcher');
+  return { ok: true, machineId: m.id, sid };
+}
+
+/** The agent dialling in for a tunnel: its token, and which machine it is. */
+export async function tunnelAgentMachine(agentToken: string): Promise<string | null> {
+  const m = await byToken(agentToken, 'agent_token_hash');
+  return m ? (m.id as string) : null;
 }

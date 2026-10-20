@@ -23,6 +23,8 @@ export const SUNSHINE_SETTINGS: Record<string, { re: RegExp; hint: string }> = {
   nvenc_preset: { re: /^[1-7]$/, hint: 'NVIDIA encoder speed/quality, 1 = fastest' },
   nvenc_twopass: { re: /^(disabled|quarter_res|full_res)$/, hint: 'NVIDIA two-pass mode' },
   nvenc_realtime_hags: { re: /^(enabled|disabled)$/, hint: 'prioritise the encoder under heavy GPU load' },
+  upnp: { re: /^(enabled|disabled)$/, hint: 'let the router open Sunshine\'s ports itself (UPnP)' },
+  origin_web_ui_allowed: { re: /^(pc|lan)$/, hint: 'who may open Sunshine\'s admin page (never the internet)' },
   nvenc_latency_over_power: { re: /^(enabled|disabled)$/, hint: 'favour low latency over power saving' },
 };
 
