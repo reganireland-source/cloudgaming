@@ -399,9 +399,9 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
 
       <div className="space-y-2 border-t border-white/5 pt-3">
         <p className="label">Away from home: Moonlight over the internet</p>
-        <p className="text-slate-400">Moonlight streams straight from the PC, so away from home your router has to let it in. 1) Prepare the PC (Sunshine asks the router to open its ports with UPnP; its admin page stays home-only). 2) Test from the internet. When that passes, the Moonlight command tries the home address first and otherwise asks GGGH for the current internet address, with a lower bitrate.</p>
+        <p className="text-slate-400">Moonlight streams straight from the PC, so away from home your router has to let it in. 1) Prepare the PC (this restarts Sunshine, so it ends any stream in progress; Sunshine then asks the router to open its ports with UPnP; its admin page stays home-only). 2) Test from the internet. When that passes, the Moonlight command tries the home address first and otherwise asks GGGH for the current internet address, with a lower bitrate.</p>
         <div className="flex flex-wrap gap-2 items-center">
-          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} onClick={() => runCommand('away-prepare', undefined, 'Prepare for away access')}>1. Prepare the PC</button>
+          <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} title="Restarts Sunshine, which ends any stream in progress" onClick={() => runCommand('away-prepare', undefined, 'Prepare for away access')}>1. Prepare the PC</button>
           <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={awayBusy || !(m.wanHost || m.status?.publicIp)} onClick={testAway}>{awayBusy ? 'Testing…' : '2. Test from the internet'}</button>
           {m.awayOk && <span className="text-neon-lime">✓ reachable{m.awayCheckedAt ? ` (tested ${timeAgo(m.awayCheckedAt)})` : ''}</span>}
         </div>

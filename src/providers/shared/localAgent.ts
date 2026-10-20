@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22)
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '7'
+$AgentVersion = '8'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -594,7 +594,7 @@ function Do-GpuClocks($action) {
   return @(($LASTEXITCODE -eq 0), ('GPU clocks locked to {0}-{1} MHz until the PC restarts (or you unlock them). {2}' -f $min, $max, $o.Trim()))
 }
 
-function Do-SunshineConfig($key, $value) {
+function Do-SunshineConfig($key, $value, $noRestart) {
   if (-not (Test-Path $SunshineConf)) { return @($false, 'Sunshine config file not found.') }
   $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   Copy-Item $SunshineConf ($SunshineConf + '.gggh-' + $stamp) -Force
@@ -606,7 +606,7 @@ function Do-SunshineConfig($key, $value) {
   }
   if (-not $found) { $out += ('{0} = {1}' -f $key, $value) }
   [IO.File]::WriteAllLines($SunshineConf, [string[]]$out, (New-Object Text.UTF8Encoding $false))
-  Restart-Service -Name 'SunshineService' -Force
+  if (-not $noRestart) { Restart-Service -Name 'SunshineService' -Force }
   return @($true, ('Sunshine setting {0} = {1} saved and Sunshine restarted. The previous config is kept; "Restore previous Sunshine config" undoes it.' -f $key, $value))
 }
 
@@ -835,7 +835,7 @@ function Do-AwayPrepare {
     Get-NetConnectionProfile -ErrorAction Stop | Where-Object { $_.NetworkCategory -eq 'Public' -and $_.IPv4Connectivity -ne 'Disconnected' } | ForEach-Object { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private; $n++ }
     if ($n) { $msgs += 'Network set to Private (Public blocks Sunshine).' }
   } catch { $msgs += ('Could not check the network type: ' + $_.Exception.Message) }
-  $r = Do-SunshineConfig 'origin_web_ui_allowed' 'lan'
+  $r = Do-SunshineConfig 'origin_web_ui_allowed' 'lan' $true
   if (-not $r[0]) { $ok = $false; $msgs += [string]$r[1] } else { $msgs += 'Sunshine admin page limited to the home network.' }
   if ($ok) {
     $r = Do-SunshineConfig 'upnp' 'enabled'
