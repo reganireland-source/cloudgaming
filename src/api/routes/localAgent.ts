@@ -35,7 +35,9 @@ router.get('/boot.ps1', (_req, res) => { res.type('text/plain').send(BOOT_PS1); 
 router.post('/poll', async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
   try {
-    const out = await agentPoll(bearer(req), req.body, undefined, undefined, req.ip);
+    // Behind Railway's edge, req.ip can be the edge itself: prefer the client address it passes on.
+    const real = String(req.headers['x-real-ip'] || '').trim() || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const out = await agentPoll(bearer(req), req.body, undefined, undefined, real || req.ip);
     if (!out) return res.status(401).json({ error: 'Unknown token. Run the install command from GGGH again.' });
     res.json(out);
   } catch (e) {

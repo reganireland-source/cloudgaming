@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22)
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '8'
+$AgentVersion = '9'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -405,6 +405,12 @@ function Get-Status {
   } catch { }
   try { $dr = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':')) -ErrorAction Stop; $s.diskUsedGb = [Math]::Round($dr.Used / 1GB, 0); $s.diskTotalGb = [Math]::Round(($dr.Used + $dr.Free) / 1GB, 0) } catch { }
   $s.ssh = Get-SshInfo
+  # The internet address this PC's connection shows to the world (asked of an outside service, every 10 minutes).
+  if (-not $script:ipAt -or ((Get-Date) - $script:ipAt).TotalMinutes -ge 10) {
+    try { $script:myIp = ([string](Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 5)).Trim() } catch { }
+    $script:ipAt = Get-Date
+  }
+  if ($script:myIp -match '^\d{1,3}(\.\d{1,3}){3}$') { $s.myIp = $script:myIp }
   try {
     $s.away = @{ upnp = ''; webUi = ''; profile = '' }
     if (Test-Path $SunshineConf) {

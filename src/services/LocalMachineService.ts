@@ -505,7 +505,8 @@ export function isPublicAddress(ip: string): boolean {
 
 /** The address a travelling Moonlight command should try: the typed one, else what GGGH saw the agent connect from. */
 export function awayAddress(row: any): string | null {
-  return row.wan_host || row.status?.publicIp || null;
+  const mine = typeof row.status?.myIp === 'string' && net.isIPv4(row.status.myIp) ? row.status.myIp : null; // asked of an outside service by the PC itself
+  return row.wan_host || mine || row.status?.publicIp || null;
 }
 
 const tcpOpen = (host: string, port: number, ms = 5000) => new Promise<boolean>((resolve) => {
@@ -529,6 +530,7 @@ const sunshineAnswers = (host: string) => new Promise<boolean>((resolve) => {
 /** From GGGH's server: does anything answer like Sunshine at the PC's internet address? */
 export async function awayCheck(userId: string, id: string) {
   const row = await owned(userId, id);
+  if (row.away_checked_at && Date.now() - new Date(row.away_checked_at).getTime() < 8_000) throw new MachineRequestError(429, 'Give it a few seconds between tests.');
   const host = awayAddress(row);
   if (!host) throw new MachineRequestError(400, 'GGGH does not know this PC\'s internet address yet.', 'It learns it when the agent next connects.');
   let ip = host;

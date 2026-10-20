@@ -31,7 +31,7 @@ interface LocalMachine {
   online: boolean; lastSeenAt: string | null; scriptEnabled: boolean; displayMode: LocalMode;
   wanHost: string | null; awayOk: boolean; awayCheckedAt: string | null; sshEnabled: boolean;
   status: {
-    publicIp?: string;
+    publicIp?: string; myIp?: string;
     ssh?: { installed: boolean; running: boolean; port: number; user: string };
     away?: { upnp: string; webUi: string; profile: string };
     display?: { mode: LocalMode; virtual: boolean; virtualState?: string; seen?: string[] };
@@ -406,7 +406,7 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
           {m.awayOk && <span className="text-neon-lime">✓ reachable{m.awayCheckedAt ? ` (tested ${timeAgo(m.awayCheckedAt)})` : ''}</span>}
         </div>
         <p className="text-slate-500">
-          Internet address GGGH sees for this PC: <span className="text-slate-300 tabular-nums">{m.status?.publicIp || 'not known yet'}</span>.
+          Internet address GGGH sees for this PC: <span className="text-slate-300 tabular-nums">{m.wanHost || m.status?.myIp || m.status?.publicIp || 'not known yet'}</span>.
           {m.status?.away && <> UPnP in Sunshine: <span className="text-slate-300">{m.status.away.upnp || 'off'}</span> · admin page: <span className="text-slate-300">{m.status.away.webUi || 'default'}</span> · network type: <span className="text-slate-300">{m.status.away.profile || '?'}</span>.</>}
           {' '}Compare that address with the “internet / WAN address” on your router’s status page: if they differ (or the router’s starts with 100.64 to 100.127) your provider shares one address between customers and a stream can’t reach you.
         </p>
