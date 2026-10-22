@@ -102,6 +102,7 @@ import { MAC_CLIPBOARD_SCRIPT } from './providers/shared/macClipboard';
 import { clipboardTarget } from './services/SshAccessService';
 import localMachineRoutes from './api/routes/localMachines';
 import localAgentRoutes from './api/routes/localAgent';
+import rocjobRoutes from './api/routes/rocjob';
 
 import { attachLocalTunnel } from './services/LocalTunnel';
 // Create the Express application. Everything below configures this object.
@@ -134,6 +135,7 @@ app.use(
 // "Body parsing": when the frontend sends data (e.g. a form as JSON), it
 // arrives as raw text. These two lines turn it into a JavaScript object and
 // put it on `req.body`, so route code can just read `req.body.provider`.
+app.use('/api/rocjob/event', express.json({ limit: '1kb' })); // the game's stats events are tiny; anything bigger is refused
 app.use('/api/local-agent/report', express.json({ limit: '1mb' })); // a PC's diagnostic reports are bigger than the 100 kb default
 app.use(express.json());                          // for JSON bodies (what our frontend sends)
 app.use(express.urlencoded({ extended: true }));  // for classic HTML-form bodies
@@ -190,6 +192,7 @@ app.get('/health', async (req: Request, res: Response) => {
 //
 // Routes WITHOUT authMiddleware are public (no login needed).
 // ---------------------------------------------------------------------------
+app.use('/api/rocjob', rocjobRoutes);          // PUBLIC: anonymous play stats from the Rocjob game (key / token checked inside)
 app.use('/api/status', statusRoutes);          // PUBLIC: status lights must work before anyone logs in
 app.use('/api/auth', authRoutes);
 // PUBLIC: the telemetry agent AWS machines download at boot (no secrets in it; the

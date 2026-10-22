@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Rocjob stats</title>
+<style>
+  :root {
+    --bg: #15111f; --panel: #211a33; --panel-2: #2a2140; --line: #3a2f57; --text: #f2edf9; --dim: #a79ec0;
+    --accent: #ffd34d; --a2: #b07cff; --a3: #5ad6c4; --bad: #ff6b81; --ok: #62e08a;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 18px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: .02em; }
+  .alive { color: var(--dim); font-size: 13px; display: inline-flex; align-items: center; gap: 7px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); display: inline-block; }
+  .dot.ok { background: var(--ok); } .dot.stale { background: var(--accent); } .dot.bad { background: var(--bad); }
+  .big { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card .n { font-size: clamp(26px, 7vw, 32px); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .card .l { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .07em; margin-top: 4px; }
+  .card .s { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  h2 { margin: 6px 0 0; font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  .charts { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); }
+  .chart svg { width: 100%; height: 120px; display: block; }
+  .chart .t { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 13px; }
+  .chart .t b { font-weight: 600; } .chart .t span { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .axis { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; margin-top: 3px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  td.r, th.r { text-align: right; }
+  .tbl { overflow-x: auto; }
+  .bar { height: 10px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--a2); }
+  .plat { display: grid; gap: 8px; }
+  .plat div { display: grid; grid-template-columns: 78px 1fr 64px; gap: 10px; align-items: center; font-size: 14px; }
+  .plat span:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); }
+  .login { max-width: 420px; margin: 18vh auto 0; display: grid; gap: 10px; }
+  input, button { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
+  button { cursor: pointer; } button:hover { border-color: var(--a2); }
+  button.danger { color: var(--bad); border-color: #5a2a3a; }
+  .note { color: var(--dim); font-size: 12.5px; }
+  .err { color: var(--bad); font-size: 13.5px; }
+  details { color: var(--dim); font-size: 13px; }
+  details summary { cursor: pointer; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main id="app" hidden>
+  <header>
+    <h1>Rocjob stats</h1>
+    <span class="alive"><span class="dot" id="dot"></span><span id="alive">loading…</span></span>
+  </header>
+
+  <section class="big" id="big"></section>
+
+  <h2>Last 30 days</h2>
+  <section class="charts" id="charts"></section>
+
+  <h2>Builds</h2>
+  <section class="card tbl"><table id="builds"></table></section>
+
+  <h2>Platforms</h2>
+  <section class="card plat" id="plat"></section>
+
+  <p class="note" id="foot"></p>
+
+  <details>
+    <summary>Delete all the data</summary>
+    <p>This erases every install, launch and playtime record. It can't be undone. Type <b>WIPE</b> to confirm.</p>
+    <p><input id="wipeText" autocomplete="off" aria-label="Type WIPE"> <button class="danger" id="wipeBtn">Delete everything</button></p>
+    <p class="err" id="wipeMsg"></p>
+  </details>
+</main>
+
+<form class="login" id="login" hidden>
+  <h1>Rocjob stats</h1>
+  <p class="note">Private. Paste the stats password.</p>
+  <input id="tok" type="password" autocomplete="off" aria-label="Stats password">
+  <button type="submit">Open</button>
+  <p class="err" id="loginErr"></p>
+</form>
+
+<script>
+(function () {
+  // Where the numbers come from. Change only if the backend moves (or add ?api=https://host/api to try another).
+  var API = new URLSearchParams(location.search).get('api') || 'https://cloudgaming-production.up.railway.app/api';
+  var $ = function (id) { return document.getElementById(id); };
+  var token = '';
+  var timer = null;
+
+  // The password rides in the address after the # (browsers don't send that part anywhere): .../rocjob-stats/#password
+  function readToken() {
+    var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    if (h.indexOf('=') > -1) h = new URLSearchParams(h).get('t') || '';
+    return h;
+  }
+  function fmt(n) { return Number(n).toLocaleString('en-US'); }
+  function hours(sec) { var h = sec / 3600; return (h >= 100 ? Math.round(h) : Math.round(h * 10) / 10).toLocaleString('en-US') + ' h'; }
+  function dur(sec) {
+    sec = Math.round(sec);
+    if (sec < 90) return sec + ' s';
+    var m = Math.round(sec / 60);
+    if (m < 90) return m + ' min';
+    return (Math.round(sec / 360) / 10) + ' h';
+  }
+  function ago(iso) {
+    if (!iso) return null;
+    var s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 90) return s + ' s ago'; if (s < 5400) return Math.round(s / 60) + ' min ago';
+    if (s < 172800) return Math.round(s / 3600) + ' h ago'; return Math.round(s / 86400) + ' days ago';
+  }
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+
+  function bigCard(n, l, s) { var c = el('div', 'card'); c.appendChild(el('div', 'n', n)); c.appendChild(el('div', 'l', l)); if (s) c.appendChild(el('div', 's', s)); return c; }
+
+  function chart(title, rows, key, color, formatTotal) {
+    var c = el('div', 'card chart');
+    var total = rows.reduce(function (a, r) { return a + r[key]; }, 0);
+    var t = el('div', 't'); t.appendChild(el('b', null, title)); t.appendChild(el('span', null, formatTotal(total) + ' in 30 days')); c.appendChild(t);
+    var W = 300, H = 120, pad = 4, bw = W / rows.length;
+    var max = Math.max.apply(null, rows.map(function (r) { return r[key]; }).concat([1]));
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', title + ' per day, last 30 days');
+    rows.forEach(function (r, i) {
+      var h = Math.max(r[key] > 0 ? 2 : 0, (r[key] / max) * (H - pad * 2));
+      var rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', (i * bw + 1).toFixed(1)); rect.setAttribute('width', Math.max(1, bw - 2).toFixed(1));
+      rect.setAttribute('y', (H - pad - h).toFixed(1)); rect.setAttribute('height', h.toFixed(1)); rect.setAttribute('rx', '1.5'); rect.setAttribute('fill', color);
+      var tt = document.createElementNS(ns, 'title'); tt.textContent = r.day + ': ' + (key === 'seconds' ? dur(r[key]) : fmt(r[key]));
+      rect.appendChild(tt); svg.appendChild(rect);
+    });
+    c.appendChild(svg);
+    var ax = el('div', 'axis'); ax.appendChild(el('span', null, rows[0].day.slice(5))); ax.appendChild(el('span', null, 'peak ' + (key === 'seconds' ? dur(max) : fmt(max)))); ax.appendChild(el('span', null, rows[rows.length - 1].day.slice(5)));
+    c.appendChild(ax);
+    return c;
+  }
+
+  function render(d) {
+    var t = d.totals;
+    var big = $('big'); big.textContent = '';
+    big.appendChild(bigCard(fmt(t.installs), 'Unique installs'));
+    big.appendChild(bigCard(fmt(t.launches), 'Launches', '"logins"'));
+    big.appendChild(bigCard(hours(t.playSeconds), 'Total playtime'));
+    big.appendChild(bigCard(dur(t.avgSessionSeconds), 'Average session'));
+    big.appendChild(bigCard(dur(t.avgPerInstallSeconds), 'Playtime per install'));
+    big.appendChild(bigCard(fmt(t.active24h), 'Active, 24 hours'));
+    big.appendChild(bigCard(fmt(t.active7d), 'Active, 7 days'));
+    big.appendChild(bigCard(fmt(t.active30d), 'Active, 30 days'));
+
+    var ch = $('charts'); ch.textContent = '';
+    ch.appendChild(chart('New installs', d.daily, 'installs', '#ffd34d', fmt));
+    ch.appendChild(chart('Launches', d.daily, 'launches', '#b07cff', fmt));
+    ch.appendChild(chart('Playtime', d.daily, 'seconds', '#5ad6c4', hours));
+
+    var tb = $('builds'); tb.textContent = '';
+    var head = el('tr'); ['Build', 'Version', 'Installs seen', 'Launches'].forEach(function (h, i) { head.appendChild(el('th', i > 1 ? 'r' : '', h)); }); tb.appendChild(head);
+    if (!d.builds.length) { var e = el('tr'); var td = el('td', null, 'No data yet.'); td.colSpan = 4; e.appendChild(td); tb.appendChild(e); }
+    d.builds.forEach(function (b) {
+      var r = el('tr'); r.appendChild(el('td', null, String(b.build))); r.appendChild(el('td', null, b.version));
+      r.appendChild(el('td', 'r', fmt(b.installs))); r.appendChild(el('td', 'r', fmt(b.launches))); tb.appendChild(r);
+    });
+
+    var pl = $('plat'); pl.textContent = '';
+    var sum = d.platforms.reduce(function (a, p) { return a + p.installs; }, 0) || 1;
+    if (!d.platforms.length) pl.appendChild(el('span', 'note', 'No data yet.'));
+    d.platforms.forEach(function (p) {
+      var row = el('div'); row.appendChild(el('span', null, p.platform));
+      var bar = el('div', 'bar'); var i = el('i'); i.style.width = Math.round((p.installs / sum) * 100) + '%'; bar.appendChild(i); row.appendChild(bar);
+      row.appendChild(el('span', null, fmt(p.installs) + ' · ' + Math.round((p.installs / sum) * 100) + '%')); pl.appendChild(row);
+    });
+
+    var a = ago(d.lastEventAt), age = d.lastEventAt ? (Date.now() - new Date(d.lastEventAt).getTime()) / 1000 : null;
+    $('alive').textContent = a ? 'last event ' + a : 'no events received yet';
+    $('dot').className = 'dot ' + (age == null ? 'bad' : age < 3600 ? 'ok' : age < 86400 * 3 ? 'stale' : 'bad');
+    $('foot').textContent = 'Anonymous: each install is a random id the game makes once; no IP address, name, email or hardware id is stored. Days are Singapore time (' + d.timezone + '), counted from when a session started. Average session counts launches that reported any playtime. Refreshes every minute.';
+  }
+
+  function call(path, opts) {
+    opts = opts || {}; opts.headers = Object.assign({ 'X-Rocjob-Stats-Token': token }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  function load() {
+    return call('/rocjob/stats').then(function (r) {
+      if (r.status === 401 || r.status === 404) { showLogin(r.status === 401 ? 'That password is wrong.' : 'Stats are not switched on yet.'); throw new Error('auth'); }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (d) { $('login').hidden = true; $('app').hidden = false; render(d); });
+  }
+  function showLogin(msg) { $('app').hidden = true; $('login').hidden = false; $('loginErr').textContent = msg || ''; clearInterval(timer); }
+  function start() {
+    token = readToken();
+    if (!token) return showLogin('');
+    load().then(function () { clearInterval(timer); timer = setInterval(function () { load().catch(function () {}); }, 60000); })
+      .catch(function (e) { if (e.message !== 'auth') { $('app').hidden = false; $('alive').textContent = 'could not load (' + e.message + ')'; $('dot').className = 'dot bad'; } });
+  }
+  $('login').addEventListener('submit', function (e) { e.preventDefault(); location.hash = encodeURIComponent($('tok').value.trim()); $('tok').value = ''; start(); });
+  $('wipeBtn').addEventListener('click', function () {
+    if ($('wipeText').value.trim() !== 'WIPE') { $('wipeMsg').textContent = 'Type WIPE (capitals) first.'; return; }
+    call('/rocjob/data', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'WIPE' }) })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); $('wipeText').value = ''; $('wipeMsg').textContent = ''; return load(); })
+      .catch(function (e) { $('wipeMsg').textContent = 'Could not delete: ' + e.message; });
+  });
+  window.addEventListener('hashchange', start);
+  start();
+})();
+</script>
+</body>
+</html>
