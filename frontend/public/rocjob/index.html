@@ -323,6 +323,10 @@ footer p { max-width: 72ch; }
             <svg viewBox="0 0 10 10" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 0h2v5h2v1H7v1H6v1H4V7H3V6H2V5h2zM1 9h8v1H1z"/></svg>
             <span></span>
           </a>
+          <a class="btn" id="dlBtn2" hidden target="_blank" rel="noopener">
+            <svg viewBox="0 0 10 10" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 0h2v5h2v1H7v1H6v1H4V7H3V6H2V5h2zM1 9h8v1H1z"/></svg>
+            <span></span>
+          </a>
           <p class="where" id="dlWhere" hidden></p>
           <div class="folder" id="folder" hidden>
             <h3>In the download</h3>
@@ -427,7 +431,7 @@ footer p { max-width: 72ch; }
     var name = file.split('/').pop();
     return ROOT + 'screenshots/' + encodeURIComponent(name);
   }
-  function safeLink(v) { return /^https?:\/\/\S+$/i.test(v) ? v : ''; }
+  function safeLink(v) { return /^(https?:\/\/|\/(?!\/))\S+$/i.test(v) ? v : ''; }
 
   function fillProse(box, lines) {
     var ps = paragraphs(lines);
@@ -464,7 +468,19 @@ footer p { max-width: 72ch; }
 
     var link = safeLink(p.get('download link'));
     var label = p.get('download button') || 'Download the game';
-    if (link) {
+    // Separate Windows and Mac downloads (served by this site): two buttons; the big button up top jumps to them.
+    var win = safeLink(p.get('download windows')), mac = safeLink(p.get('download mac'));
+    if (win || mac) {
+      var first = win || mac;
+      if (win) fillButton($('#dlBtn'), win, p.get('download windows button') || 'Download for Windows');
+      if (mac) fillButton(win ? $('#dlBtn2') : $('#dlBtn'), mac, p.get('download mac button') || 'Download for Mac');
+      ['#dlBtn', '#dlBtn2'].forEach(function (s) { var b = $(s); if (!b.hidden) { b.removeAttribute('target'); b.removeAttribute('rel'); b.setAttribute('download', ''); } });
+      fillButton($('#cta'), '#download', label); $('#cta').removeAttribute('target'); $('#cta').removeAttribute('rel');
+      if (p.get('download where')) {
+        show($('#where')).textContent = p.get('download where');
+        show($('#dlWhere')).textContent = p.get('download where');
+      }
+    } else if (link) {
       fillButton($('#cta'), link, label);
       fillButton($('#dlBtn'), link, label);
       if (p.get('download where')) {
