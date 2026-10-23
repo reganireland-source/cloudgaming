@@ -21,7 +21,7 @@
 
 import { Router, Request, Response } from 'express';
 import { cleanName, folderInfo, isPlatform, PLATFORMS, readMeta, removeFile, saveUpload, zipPath } from '../../services/RocjobFiles';
-import { allow, ingestEnabled, ingestKeyOk, parseEvent, recordEvent, stats, statsEnabled, statsTokenOk, wipe } from '../../services/RocjobStats';
+import { allow, ingestEnabled, ingestKeyOk, newInstallCapped, parseEvent, recordEvent, stats, statsEnabled, statsTokenOk, wipe } from '../../services/RocjobStats';
 
 const router = Router();
 const bearer = (req: Request) => String(req.headers['x-rocjob-stats-token'] || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '') || '').trim();
@@ -35,7 +35,10 @@ router.post('/event', async (req: Request, res: Response) => {
   const e = parseEvent(req.body);
   if (!e) return res.status(400).json({ error: 'Invalid event.' });
   if (!allow(`id:${e.install}`, 240, 3600_000)) return res.status(429).set('Retry-After', '600').json({ error: 'Slow down.' });
-  try { await recordEvent(e); res.status(204).end(); } catch (err) { console.error('rocjob event failed:', (err as Error).message); res.status(500).json({ error: 'Try again shortly.' }); }
+  try {
+    if (await newInstallCapped(e.install)) return res.status(429).set('Retry-After', '3600').json({ error: 'Too many new installs today. Try again later.' });
+    await recordEvent(e); res.status(204).end();
+  } catch (err) { console.error('rocjob event failed:', (err as Error).message); res.status(500).json({ error: 'Try again shortly.' }); }
 });
 
 function guard(req: Request, res: Response): boolean {

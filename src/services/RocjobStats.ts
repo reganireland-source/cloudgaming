@@ -16,6 +16,9 @@
  * stays switched off):
  *   ROCJOB_INGEST_KEY    the shared key the game sends (public in the game, so spam protection only)
  *   ROCJOB_STATS_TOKEN   the secret that opens the private stats page / API
+ *   ROCJOB_MAX_NEW_INSTALLS_PER_DAY   safety net against junk (default 200): once that many NEW installs
+ *                        have appeared in 24 h, further new ones are answered 429 (the game retries later);
+ *                        installs already known keep working
  * ============================================================================
  */
 
@@ -81,6 +84,15 @@ export function parseEvent(b: any): RocjobEvent | null {
     seconds = b.seconds;
   }
   return { event: b.event, install: b.install.toLowerCase(), session, build: b.build, version: b.version, platform: b.platform, seconds };
+}
+
+/** true = this event would create a brand-new install while the daily cap on new installs is used up. */
+export async function newInstallCapped(install: string): Promise<boolean> {
+  const cap = Math.max(1, Number(process.env.ROCJOB_MAX_NEW_INSTALLS_PER_DAY) || 200);
+  const known = (await query('SELECT 1 FROM rocjob_installs WHERE install = $1', [install])).rows[0];
+  if (known) return false;
+  const n = Number((await query(`SELECT COUNT(*) AS n FROM rocjob_installs WHERE first_seen > NOW() - INTERVAL '24 hours'`)).rows[0].n);
+  return n >= cap;
 }
 
 export async function recordEvent(e: RocjobEvent): Promise<void> {
