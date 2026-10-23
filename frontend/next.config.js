@@ -10,10 +10,13 @@ const nextConfig = {
     return [{ source: '/rocjob', destination: '/rocjob/index.html' }];
   },
   // /rocjob/get/windows and /rocjob/get/mac: short download links on this site that
-  // hand over to the backend, which serves the zips itself (see src/services/RocjobFiles.ts).
+  // lead to the "latest" zips in Vercel Blob (the same files page.txt links to).
   async redirects() {
-    const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api').replace(/\/$/, '');
-    return [{ source: '/rocjob/get/:platform(windows|mac)', destination: `${api}/rocjob/get/:platform`, permanent: false }];
+    const blob = 'https://stxqpdyndd3dc0mg.public.blob.vercel-storage.com/rocjob/download';
+    return [
+      { source: '/rocjob/get/windows', destination: `${blob}/Rocjob-Windows-latest.zip`, permanent: false },
+      { source: '/rocjob/get/mac', destination: `${blob}/Rocjob-Mac-latest.zip`, permanent: false },
+    ];
   },
 }
 

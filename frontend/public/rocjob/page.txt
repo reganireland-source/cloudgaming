@@ -23,20 +23,16 @@ Tagline: A rhythm beat 'em up through rock history.
 # The scrolling strip under the title. Separate bits with a star.
 Banner: 2-player co-op ★ 22 band members ★ 18 stages ★ hit on the beat ★ FULL SHRED
 
-# Separate Windows and Mac downloads, served by this site (the zips are
-# uploaded to GGGH; the links below never show a Google Drive address).
-# When the zips are uploaded, delete the "Download link:" line below and
-# remove the # from the next two lines, and change "Download where:"
-# below from "Google Drive · Windows and Mac" to just "Windows and Mac".
-# Download Windows: /rocjob/get/windows
-# Download Mac: /rocjob/get/mac
-# Optional button names: "Download Windows button:" and "Download Mac button:".
-
-# The old single link (a Google Drive folder). Delete it once the two
-# lines above are switched on.
-Download link: https://drive.google.com/drive/folders/1IYkxhdmE-AaY4OlPv208qqMy1hrmseiN?usp=sharing
+# The two download buttons. These are the "latest version" files in Vercel
+# Blob: uploading a new build over the same file name updates the download
+# with no change here. (The short links /rocjob/get/windows and
+# /rocjob/get/mac on this site lead to the same two files.)
+Download Windows: https://stxqpdyndd3dc0mg.public.blob.vercel-storage.com/rocjob/download/Rocjob-Windows-latest.zip
+Download Mac: https://stxqpdyndd3dc0mg.public.blob.vercel-storage.com/rocjob/download/Rocjob-Mac-latest.zip
+Download Windows button: Latest Version - Windows
+Download Mac button: Latest Version - Mac
 Download button: Download the game
-Download where: Google Drive · Windows and Mac
+Download where: Windows and Mac
 
 # Shown next to the download button. Update these two when you
 # upload a new build (for example "Build 17").
