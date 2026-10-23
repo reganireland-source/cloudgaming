@@ -174,7 +174,8 @@ app.get('/health', async (req: Request, res: Response) => {
     // "SELECT 1" is the cheapest possible SQL query — it just returns the
     // number 1. If it succeeds, the database connection works.
     await dbQuery('SELECT 1');
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    // `commit` = which version is running (Railway provides the git commit), so a deploy can be checked from outside.
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), commit: (process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown').slice(0, 7) });
   } catch (error) {
     // 503 = "Service Unavailable": we're running but can't do our job.
     res.status(503).json({ status: 'database-error', error });
