@@ -1,7 +1,7 @@
 # ================================================================
-#  THE ROCJOB PAGE: this is the only file you need to edit.
+#  THE FACEMELTERS PAGE: this is the only file you need to edit.
 # ================================================================
-#  The page at /rocjob reads this file. Change the text below, then
+#  The page at /rocjob (also /facemelters) reads this file. Change the text below, then
 #  click "Commit changes" on GitHub. The page updates about a minute
 #  later, once the site has redeployed.
 #
@@ -16,8 +16,8 @@
 #    (band | picture | hook, file | caption, or song | band).
 # ================================================================
 
-Title: ROCJOB
-Title note: working title
+Title: FACEMELTERS
+Title note:
 Tagline: A rhythm beat 'em up through rock history.
 
 # The scrolling strip under the title. Separate bits with a star.
@@ -29,8 +29,8 @@ Banner: 2-player co-op ★ 22 band members ★ 18 stages ★ hit on the beat ★
 # /rocjob/get/mac on this site lead to the same two files.)
 Download Windows: https://stxqpdyndd3dc0mg.public.blob.vercel-storage.com/rocjob/download/Rocjob-Windows-latest.zip
 Download Mac: https://stxqpdyndd3dc0mg.public.blob.vercel-storage.com/rocjob/download/Rocjob-Mac-latest.zip
-Download Windows button: Latest Version - Windows
-Download Mac button: Latest Version - Mac
+Download Windows button: Download Facemelters for Windows
+Download Mac button: Download Facemelters for Mac
 Download button: Download the game
 Download where: Windows and Mac
 
@@ -64,7 +64,7 @@ Play as the band members themselves. Every stage is built from a band's legend.
 
 
 [Pitch]
-Rocjob is an HD-2D, rhythm-driven beat 'em up: a love letter to Streets of Rage and Turtles in Time. You time-travel through rock history and play as the band members themselves, in local 2-player co-op, fighting to the bands' songs. Every stage is built from a band's legend, in painted pixel-art worlds you can almost hear.
+Facemelters is an HD-2D, rhythm-driven beat 'em up: a love letter to Streets of Rage and Turtles in Time. You time-travel through rock history and play as the band members themselves, in local 2-player co-op, fighting to the bands' songs. Every stage is built from a band's legend, in painted pixel-art worlds you can almost hear.
 
 
 [In the download]
@@ -150,4 +150,4 @@ Move with the stick or keys, hit on the beat, grab, jump and use your special. T
 
 
 [Credits]
-Rocjob is a fan-made homage by Regan Ireland. All bands and songs are named in affection; no affiliation or endorsement. Pixel-art character bodies are edited from licensed asset packs; the full credits are in the game.
+Facemelters is a fan-made homage by Regan Ireland. All bands and songs are named in affection; no affiliation or endorsement. Pixel-art character bodies are edited from licensed asset packs; the full credits are in the game.

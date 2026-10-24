@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ROCJOB</title>
+<title>FACEMELTERS</title>
 <!--
-  The Rocjob game page, served at /rocjob (see frontend/next.config.js).
+  The Facemelters game page (internal name: Rocjob), served at /rocjob and /facemelters (see frontend/next.config.js).
   A plain static page: no sign-in, no tracking, nothing from the GGGH app.
   ALL of its text, links and pictures come from page.txt in this folder;
   to change the page, edit page.txt (how: README.md in this folder).
 -->
-<meta name="description" content="Rocjob: a rhythm beat 'em up through rock history. An early build for friends and playtesters.">
+<meta name="description" content="Facemelters: a rhythm beat 'em up through rock history. An early build for friends and playtesters.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="ROCJOB">
+<meta property="og:title" content="FACEMELTERS">
 <meta property="og:description" content="A rhythm beat 'em up through rock history.">
 <meta name="theme-color" content="#140f19">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -275,7 +275,7 @@ footer p { max-width: 72ch; }
 <div class="wrap">
   <header class="masthead" id="top">
     <p class="hud" id="version" hidden></p>
-    <h1 class="logo" id="title">ROCJOB</h1>
+    <h1 class="logo" id="title">FACEMELTERS</h1>
     <p class="titlenote" id="titleNote" hidden></p>
     <p class="tagline" id="tagline"></p>
     <a class="btn" id="cta" hidden target="_blank" rel="noopener">
@@ -328,6 +328,7 @@ footer p { max-width: 72ch; }
             <span></span>
           </a>
           <p class="where" id="dlWhere" hidden></p>
+          <p class="where" id="dlBuild" hidden></p>
           <div class="folder" id="folder" hidden>
             <h3>In the download</h3>
             <ul class="ticks"></ul>
@@ -455,7 +456,7 @@ footer p { max-width: 72ch; }
   function missing(file) { return el('div', 'missing', 'Missing picture: ' + file + ' (check the file name in page.txt and the screenshots folder)'); }
 
   function render(p) {
-    var title = p.get('title') || 'ROCJOB';
+    var title = p.get('title') || 'FACEMELTERS';
     var tagline = p.get('tagline');
     document.title = tagline ? title + ' · ' + tagline : title;
     $('#title').textContent = title;
@@ -487,6 +488,21 @@ footer p { max-width: 72ch; }
         show($('#where')).textContent = p.get('download where');
         show($('#dlWhere')).textContent = p.get('download where');
       }
+    }
+
+    // The newest build number and file sizes, from latest.json next to the zips (skipped quietly if it can't be read).
+    var base = (win || mac || '').replace(/[^\/]*$/, '');
+    if (/^https?:\/\//i.test(base)) {
+      fetch(base + 'latest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        if (!j || typeof j !== 'object') return;
+        var bits = [];
+        if (j.build != null) bits.push('Latest build ' + String(j.build).slice(0, 12) + (j.version ? ' (' + String(j.version).slice(0, 16) + ')' : ''));
+        [['Windows', win], ['Mac', mac]].forEach(function (x) {
+          var file = x[1] && x[1].split('/').pop(), f = j.files && file && j.files[file];
+          if (f && typeof f.size === 'number' && f.size > 0) bits.push(x[0] + ' ' + (f.size >= 1048576 * 10 ? Math.round(f.size / 1048576) : Math.round(f.size / 104857.6) / 10) + ' MB');
+        });
+        if (bits.length) show($('#dlBuild')).textContent = bits.join(' · ');
+      }).catch(function () { /* the buttons work without it */ });
     }
 
     var inDl = p.section('in the download').filter(isItem);

@@ -7,7 +7,14 @@ const nextConfig = {
   // /rocjob: a plain static page (public/rocjob/), not part of the app — no
   // sign-in, no app layout. Its content comes from public/rocjob/page.txt.
   async rewrites() {
-    return [{ source: '/rocjob', destination: '/rocjob/index.html' }];
+    return [
+      { source: '/rocjob', destination: '/rocjob/index.html' },
+      // The stats page under the game's player-facing name; /rocjob-stats keeps working (same page).
+      { source: '/facemelters-stats', destination: '/rocjob-stats/index.html' },
+      { source: '/rocjob-stats', destination: '/rocjob-stats/index.html' },
+      // The game page under its player-facing name; /rocjob keeps working (same page).
+      { source: '/facemelters', destination: '/rocjob/index.html' },
+    ];
   },
   // /rocjob/get/windows and /rocjob/get/mac: short download links on this site that
   // lead to the "latest" zips in Vercel Blob (the same files page.txt links to).
