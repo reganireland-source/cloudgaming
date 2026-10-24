@@ -14,8 +14,9 @@
   html { color-scheme: dark; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 18px; }
-  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 16px; }
   h1 { margin: 0; font-size: 22px; letter-spacing: .02em; }
+  .sub { margin: 4px 0 0; color: var(--dim); font-size: 13.5px; max-width: 560px; }
   .alive { color: var(--dim); font-size: 13px; display: inline-flex; align-items: center; gap: 7px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); display: inline-block; }
   .dot.ok { background: var(--ok); } .dot.stale { background: var(--accent); } .dot.bad { background: var(--bad); }
@@ -54,7 +55,10 @@
 <body>
 <main id="app" hidden>
   <header>
-    <h1>Facemelters stats</h1>
+    <div>
+      <h1>FACEMELTERS - play stats</h1>
+      <p class="sub">Anonymous installs, launches and play time from the Facemelters friends build. No personal information.</p>
+    </div>
     <span class="alive"><span class="dot" id="dot"></span><span id="alive">loading…</span></span>
   </header>
 
@@ -63,13 +67,14 @@
   <h2>Last 30 days</h2>
   <section class="charts" id="charts"></section>
 
-  <h2>Builds</h2>
+  <h2>By build</h2>
   <section class="card tbl"><table id="builds"></table></section>
 
-  <h2>Platforms</h2>
+  <h2>By platform</h2>
   <section class="card plat" id="plat"></section>
 
   <p class="note" id="foot"></p>
+  <p class="note">Facemelters (dev name Rocjob) - private friends build.</p>
 
   <details>
     <summary>Delete all the data</summary>
@@ -80,7 +85,7 @@
 </main>
 
 <form class="login" id="login" hidden>
-  <h1>Facemelters stats</h1>
+  <h1>FACEMELTERS - play stats</h1>
   <p class="note">Private. Paste the stats password.</p>
   <input id="tok" type="password" autocomplete="off" aria-label="Stats password">
   <button type="submit">Open</button>
@@ -146,11 +151,11 @@
   function render(d) {
     var t = d.totals;
     var big = $('big'); big.textContent = '';
-    big.appendChild(bigCard(fmt(t.installs), 'Unique installs'));
+    big.appendChild(bigCard(fmt(t.installs), 'Installs', 'unique'));
     big.appendChild(bigCard(fmt(t.launches), 'Launches', '"logins"'));
-    big.appendChild(bigCard(hours(t.playSeconds), 'Total playtime'));
+    big.appendChild(bigCard(hours(t.playSeconds), 'Play time', 'total'));
     big.appendChild(bigCard(dur(t.avgSessionSeconds), 'Average session'));
-    big.appendChild(bigCard(dur(t.avgPerInstallSeconds), 'Playtime per install'));
+    big.appendChild(bigCard(dur(t.avgPerInstallSeconds), 'Play time per install'));
     big.appendChild(bigCard(fmt(t.active24h), 'Active, 24 hours'));
     big.appendChild(bigCard(fmt(t.active7d), 'Active, 7 days'));
     big.appendChild(bigCard(fmt(t.active30d), 'Active, 30 days'));
@@ -158,7 +163,7 @@
     var ch = $('charts'); ch.textContent = '';
     ch.appendChild(chart('New installs', d.daily, 'installs', '#ffd34d', fmt));
     ch.appendChild(chart('Launches', d.daily, 'launches', '#b07cff', fmt));
-    ch.appendChild(chart('Playtime', d.daily, 'seconds', '#5ad6c4', hours));
+    ch.appendChild(chart('Play time', d.daily, 'seconds', '#5ad6c4', hours));
 
     var tb = $('builds'); tb.textContent = '';
     var head = el('tr'); ['Build', 'Version', 'Installs seen', 'Launches'].forEach(function (h, i) { head.appendChild(el('th', i > 1 ? 'r' : '', h)); }); tb.appendChild(head);
