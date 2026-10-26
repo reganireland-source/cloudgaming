@@ -433,6 +433,7 @@ function SettingsPanel({ m, onChanged, busy, newToken, askToken, askRemove, runS
             </p>
             <div className="flex flex-wrap gap-2 items-center">
               <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} onClick={() => runCommand('ssh-setup', undefined, 'Set up SSH')}>Set up SSH on the PC</button>
+              <button type="button" className="btn-neon text-xs disabled:opacity-40" disabled={!m.online || !!busy} title="Asks the PC about its SSH server: service, port, who it listens to, keys, recent errors" onClick={() => runCommand('ssh-diagnose', undefined, 'SSH diagnostics')}>Diagnose SSH</button>
               <span className="text-slate-500">Adds the OpenSSH server if it’s missing, starts it, and adds the public keys saved on the Machines page (SSH access). Anything already there is left alone.</span>
             </div>
             {launcher

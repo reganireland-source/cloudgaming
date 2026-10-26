@@ -36,9 +36,9 @@ import crypto from 'crypto';
 
 
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
-param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22)
+param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22, [string]$TargetHost = '127.0.0.1')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '10'
+$AgentVersion = '11'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -66,12 +66,13 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 public static class GgghTunnel {
+  public static string Err = "";
   public static int Run(string url, string bearer, string host, int port) {
     ClientWebSocket ws = new ClientWebSocket();
     TcpClient tcp = new TcpClient();
     try {
       ws.Options.SetRequestHeader("Authorization", "Bearer " + bearer);
-      if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(15000)) return 2;
+      if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(15000)) { Err = "could not open the connection to GGGH"; return 2; }
       tcp.Connect(host, port);
       NetworkStream ns = tcp.GetStream();
       Task up = Task.Run(() => {
@@ -91,7 +92,8 @@ public static class GgghTunnel {
       });
       Task.WaitAny(up, down);
       return 0;
-    } catch (Exception) {
+    } catch (Exception ex) {
+      Err = ex.GetBaseException().Message;
       return 3;
     } finally {
       try { tcp.Close(); } catch (Exception) { }
@@ -102,8 +104,8 @@ public static class GgghTunnel {
 '@
   $cfg0 = Get-Content (Join-Path $Dir 'agent.json') -Raw | ConvertFrom-Json
   $wsUrl = ($cfg0.api -replace '^http', 'ws') + '/local-agent/tunnel/' + $Sid
-  $rc = [GgghTunnel]::Run($wsUrl, [string]$cfg0.token, '127.0.0.1', $Port)
-  Log ('ssh tunnel ended (code ' + $rc + ')')
+  $rc = [GgghTunnel]::Run($wsUrl, [string]$cfg0.token, $TargetHost, $Port)
+  Log ('ssh tunnel to ' + $TargetHost + ':' + $Port + ' ended (code ' + $rc + ') ' + [GgghTunnel]::Err)
   exit 0
 }
 
@@ -825,9 +827,62 @@ function Do-SshSetup($keys) {
   return @($true, ($msgs -join ' '))
 }
 
+function Test-TcpPort($h, $p) {
+  try {
+    $c = New-Object Net.Sockets.TcpClient
+    $iar = $c.BeginConnect($h, [int]$p, $null, $null)
+    $ok = $iar.AsyncWaitHandle.WaitOne(2000) -and $c.Connected
+    $c.Close()
+    return $ok
+  } catch { return $false }
+}
+
+# Everything about SSH on this PC that decides whether a connection through GGGH works.
+function Do-SshDiagnose {
+  $o = @()
+  $i = Get-SshInfo
+  $o += ('SSH server: {0}; port {1}; signed-in user "{2}".' -f $(if ($i.running) { 'running' } elseif ($i.installed) { 'installed but STOPPED' } else { 'NOT installed' }), $i.port, $i.user)
+  try { $o += ('Service start type: ' + (Get-Service sshd -ErrorAction Stop).StartType) } catch { }
+  $cf = Join-Path $env:ProgramData 'ssh\sshd_config'
+  if (Test-Path $cf) {
+    $keep = @(Get-Content $cf | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(Port|ListenAddress|AddressFamily|PasswordAuthentication|PubkeyAuthentication|AllowUsers|AllowGroups|DenyUsers|DenyGroups|AuthorizedKeysFile|Match)\b' })
+    $o += ('sshd_config (relevant lines): ' + $(if ($keep.Count) { $keep -join ' | ' } else { 'none (all defaults)' }))
+  } else { $o += 'No sshd_config found.' }
+  $n = Get-NetInfo
+  $o += ('Answers on 127.0.0.1:{0}: {1}' -f $i.port, (Test-TcpPort '127.0.0.1' $i.port))
+  if ($n.lanIp) { $o += ('Answers on {0}:{1}: {2}' -f $n.lanIp, $i.port, (Test-TcpPort $n.lanIp $i.port)) }
+  try {
+    $ls = @(Get-NetTCPConnection -State Listen -LocalPort $i.port -ErrorAction Stop | ForEach-Object { $_.LocalAddress })
+    $o += ('Listening on: ' + $(if ($ls.Count) { $ls -join ', ' } else { 'nothing on that port' }))
+  } catch { $o += ('Nothing is listening on port ' + $i.port) }
+  $cu = Get-ConsoleUser; $name = ($cu -split '\\')[-1]
+  if ($name) {
+    $admin = $false
+    try { $admin = [bool](Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop | Where-Object { ($_.Name -split '\\')[-1] -ieq $name }) } catch { }
+    $file = $(if ($admin) { Join-Path $env:ProgramData 'ssh\administrators_authorized_keys' } else { 'C:\Users\' + $name + '\.ssh\authorized_keys' })
+    $cnt = 0; if (Test-Path $file) { $cnt = @(Get-Content $file | Where-Object { $_.Trim() }).Count }
+    $o += ('User {0} is {1}; keys file {2}: {3} key(s).' -f $name, $(if ($admin) { 'an administrator (uses the administrators file)' } else { 'a normal user' }), $file, $cnt)
+  } else { $o += 'Nobody is signed in to Windows, so the keys file could not be checked.' }
+  try {
+    $ev = @(Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 6 -ErrorAction Stop | ForEach-Object { Scrub (($_.TimeCreated.ToString('HH:mm:ss')) + ' ' + ($_.Message -replace '\s+', ' ')) })
+    $o += ('Recent SSH server log: ' + ($ev -join ' || '))
+  } catch { $o += 'SSH server log: nothing readable.' }
+  try {
+    $tl = @(Get-Content $Log -Tail 200 -ErrorAction Stop | Where-Object { $_ -match 'ssh tunnel|tunnel-open|command tunnel' } | Select-Object -Last 5)
+    $o += ('Agent log, SSH tunnels: ' + $(if ($tl.Count) { $tl -join ' || ' } else { 'no tunnel has been opened yet' }))
+  } catch { }
+  return @($true, ($o -join [Environment]::NewLine))
+}
+
 function Do-TunnelOpen($sid, $port) {
   if ($sid -notmatch '^[0-9a-f-]{36}$' -or $port -lt 1 -or $port -gt 65535) { return @($false, 'Bad tunnel request.') }
-  Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $AgentFile, '-Mode', 'tunnel', '-Sid', $sid, '-Port', [string]$port) -WindowStyle Hidden
+  # sshd may listen only on the LAN address (ListenAddress in sshd_config), so use whichever of loopback / LAN address answers.
+  $target = '127.0.0.1'
+  if (-not (Test-TcpPort '127.0.0.1' $port)) {
+    $n = Get-NetInfo
+    if ($n.lanIp -and (Test-TcpPort $n.lanIp $port)) { $target = $n.lanIp }
+  }
+  Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $AgentFile, '-Mode', 'tunnel', '-Sid', $sid, '-Port', [string]$port, '-TargetHost', $target) -WindowStyle Hidden
   return @($true, 'SSH connection opened.')
 }
 
@@ -919,6 +974,7 @@ function Run-Command($c) {
       'tunnel-open' { $r = Do-TunnelOpen ([string]$c.args.sid) ([int]$c.args.port); Report $c.id $r[0] $r[1] }
       'away-prepare' { $r = Do-AwayPrepare; Report $c.id $r[0] $r[1] }
       'away-diagnose' { $r = Do-AwayDiagnose; Report $c.id $r[0] $r[1] }
+      'ssh-diagnose' { $r = Do-SshDiagnose; Report $c.id $r[0] $r[1] }
       'sleep' { Report $c.id $true 'Going to sleep.'; Start-Sleep -Seconds 2; Start-Process -FilePath 'rundll32.exe' -ArgumentList 'powrprof.dll,SetSuspendState 0,1,0' }
       'restart' { Report $c.id $true 'Restarting.'; & shutdown.exe /r /t 5 /c 'Restart requested from GGGH' }
       'shutdown' { Report $c.id $true 'Shutting down.'; & shutdown.exe /s /t 5 /c 'Shutdown requested from GGGH' }
