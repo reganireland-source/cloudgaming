@@ -22,7 +22,7 @@ import { SCREENS, detectScreen, detectAllScreens, canListScreens, fitResolution,
 import LocalDiagnose from '@/components/LocalDiagnose';
 import { sshAlias, sshSetupCommand } from '@/lib/sshHelper';
 import {
-  LOCAL_APPS, buildCheckScript, buildLaunchScript, saveAndRunCommand, localBitrateKbps, pairCommand, plainStreamCommand,
+  CONNECTIONS, LOCAL_APPS, buildCheckScript, buildLaunchScript, saveAndRunCommand, localBitrateKbps, pairCommand, plainStreamCommand,
   type LocalCodec, type LocalLaunch, type LocalMode, type LocalOS,
 } from '@/lib/localCommand';
 
@@ -253,14 +253,19 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   };
   const [overlay, setOverlay] = useState(true);
   const [muteHere, setMuteHere] = useState(true);
+  const [connection, setConnection] = useState('best');
 
   const picked = screenId.startsWith('attached:') ? attached?.find((x) => `attached:${x.key}` === screenId) : undefined;
   const screen = picked || (screenId === 'this' ? (thisScreen || { w: 1920, h: 1080 }) : (SCREENS.find((s) => s.id === screenId) || { w: 1920, h: 1080 }));
-  const res = fitResolution(screen, screen.w * screen.h, 3840, 2160);
+  const conn = CONNECTIONS.find((c) => c.id === connection);
+  const res = conn ? fitResolution(screen, conn.pixels, 3840, 2160) : fitResolution(screen, screen.w * screen.h, 3840, 2160);
+  const useFps = conn ? conn.fps : fps;
+  const useCodec: LocalCodec = conn ? conn.codec : codec;
+  const useKbps = conn ? conn.bitrateKbps : localBitrateKbps(res.w, res.h, fps);
   const host = info?.lanIp || m.lanIp;
   const mac = info?.mac || m.mac;
   const launch: LocalLaunch | null = info && host ? {
-    os, name: m.name, host, mac, app, width: res.w, height: res.h, fps, bitrateKbps: localBitrateKbps(res.w, res.h, fps), codec, fullscreen,
+    os, name: m.name, host, mac, app, width: res.w, height: res.h, fps: useFps, bitrateKbps: useKbps, codec: useCodec, fullscreen,
     wake: wake && !!mac, mode, muteHere, overlay, away: m.awayOk, target: picked?.target ?? null, api: info.api, token: info.launcherToken,
   } : null;
   const script = useMemo(() => (launch ? buildLaunchScript(launch) : ''), [launch ? JSON.stringify(launch) : '']); // eslint-disable-line react-hooks/exhaustive-deps
@@ -271,6 +276,10 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
   return (
     <div className="space-y-3 text-xs">
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <label className="space-y-1"><span className="label">Connection</span>
+          <select className={`${sel} w-full`} value={connection} onChange={(e) => setConnection(e.target.value)}>
+            <option value="best">Best · follows my screen (home network)</option>
+            {CONNECTIONS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
         <label className="space-y-1"><span className="label">Stream</span>
           <select className={`${sel} w-full`} value={app} onChange={(e) => setApp(e.target.value)}>{LOCAL_APPS.map((a) => <option key={a}>{a}</option>)}</select></label>
         <label className="space-y-1"><span className="label">Your screen</span>
@@ -280,9 +289,9 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
             {SCREENS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select></label>
         <label className="space-y-1"><span className="label">Frame rate</span>
-          <select className={`${sel} w-full`} value={fps} onChange={(e) => setFps(Number(e.target.value))}>{[30, 60, 90, 120].map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
+          <select className={`${sel} w-full`} value={useFps} disabled={!!conn} onChange={(e) => setFps(Number(e.target.value))}>{[30, 60, 90, 120].map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
         <label className="space-y-1"><span className="label">Video</span>
-          <select className={`${sel} w-full`} value={codec} onChange={(e) => setCodec(e.target.value as LocalCodec)}>
+          <select className={`${sel} w-full`} value={useCodec} disabled={!!conn} onChange={(e) => setCodec(e.target.value as LocalCodec)}>
             <option value="HEVC">HEVC (best for most)</option><option value="H.264">H.264 (oldest, most compatible)</option><option value="AV1">AV1 (RTX 40/50 only)</option></select></label>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-slate-300">
@@ -313,12 +322,13 @@ function LaunchPanel({ m }: { m: LocalMachine }) {
           : canListScreens() ? <> <button type="button" className="text-neon-cyan hover:underline" onClick={findScreens}>Find my other displays</button>{listTried && ' (permission refused: allow “window management” for this site in the browser)'}</>
           : <> This browser can only see its own screen; Chrome or Edge can list every display.</>}
       </p>
-      <p className="text-slate-500">Stream {res.w}×{res.h} at {fps} fps, about {Math.round(localBitrateKbps(res.w, res.h, fps) / 1000)} Mbit/s over your home network. Needs Moonlight installed and paired (Pair Moonlight above).</p>
+      {conn && <p className="text-neon-cyan">{conn.label.split(' · ')[0]} connection: for {conn.hint}. Frame rate and video format are set by this choice. It saves as its own launcher file, so it can sit beside your normal one.</p>}
+      <p className="text-slate-500">Stream {res.w}×{res.h} at {useFps} fps, about {Math.round((useKbps / 1000) * 10) / 10} Mbit/s{conn ? '' : ' over your home network'}. Needs Moonlight installed and paired (Pair Moonlight above).</p>
       {os === 'windows'
         ? <><CopyBox text={plainStreamCommand(launch)} /><p className="text-slate-500">Paste into Command Prompt. (Waking and the Mirror / Headless switch are for the macOS and Linux command.)</p></>
         : <>
           <p className="text-slate-300">Paste this into Terminal. It saves the launcher as a file on this computer and runs it. (A downloaded file is blocked by macOS, but one made in Terminal isn’t.)</p>
-          <CopyBox text={saveAndRunCommand(`moonlight-${m.name}-${app}.sh`, script)} tall />
+          <CopyBox text={saveAndRunCommand(`moonlight-${m.name}-${app}${conn ? `-${conn.id}` : ''}.sh`, script)} tall />
           <details className="text-slate-500"><summary className="cursor-pointer">What does that command contain?</summary><div className="pt-2"><CopyBox text={script} tall /></div></details>
           <p className="text-slate-500">After that, start it any time with the path it prints. Streaming needs only the PC’s address, so it works even if GGGH is down (the screen steps just get skipped).</p>
           <p className="text-slate-300 pt-1">Laggy? Check this computer’s side of the connection (20 seconds: Wi-Fi or cable, lost pings):</p>

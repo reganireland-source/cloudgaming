@@ -70,6 +70,19 @@ export function localBitrateKbps(w: number, h: number, fps: number): number {
   return Math.min(150000, Math.max(8000, Math.round(kbps / 500) * 500));
 }
 
+/**
+ * "How good is the connection": the stream's size, frame rate, bitrate and video format in one choice.
+ * "best" follows the screen and the other controls; the rest are for a slow or unreliable link (a hotspot,
+ * hotel Wi-Fi, a long way from home). Sizes keep the screen's own shape within the pixel budget.
+ */
+export interface Connection { id: string; label: string; pixels: number; fps: number; bitrateKbps: number; codec: LocalCodec; hint: string }
+export const CONNECTIONS: Connection[] = [
+  { id: 'good', label: 'Good · 1080p60 · 12 Mbit/s', pixels: 1920 * 1080, fps: 60, bitrateKbps: 12000, codec: 'HEVC', hint: 'a decent connection that is not the home network' },
+  { id: 'poor', label: 'Poor · 720p60 · 6 Mbit/s', pixels: 1280 * 720, fps: 60, bitrateKbps: 6000, codec: 'H.264', hint: 'a mobile hotspot or busy Wi-Fi' },
+  { id: 'verypoor', label: 'Very poor · 720p30 · 3 Mbit/s', pixels: 1280 * 720, fps: 30, bitrateKbps: 3000, codec: 'H.264', hint: 'weak 4G, hotel or café Wi-Fi' },
+  { id: 'minimal', label: 'Minimal · 540p30 · 1.5 Mbit/s', pixels: 960 * 540, fps: 30, bitrateKbps: 1500, codec: 'H.264', hint: 'barely usable internet: a desktop, not a fast game' },
+];
+
 /** Single-quote for sh. */
 const sq = (v: string) => `'${v.replace(/'/g, `'\\''`)}'`;
 
