@@ -129,7 +129,7 @@ export function sshSetupCommand(opts: { api: string; token: string; name: string
   const alias = sshAlias(opts.name);
   const helper = `$HOME/gggh/ssh-${alias}.py`;
   const user = (opts.user || 'YOUR_WINDOWS_USER').replace(/[^\w.$-]/g, '');
-  const stanza = `\n# GGGH: ${opts.name} over the internet\nHost ${alias}\n  HostName localhost\n  User ${user}\n  ProxyCommand python3 ${helper}\n  ServerAliveInterval 30\n`;
+  const stanza = `\n# GGGH: ${opts.name} over the internet\nHost ${alias}\n  HostName localhost\n  HostKeyAlias ${alias}\n  User ${user}\n  ProxyCommand python3 ${helper}\n  ServerAliveInterval 30\n  # Add your key here once it is saved in GGGH (Machines page, SSH access):  IdentityFile ~/.ssh/id_ed25519\n`;
   return [
     `mkdir -p "$HOME/gggh" "$HOME/.ssh" && echo ${sq(b64(buildSshProxy(opts.api, opts.token)))} | openssl base64 -d -A > "${helper}" && chmod 700 "${helper}"`,
     `grep -q "^Host ${alias}$" "$HOME/.ssh/config" 2>/dev/null || echo ${sq(b64(stanza))} | openssl base64 -d -A >> "$HOME/.ssh/config"`,
