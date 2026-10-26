@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22, [string]$TargetHost = '127.0.0.1')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '13'
+$AgentVersion = '14'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -1012,7 +1012,8 @@ function Try-Update($list) {
     try {
       Set-Content -Path $triedFile -Value ('{0}|{1}' -f $sha, (Get-Date).ToBinary()) -Encoding ASCII
       Invoke-WebRequest -UseBasicParsing -Uri ($cfg.api + '/local-agent/' + $name + '.ps1') -OutFile $tmp -TimeoutSec 60
-      if ((Hash-Of $tmp) -ne $sha) { Log ('update ' + $name + ': the download did not match its fingerprint; ignored'); Remove-Item $tmp -Force -ErrorAction SilentlyContinue; continue }
+      # A mismatch can just mean GGGH was mid-deploy (old and new copies running side by side): try again in about 5 minutes, not 6 hours.
+      if ((Hash-Of $tmp) -ne $sha) { Log ('update ' + $name + ': the download did not match its fingerprint; ignored, will retry soon'); Set-Content -Path $triedFile -Value ('{0}|{1}' -f $sha, (Get-Date).AddMinutes(-355).ToBinary()) -Encoding ASCII; Remove-Item $tmp -Force -ErrorAction SilentlyContinue; continue }
       try { [void][scriptblock]::Create((Get-Content $tmp -Raw)) } catch { Log ('update ' + $name + ': the new file does not parse; ignored'); Remove-Item $tmp -Force -ErrorAction SilentlyContinue; continue }
       Copy-Item $target ($target + '.bak') -Force
       Move-Item $tmp $target -Force
