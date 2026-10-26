@@ -10,7 +10,7 @@
  *
  * 1. The helper dials /api/local-agent/ssh-client with the PC's launcher token.
  * 2. GGGH asks the agent (the command queue) to dial /api/local-agent/tunnel/<id>.
- * 3. The agent opens a TCP connection to localhost:22 on the PC and relays bytes.
+ * 3. The agent opens a TCP connection to the PC's own SSH server and relays bytes (pings every 15 s keep it open while nobody types).
  * GGGH only relays encrypted SSH bytes; the PC's SSH server still decides who
  * gets in (keys). The tunnel is for SSH only: Moonlight's video is far too heavy.
  * ============================================================================
@@ -26,7 +26,7 @@ const AGENT_PATH = '/api/local-agent/tunnel/';
 const AGENT_WAIT_MS = 25_000;
 const MAX_PER_MACHINE = 5;
 
-interface Pending { machineId: string; client: WebSocket; agent?: WebSocket; queued: Array<{ data: RawData; binary: boolean }>; timer: NodeJS.Timeout }
+interface Pending { machineId: string; client: WebSocket; agent?: WebSocket; queued: Array<{ data: RawData; binary: boolean }>; timer: NodeJS.Timeout; beat?: NodeJS.Timeout }
 const sessions = new Map<string, Pending>();
 
 const bearer = (req: IncomingMessage) => String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
@@ -40,6 +40,7 @@ function end(sid: string, code = 1000, reason = '') {
   if (!s) return;
   sessions.delete(sid);
   clearTimeout(s.timer);
+  if (s.beat) clearInterval(s.beat);
   for (const w of [s.client, s.agent]) { try { if (w && w.readyState <= WebSocket.OPEN) w.close(code, reason.slice(0, 120)); } catch { /* already gone */ } }
 }
 
@@ -74,6 +75,9 @@ export function attachLocalTunnel(server: Server) {
         wss.handleUpgrade(req, socket, head, (agent) => {
           s.agent = agent;
           clearTimeout(s.timer);
+          // A person answering a host-key question or sitting at a prompt sends nothing for a while: ping both sides
+          // so no proxy in between treats the connection as idle and closes it.
+          s.beat = setInterval(() => { for (const w of [s.client, s.agent]) { try { if (w && w.readyState === WebSocket.OPEN) w.ping(); } catch { /* closing */ } } }, 15_000);
           for (const q of s.queued) agent.send(q.data, { binary: q.binary });
           s.queued = [];
           agent.on('message', (data, binary) => { if (s.client.readyState === WebSocket.OPEN) s.client.send(data, { binary }); });

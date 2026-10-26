@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22, [string]$TargetHost = '127.0.0.1')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '11'
+$AgentVersion = '12'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -72,6 +72,7 @@ public static class GgghTunnel {
     TcpClient tcp = new TcpClient();
     try {
       ws.Options.SetRequestHeader("Authorization", "Bearer " + bearer);
+      ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
       if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(15000)) { Err = "could not open the connection to GGGH"; return 2; }
       tcp.Connect(host, port);
       NetworkStream ns = tcp.GetStream();
