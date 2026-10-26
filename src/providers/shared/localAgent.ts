@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22, [string]$TargetHost = '127.0.0.1')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '12'
+$AgentVersion = '13'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -59,6 +59,8 @@ function Log($m) {
 # Dials out to GGGH over a WebSocket and joins it to this PC's own SSH server.
 # ---------------------------------------------------------------------------
 if ($Mode -eq 'tunnel') {
+  Log ('ssh tunnel ' + $Sid.Substring(0, 8) + ' starting')
+  try {
   Add-Type -ReferencedAssemblies 'System.dll' -TypeDefinition @'
 using System;
 using System.Net.Sockets;
@@ -67,14 +69,18 @@ using System.Threading;
 using System.Threading.Tasks;
 public static class GgghTunnel {
   public static string Err = "";
+  public static string Stage = "start";
   public static int Run(string url, string bearer, string host, int port) {
     ClientWebSocket ws = new ClientWebSocket();
     TcpClient tcp = new TcpClient();
     try {
       ws.Options.SetRequestHeader("Authorization", "Bearer " + bearer);
       ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+      Stage = "opening the connection to GGGH";
       if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(15000)) { Err = "could not open the connection to GGGH"; return 2; }
+      Stage = "connecting to the SSH server";
       tcp.Connect(host, port);
+      Stage = "relaying";
       NetworkStream ns = tcp.GetStream();
       Task up = Task.Run(() => {
         byte[] buf = new byte[16384];
@@ -94,7 +100,7 @@ public static class GgghTunnel {
       Task.WaitAny(up, down);
       return 0;
     } catch (Exception ex) {
-      Err = ex.GetBaseException().Message;
+      Err = Stage + ": " + ex.GetBaseException().Message;
       return 3;
     } finally {
       try { tcp.Close(); } catch (Exception) { }
@@ -106,7 +112,8 @@ public static class GgghTunnel {
   $cfg0 = Get-Content (Join-Path $Dir 'agent.json') -Raw | ConvertFrom-Json
   $wsUrl = ($cfg0.api -replace '^http', 'ws') + '/local-agent/tunnel/' + $Sid
   $rc = [GgghTunnel]::Run($wsUrl, [string]$cfg0.token, $TargetHost, $Port)
-  Log ('ssh tunnel to ' + $TargetHost + ':' + $Port + ' ended (code ' + $rc + ') ' + [GgghTunnel]::Err)
+  Log ('ssh tunnel ' + $Sid.Substring(0, 8) + ' to ' + $TargetHost + ':' + $Port + ' ended (code ' + $rc + ') ' + [GgghTunnel]::Err)
+  } catch { Log ('ssh tunnel ' + $Sid.Substring(0, 8) + ' FAILED: ' + $_.Exception.Message) }
   exit 0
 }
 
@@ -865,11 +872,12 @@ function Do-SshDiagnose {
     $o += ('User {0} is {1}; keys file {2}: {3} key(s).' -f $name, $(if ($admin) { 'an administrator (uses the administrators file)' } else { 'a normal user' }), $file, $cnt)
   } else { $o += 'Nobody is signed in to Windows, so the keys file could not be checked.' }
   try {
-    $ev = @(Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 6 -ErrorAction Stop | ForEach-Object { Scrub (($_.TimeCreated.ToString('HH:mm:ss')) + ' ' + ($_.Message -replace '\s+', ' ')) })
+    # Login lines ("Failed password for regan", "Accepted publickey ...") are what matters here; they hold no secrets, so only long key-like strings are cut.
+    $ev = @(Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 14 -ErrorAction Stop | ForEach-Object { (($_.TimeCreated.ToString('HH:mm:ss')) + ' ' + (($_.Message -replace '\s+', ' ') -replace '[A-Za-z0-9+/=]{30,}', '[cut]')) })
     $o += ('Recent SSH server log: ' + ($ev -join ' || '))
   } catch { $o += 'SSH server log: nothing readable.' }
   try {
-    $tl = @(Get-Content $Log -Tail 200 -ErrorAction Stop | Where-Object { $_ -match 'ssh tunnel|tunnel-open|command tunnel' } | Select-Object -Last 5)
+    $tl = @(Get-Content $Log -Tail 200 -ErrorAction Stop | Where-Object { $_ -match 'ssh tunnel|tunnel-open|command tunnel' } | Select-Object -Last 10)
     $o += ('Agent log, SSH tunnels: ' + $(if ($tl.Count) { $tl -join ' || ' } else { 'no tunnel has been opened yet' }))
   } catch { }
   return @($true, ($o -join [Environment]::NewLine))
