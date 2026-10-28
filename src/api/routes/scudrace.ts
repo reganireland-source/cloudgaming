@@ -15,7 +15,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { adminOk, allow, board, clear, CARS, COURSES, enabled, groupFull, knownGroup, MODES, parseScore, submit, TRANSMISSIONS } from '../../services/ScudraceBoard';
+import { adminOk, allow, board, clear, CARS, COURSES, enabled, getReplay, groupFull, knownGroup, MODES, parseScore, REPLAY_TYPE, storeReplay, submit, TRANSMISSIONS } from '../../services/ScudraceBoard';
 
 const router = Router();
 
@@ -32,6 +32,42 @@ router.post('/scores', async (req: Request, res: Response) => {
     if (await groupFull(p.score.grp)) return res.status(429).set('Retry-After', '3600').json({ error: 'This group has reached its daily limit.' });
     res.json(await submit(p.score));
   } catch (e) { console.error('scudrace submit failed:', (e as Error).message); res.status(500).json({ error: 'Try again shortly.' }); }
+});
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const scoreId = (v: unknown): number | null => (typeof v === 'string' && /^\d{1,12}$/.test(v) ? Number(v) : null);
+
+// A replay (ghost) for a lap: RAW bytes, Content-Type application/vnd.scudrace.replay (never JSON or base64).
+router.post('/replays', async (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  if (!enabled()) return res.status(503).json({ error: 'Not switched on.' });
+  if (!allow(`ip:${req.ip}`, 120, 60_000)) return res.status(429).set('Retry-After', '60').json({ error: 'Slow down.' });
+  const id = scoreId(req.query.id), install = typeof req.query.install_id === 'string' ? req.query.install_id.toLowerCase() : '';
+  let grp: string | null = null;
+  if (req.query.group !== undefined && req.query.group !== '') { grp = knownGroup(req.query.group); if (!grp) return res.status(403).json({ error: 'Unknown group code.' }); }
+  if (id === null || !UUID.test(install)) return res.status(404).json({ error: 'not_found' });
+  if (!allow(`rp:${install}`, 30, 3600_000)) return res.status(429).set('Retry-After', '600').json({ error: 'Too many replays from this install. Try again later.' });
+  const body = Buffer.isBuffer(req.body) ? req.body : null;
+  try {
+    // The size check (413) happens in the body reader; the rest follows the documented order.
+    const r = await storeReplay(id, install, grp, body);
+    res.status(r.status).json(r.body);
+  } catch (e) { console.error('scudrace replay failed:', (e as Error).message); res.status(500).json({ error: 'Try again shortly.' }); }
+});
+
+router.get('/replay', async (req: Request, res: Response) => {
+  if (!enabled()) return res.status(503).json({ error: 'Not switched on.' });
+  if (!allow(`rd:${req.ip}`, 120, 60_000)) return res.status(429).set('Retry-After', '60').json({ error: 'Slow down.' });
+  const grp = knownGroup(req.query.group);
+  if (!grp) return res.status(403).json({ error: 'Unknown group code.' });
+  const id = scoreId(req.query.id);
+  if (id === null) return res.status(404).json({ error: 'not_found' });
+  try {
+    const r = await getReplay(id, grp);
+    if (!r) return res.status(404).json({ error: 'not_found' });
+    res.set({ 'Content-Type': REPLAY_TYPE, 'Content-Length': String(r.data.length), ETag: `"${r.hash}"`, 'Cache-Control': 'private, max-age=31536000, immutable' });
+    res.end(r.data);
+  } catch (e) { console.error('scudrace replay read failed:', (e as Error).message); res.status(500).json({ error: 'Try again shortly.' }); }
 });
 
 router.get('/leaderboard', async (req: Request, res: Response) => {

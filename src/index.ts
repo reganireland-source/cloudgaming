@@ -137,6 +137,7 @@ app.use(
 // arrives as raw text. These two lines turn it into a JavaScript object and
 // put it on `req.body`, so route code can just read `req.body.provider`.
 app.use('/api/scudrace/scores', express.json({ limit: '2kb' })); // a lap is tiny; anything bigger is refused
+app.use('/api/scudrace/replays', express.raw({ type: 'application/vnd.scudrace.replay', limit: 16384 })); // a replay is raw bytes, at most 16 KiB
 app.use('/api/rocjob/event', express.json({ limit: '1kb' })); // the game's stats events are tiny; anything bigger is refused
 app.use('/api/local-agent/report', express.json({ limit: '1mb' })); // a PC's diagnostic reports are bigger than the 100 kb default
 app.use(express.json());                          // for JSON bodies (what our frontend sends)
