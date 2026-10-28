@@ -229,6 +229,36 @@ ln -sfn "$D/blender" /usr/local/bin/blender
 say "blender done: $(blender --background --version 2>/dev/null | head -1)"
 `);
 
+
+const CLAUDE_CODE = script(String.raw`
+command -v npm >/dev/null 2>&1 || { say "Needs node."; exit 1; }
+npm install -g --no-fund --no-audit @anthropic-ai/claude-code
+say "claude-code done: $(claude --version 2>/dev/null || echo installed). Sign in yourself: sudo -iu dev, then run claude (it prints a login link to open in your own browser)."
+`);
+
+const GDRIVE = script(String.raw`
+# Google has no Linux Drive app: this is rclone, which mounts a Drive as a folder.
+$APT update || true
+$APT install --no-install-recommends rclone fuse3 ca-certificates
+id dev >/dev/null 2>&1 || useradd -m -s /bin/bash -p '*' dev
+grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || echo user_allow_other >> /etc/fuse.conf
+R=$(opt GDRIVE_REMOTE gdrive)
+cat > /usr/local/bin/gdrive-mount <<GM
+#!/bin/sh
+# Mount the rclone remote "$R" at ~/GoogleDrive (as the user running this).
+rclone listremotes 2>/dev/null | grep -q '^$R:' || { echo "No rclone remote named $R yet. Set it up once: rclone config  (see the notes: headless sign-in uses rclone authorize drive on a computer with a browser)."; exit 1; }
+mkdir -p "\$HOME/GoogleDrive"
+rclone mount $R: "\$HOME/GoogleDrive" --daemon --vfs-cache-mode full --vfs-cache-max-size 10G --dir-cache-time 5m
+echo "Mounted at \$HOME/GoogleDrive. Unmount: gdrive-umount"
+GM
+cat > /usr/local/bin/gdrive-umount <<'GU'
+#!/bin/sh
+fusermount3 -u "$HOME/GoogleDrive" 2>/dev/null || fusermount -u "$HOME/GoogleDrive"
+GU
+chmod 755 /usr/local/bin/gdrive-mount /usr/local/bin/gdrive-umount
+say "google-drive done (rclone $(rclone version 2>/dev/null | head -1)). Not signed in: as dev run rclone config (new remote, type drive, name $R), then gdrive-mount."
+`);
+
 const UNITY = script(String.raw`
 # EXPERIMENTAL. Installs the Unity Editor through the Unity Hub command line.
 # No licence is activated: do that yourself (see the notes at the end).
@@ -295,6 +325,11 @@ export const ADDONS: AddonDef[] = [
   { id: 'blender', name: 'Blender (headless)', diskGb: 1.5, requires: [],
     options: [{ key: 'BLENDER_VERSION', label: 'Version', default: '4.2.3' }],
     description: 'Blender from blender.org (checksum-verified) for scripted model work.', script: BLENDER },
+  { id: 'claude-code', name: 'Claude Code (CLI)', diskGb: 0.5, requires: ['node'], options: [],
+    description: 'Anthropic\'s Claude Code command-line tool. You sign in on the machine; no key is installed. (There is no Linux Claude Desktop app.)', script: CLAUDE_CODE },
+  { id: 'google-drive', name: 'Google Drive (rclone mount)', diskGb: 0.2, requires: ['dev-base'],
+    options: [{ key: 'GDRIVE_REMOTE', label: 'rclone remote name', default: 'gdrive' }],
+    description: 'Google has no Linux Drive app, so this installs rclone and a gdrive-mount command. You sign in to Google once yourself.', script: GDRIVE },
   { id: 'unity', name: 'Unity Editor', diskGb: 30, requires: ['dev-base'], experimental: true,
     options: [
       { key: 'UNITY_VERSION', label: 'Editor version', default: '6000.3.27f1' },

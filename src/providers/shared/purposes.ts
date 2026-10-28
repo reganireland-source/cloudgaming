@@ -26,10 +26,15 @@ export interface Purpose {
 
 export const PURPOSES: Purpose[] = [
   { id: 'play', name: 'Play games', blurb: 'A gaming PC you stream to. Nothing extra installed.',
-    size: {}, diskGb: 0, addons: [], toggles: [] },
+    size: {}, diskGb: 0, addons: [], toggles: [
+      { id: 'claude', label: 'Claude Code (CLI)', default: false, addons: ['claude-code'] },
+      { id: 'drive', label: 'Google Drive (rclone)', default: false, addons: ['google-drive'] },
+    ] },
   { id: 'gamedev', name: 'Game development & testing', blurb: 'Build, run headless tests and smoke-test Windows builds. Many cores, bigger disk.',
     size: { minVcpus: 8, devTier: true }, diskGb: 200, addons: ['dev-base', 'github-cli', 'headless-gpu'],
     toggles: [
+      { id: 'claude', label: 'Claude Code (CLI)', default: false, addons: ['claude-code'] },
+      { id: 'drive', label: 'Google Drive (rclone)', default: false, addons: ['google-drive'] },
       { id: 'godot', label: 'Godot', default: true, addons: ['godot'] },
       { id: 'wine', label: 'Run Windows builds (Wine + DXVK)', default: true, addons: ['wine'] },
       { id: 'python', label: 'Python tools', default: true, addons: ['python'] },
@@ -38,12 +43,16 @@ export const PURPOSES: Purpose[] = [
   { id: 'unity', name: 'Unity builds', blurb: 'Unity Editor for command-line builds. Large disk; the install is experimental and you activate the licence.',
     size: { minVcpus: 8, minMemoryGb: 32, devTier: true }, diskGb: 300, addons: ['dev-base', 'github-cli', 'headless-gpu', 'unity'],
     toggles: [
+      { id: 'claude', label: 'Claude Code (CLI)', default: false, addons: ['claude-code'] },
+      { id: 'drive', label: 'Google Drive (rclone)', default: false, addons: ['google-drive'] },
       { id: 'python', label: 'Python tools', default: false, addons: ['python'] },
       { id: 'node', label: 'Node.js', default: false, addons: ['node'] },
     ] },
   { id: 'dev', name: 'General development', blurb: 'Compilers, git, Python and Node for builds, scripts and CI-style jobs.',
     size: { minVcpus: 4 }, diskGb: 100, addons: ['dev-base', 'github-cli'],
     toggles: [
+      { id: 'claude', label: 'Claude Code (CLI)', default: false, addons: ['claude-code'] },
+      { id: 'drive', label: 'Google Drive (rclone)', default: false, addons: ['google-drive'] },
       { id: 'python', label: 'Python', default: true, addons: ['python'] },
       { id: 'node', label: 'Node.js', default: true, addons: ['node'] },
       { id: 'browser', label: 'Headless browser (Playwright)', default: false, addons: ['browser-test'] },
@@ -51,6 +60,8 @@ export const PURPOSES: Purpose[] = [
   { id: 'content', name: '3D & media processing', blurb: 'Blender, ffmpeg and Python for model, texture, audio and video jobs.',
     size: { minVcpus: 4 }, diskGb: 150, addons: ['dev-base', 'media-tools', 'blender'],
     toggles: [
+      { id: 'claude', label: 'Claude Code (CLI)', default: false, addons: ['claude-code'] },
+      { id: 'drive', label: 'Google Drive (rclone)', default: false, addons: ['google-drive'] },
       { id: 'python', label: 'Python', default: true, addons: ['python'] },
       { id: 'github', label: 'GitHub CLI', default: false, addons: ['github-cli'] },
     ] },
