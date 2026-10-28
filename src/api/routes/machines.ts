@@ -30,6 +30,7 @@
  * ============================================================================
  */
 
+import { addonCatalog } from '../../providers/shared/addons';
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
 import { MachineRequestError, MachineService } from '../../services/MachineService';
@@ -58,7 +59,7 @@ export function sendRouteError(res: Response, error: unknown, fallback: string) 
 // The columns the frontend needs. connection_secret is deliberately NOT listed.
 const MACHINE_COLUMNS = `id, provider, region, instance_type, instance_id, status, cost_per_hour, streaming_quality,
   game_title, spot, disk_size_gb, ip_address, last_error, created_at, last_started, last_synced_at, snapshot_id,
-  shelved_at, stopped_at, auto_shelve_days, auto_stop_minutes, display_driver, nickname`;
+  shelved_at, stopped_at, auto_shelve_days, auto_stop_minutes, display_driver, nickname, addons`;
 
 /**
  * What a machine costs per month while you AREN'T playing, and what it would
@@ -153,7 +154,7 @@ router.get('/options', async (req: Request, res: Response) => {
         }))),
       };
     }));
-    res.json({ providers, games: games.rows, qualities: ['budget', 'good', 'high', 'ultra'] });
+    res.json({ providers, games: games.rows, qualities: ['budget', 'good', 'high', 'ultra'], addonCatalog: addonCatalog() });
   } catch (error) {
     sendRouteError(res, error, 'Failed to load launch options');
   }
@@ -216,6 +217,7 @@ router.post('/', async (req: Request, res: Response) => {
       provider, region, shapeId, gameTitle, quality, spot, diskSizeGb, autoStopMinutes, autoShelveDays,
       bigScreen: bigScreen === true, // experimental GRID driver (screens up to 4096×2160)
       nickname: typeof req.body?.nickname === 'string' ? req.body.nickname : undefined,
+      addons: req.body?.addons,
     });
     res.status(202).json(started);
   } catch (error) {

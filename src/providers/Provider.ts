@@ -57,6 +57,8 @@ export interface RestoreOptions {
   spot?: boolean;
   /** EXPERIMENTAL big screen: NVIDIA's GRID driver (4096x2160) instead of the datacenter one (2560x1600). */
   displayDriver?: 'standard' | 'grid';
+  /** Optional add-ons chosen at launch (validated by addons.ts). */
+  addons?: unknown;
   /** The machine's nickname: tagged on the machine ("cg-nickname") and announced by Sunshine. */
   nickname?: string;
 }
@@ -74,6 +76,8 @@ export interface LaunchOptions {
   autoStopMinutes?: number;
   /** EXPERIMENTAL big screen: NVIDIA's GRID driver (4096x2160) instead of the datacenter one (2560x1600). */
   displayDriver?: 'standard' | 'grid';
+  /** Optional add-ons chosen at launch (validated by addons.ts). */
+  addons?: unknown;
   /** The machine's nickname: tagged on the machine ("cg-nickname") and announced by Sunshine. */
   nickname?: string;
 }
@@ -152,7 +156,7 @@ export abstract class CloudProvider {
    * before them). Applies at the next boot. false = not possible on this
    * cloud (the script there only runs at first boot).
    */
-  async refreshSetupScript(_instanceId: string, _opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string }): Promise<boolean> {
+  async refreshSetupScript(_instanceId: string, _opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string; addons?: unknown }): Promise<boolean> {
     return false;
   }
 

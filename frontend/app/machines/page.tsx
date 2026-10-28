@@ -77,6 +77,7 @@ interface Machine {
   auto_shelve_days: number | null;
   standing: Standing | null;
   display_driver?: 'standard' | 'grid';
+  addons?: Array<{ id: string }>;
 }
 
 /** Monthly cost while not playing (see standingFor in src/api/routes/machines.ts). */
@@ -380,6 +381,10 @@ function MachineCard({
             {machine.display_driver === 'grid' && (
               <span className="text-[0.66rem] uppercase tracking-label text-neon-magenta border border-neon-magenta/60 bg-neon-magenta/10 rounded px-1.5 py-0.5 whitespace-nowrap"
                 title="Experimental: NVIDIA GRID driver — screens up to 4096×2160 instead of 2560×1600">▣ big screen · experimental</span>
+            )}
+            {machine.addons && machine.addons.length > 0 && (
+              <span className="text-[0.66rem] uppercase tracking-label text-neon-cyan border border-neon-cyan/40 rounded px-1.5 whitespace-nowrap"
+                title={'Extra tools chosen at launch: ' + machine.addons.map((x) => x.id).join(', ') + '. Install log on the machine: /var/log/cg-addons.log'}>+{machine.addons.length} tools</span>
             )}
             <span className="text-xs text-slate-400">{PROVIDER_LABEL[machine.provider] || machine.provider} · {machine.region}{zone && zone !== machine.region ? ` · ${zone}` : ''}</span>
             {machine.spot

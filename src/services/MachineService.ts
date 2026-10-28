@@ -53,6 +53,7 @@ import { Operation, hasRunningOperation } from './OperationLog';
 import { SnapshotService } from './SnapshotService';
 import { cleanNickname, defaultNickname, uniqueNickname } from './Nickname';
 import { live as liveTelemetry } from './TelemetryService';
+import { validateAddons } from '../providers/shared/addons';
 
 const VALID_QUALITIES = ['budget', 'good', 'high', 'ultra'];
 
@@ -75,6 +76,8 @@ export interface LaunchRequest {
   bigScreen?: boolean;
   /** Editable name; default CLOUD-CITY-GPU-TIER[-S][-BS]. Announced by Sunshine. */
   nickname?: string;
+  /** Optional add-ons: [{ id, options? }] from the catalog in providers/shared/addons.ts. */
+  addons?: unknown;
 }
 
 /** Auto-shelve choices the UI offers (days stopped). */
@@ -201,6 +204,8 @@ export class MachineService {
       throw new MachineRequestError(400, `"${req.shapeId}" isn't a machine type we offer on ${catalog.label}.`,
         `Choose one of: ${catalog.shapes.map((s) => s.label).join(', ') || '(none available yet)'}.`);
     }
+    let addons;
+    try { addons = validateAddons(req.addons); } catch (e: any) { throw new MachineRequestError(400, e.message, 'Pick add-ons from the list.'); }
     const region = catalog.regions.find((r) => r.id === req.region);
     if (!region) {
       throw new MachineRequestError(400, `"${req.region}" isn't a region we launch in on ${catalog.label}.`,
@@ -256,10 +261,10 @@ export class MachineService {
     }
     await query(
       `INSERT INTO machines (id, user_id, provider, region, instance_type, instance_id, status, cost_per_hour,
-                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, display_driver, nickname, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())`,
+                             streaming_quality, game_title, spot, disk_size_gb, connection_secret, auto_stop_minutes, auto_shelve_days, display_driver, nickname, addons, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'creating', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, NOW())`,
       [machineId, userId, req.provider, region.id, shape.id, `pending:${machineId}`, costPerHour, quality,
-       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays, bigScreen ? 'grid' : 'standard', nickname]
+       req.gameTitle || null, spot, diskSizeGb, encryptCredentials(userId, `sunshine:${machineId}`, sunshine), autoStopMinutes, autoShelveDays, bigScreen ? 'grid' : 'standard', nickname, JSON.stringify(addons)]
     );
 
     // ---- 3. Create it in the background, narrating every step --------------
@@ -296,6 +301,7 @@ export class MachineService {
             autoStopMinutes,
             displayDriver: bigScreen ? 'grid' : 'standard',
             nickname,
+            addons,
           }
         );
 
@@ -590,7 +596,7 @@ export class MachineService {
         const renamed = await nicknameAfter(userId, machine, { bigScreen: on });
         await provider.refreshSetupScript(machine.instance_id, {
           sunshineUsername: login.username, sunshinePassword: login.password,
-          autoStopMinutes: machine.auto_stop_minutes ?? 15, displayDriver: driver, nickname: renamed,
+          autoStopMinutes: machine.auto_stop_minutes ?? 15, displayDriver: driver, nickname: renamed, addons: machine.addons,
         });
         await query('UPDATE machines SET display_driver = $2, cost_per_hour = $3, nickname = $4 WHERE id = $1', [machineId, driver, cost, renamed]);
         if (renamed !== machine.nickname) await provider.setNickname(machine.instance_id, renamed).catch(() => false);
@@ -723,7 +729,7 @@ export class MachineService {
       if ((provider as any).projectId) op.projectId = (provider as any).projectId;
       await provider.refreshSetupScript(machine.instance_id, {
         sunshineUsername: login.username, sunshinePassword: login.password,
-        autoStopMinutes: machine.auto_stop_minutes ?? 15, displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard', nickname: machine.nickname || undefined,
+        autoStopMinutes: machine.auto_stop_minutes ?? 15, displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard', nickname: machine.nickname || undefined, addons: machine.addons,
       });
       DISK_CACHE.delete(machineId);
       if (restart && machine.status === 'running') {
@@ -996,6 +1002,7 @@ export class MachineService {
           diskSizeGb: Math.max(Number(machine.disk_size_gb) || 0, shape.defaultDiskGb || 0) || undefined,
           displayDriver: machine.display_driver === 'grid' ? 'grid' : 'standard',
           nickname: restoredName,
+          addons: machine.addons,
         });
         const costPerHour = (catalog.estimateHourly(shape.id, regionId, !!machine.spot) + (machine.display_driver === 'grid' ? catalog.bigScreen.extraPerHour : 0)) || Number(machine.cost_per_hour) || 0;
         await setStatus(machineId, 'running', {

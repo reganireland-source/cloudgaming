@@ -465,10 +465,10 @@ export class OracleProvider extends CloudProvider {
    * after the "#!/bin/bash" line (which must stay the very first line, or
    * cloud-init won't know how to run it).
    */
-  private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, nickname?: string): string {
+  private buildOracleScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, nickname?: string, addons?: unknown): string {
     // Oracle's metadata holds ~32 KB: with the app's public URL the machine downloads
     // the agent, dev tools and helpers instead (checksummed).
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname, devSshKeys: this.devSshKeys,
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, serverName: nickname, addons, devSshKeys: this.devSshKeys,
       ...(env.API_PUBLIC_URL ? { agentUrl: `${env.API_PUBLIC_URL}/agent/cgtel.py` } : {}) });
     const newline = script.indexOf('\n');
     return script.slice(0, newline + 1) + this.hostFirewallSnippet() + script.slice(newline + 1);
@@ -880,7 +880,7 @@ export class OracleProvider extends CloudProvider {
       {
         spot: !!options.spotInstance,
         diskSizeGb: Math.max(50, options.diskSizeGb || 150), // Oracle's minimum boot volume is 50 GB
-        script: this.buildOracleScript(sunshineUsername, sunshinePassword, options.autoStopMinutes, options.nickname),
+        script: this.buildOracleScript(sunshineUsername, sunshinePassword, options.autoStopMinutes, options.nickname, options.addons),
         nickname: options.nickname,
       }
     );

@@ -97,6 +97,7 @@ import { authMiddleware } from './api/middleware/auth';
 import { AGENT_SOURCE } from './providers/shared/agent';
 import { DEV_TOOLS_SCRIPT } from './providers/shared/devTools';
 import { SCUDRACE_TOOLS_SCRIPT } from './providers/shared/scudraceTools';
+import { addonScript } from './providers/shared/addons';
 import { MLWEB_PAIR_SOURCE } from './providers/shared/mlwebPair';
 import { ADD_APPS_SOURCE } from './providers/shared/addApps';
 import { MAC_CLIPBOARD_SCRIPT } from './providers/shared/macClipboard';
@@ -221,6 +222,11 @@ app.get('/api/agent/add-apps.py', (_req, res) => { res.type('text/x-python').sen
 app.get('/api/agent/mlweb-pair.py', (_req, res) => { res.type('text/x-python').send(MLWEB_PAIR_SOURCE); });   // PUBLIC: nothing secret in it
 app.get('/api/agent/dev-tools.sh', (_req, res) => { res.type('text/x-shellscript').send(DEV_TOOLS_SCRIPT); });
 // PUBLIC (nothing secret in it): the optional Scud Race Revisited developer profile, run by hand on a chosen machine; it is not part of any machine's setup.
+app.get('/api/agent/addons/:id.sh', (req, res) => {   // PUBLIC: nothing secret in any add-on
+  const s = addonScript(req.params.id);
+  if (!s) return res.status(404).type('text/plain').send('No such add-on');
+  res.type('text/x-shellscript').send(s);
+});
 app.get('/api/agent/scudrace-tools.sh', (_req, res) => { res.type('text/x-shellscript').send(SCUDRACE_TOOLS_SCRIPT); });   // PUBLIC: nothing secret in it              // PUBLIC: you can't require login on the login page
 app.use('/api/machines', authMiddleware, machineRoutes);
 app.use('/api/local-machines', authMiddleware, localMachineRoutes); // your own PCs (Windows + Sunshine)

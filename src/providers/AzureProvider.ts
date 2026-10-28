@@ -271,8 +271,8 @@ fi
 # --- end Azure extra ---
 `;
 
-function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, displayDriver?: 'standard' | 'grid', nickname?: string, devSshKeys?: string[]): string {
-  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure', serverName: nickname, devSshKeys,
+function azureSetupScript(sunshineUsername: string, sunshinePassword: string, autoStopMinutes?: number, displayDriver?: 'standard' | 'grid', nickname?: string, devSshKeys?: string[], addons?: unknown): string {
+  const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes, displayDriver, gridSource: 'azure', serverName: nickname, devSshKeys, addons,
     // Azure's custom data holds at most 64 KB: with the app's public URL the
     // machine downloads the agent, dev tools and pairing helper (checksummed).
     ...(env.API_PUBLIC_URL ? { agentUrl: `${env.API_PUBLIC_URL}/agent/cgtel.py` } : {}) });
@@ -564,6 +564,7 @@ export class AzureProvider extends CloudProvider {
       autoStopMinutes?: number;
       displayDriver?: 'standard' | 'grid';
       nickname?: string;
+      addons?: unknown;
       fromSnapshot?: Snapshot;
     }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
@@ -685,7 +686,7 @@ export class AzureProvider extends CloudProvider {
               computerName: vmName,
               adminUsername: ADMIN_USER,
               // The setup script, base64-encoded. cloud-init runs it on first boot.
-              customData: azureCustomData(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver, options.nickname, this.devSshKeys)),
+              customData: azureCustomData(azureSetupScript(options.sunshineUsername, options.sunshinePassword, options.autoStopMinutes, options.displayDriver, options.nickname, this.devSshKeys, options.addons)),
               linuxConfiguration: {
                 disablePasswordAuthentication: true,
                 ssh: { publicKeys: [{ path: `/home/${ADMIN_USER}/.ssh/authorized_keys`, keyData: throwawaySshPublicKey() }] },
@@ -770,6 +771,7 @@ export class AzureProvider extends CloudProvider {
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
       nickname: options.nickname,
+      addons: options.addons,
     });
   }
 

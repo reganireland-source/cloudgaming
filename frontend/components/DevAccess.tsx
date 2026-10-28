@@ -3,8 +3,8 @@
 /**
  * components/DevAccess.tsx — DEVELOPER ACCESS (SSH) TO THE MACHINES
  *
- * Every machine has the developer tools (Godot, WINE + DXVK/VKD3D-Proton,
- * Python) and a "dev" user with key-only SSH. Here you:
+ * Every machine has a "dev" user with key-only SSH (tools such as Godot, WINE,
+ * Python are optional "Extra tools" chosen when launching). Here you:
  *   - paste the SSH PUBLIC keys allowed to log in as dev (written to each
  *     machine at launch and every boot);
  *   - open SSH (TCP 22) per cloud to specific IPv4 addresses only — closed
@@ -94,10 +94,9 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
 
       <div className="mt-4 space-y-5 text-xs text-slate-300">
         <p className="text-slate-400 max-w-3xl">
-          Every machine has Godot 4.7.2 (<code className="text-slate-200">/usr/local/bin/godot</code>), Python tools (<code className="text-slate-200">/opt/devtools/venv</code>),
-          WineHQ with DXVK + VKD3D-Proton, and Vulkan on its NVIDIA GPU, under the user <strong className="text-slate-200">{data.user}</strong>. They install in the background
-          after the machine is ready to play (about 10 minutes; <code className="text-slate-200">cat /opt/devtools/READY</code> once done). Login is by SSH key only.
-          {' '}To see a program on your stream (Moonlight or the browser desktop), start it with <code className="text-slate-200">on-desktop</code>, e.g. <code className="text-slate-200">on-desktop godot --path ~/rocjob</code> — without it, programs run off-screen.
+          Every machine has a <strong className="text-slate-200">{data.user}</strong> login (SSH key only). Developer tools are not installed unless you tick them under
+          &quot;Extra tools&quot; when launching a machine; they install in the background after the machine is ready to play (follow <code className="text-slate-200">tail -f /var/log/cg-addons.log</code>).
+          {' '}To see a program on your stream (Moonlight or the browser desktop), start it with <code className="text-slate-200">on-desktop</code>, e.g. <code className="text-slate-200">on-desktop xterm</code> — without it, programs run off-screen.
         </p>
 
         <div className="space-y-1.5">

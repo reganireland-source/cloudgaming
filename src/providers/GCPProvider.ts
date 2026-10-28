@@ -408,7 +408,7 @@ export class GCPProvider extends CloudProvider {
     config: ProviderConfig,
     options: { spot: boolean; diskSizeGb: number; sourceSnapshot?: string;
                sunshineUsername: string; sunshinePassword: string; autoStopMinutes?: number;
-               displayDriver?: 'standard' | 'grid'; nickname?: string }
+               displayDriver?: 'standard' | 'grid'; nickname?: string; addons?: unknown }
   ): Promise<{ instanceId: string; ipAddress: string; costPerHour: number }> {
     const shape = findShape(config.instanceType);
     if (!shape) {
@@ -518,7 +518,7 @@ export class GCPProvider extends CloudProvider {
           : { onHostMaintenance: 'TERMINATE', automaticRestart: true, provisioningModel: 'STANDARD' },
         metadata: {
           items: [
-            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp', serverName: options.nickname, devSshKeys: this.devSshKeys }) },
+            { key: 'startup-script', value: buildSetupScript({ sunshineUsername: options.sunshineUsername, sunshinePassword: options.sunshinePassword, autoStopMinutes: options.autoStopMinutes, displayDriver: options.displayDriver, gridSource: 'gcp', serverName: options.nickname, addons: options.addons, devSshKeys: this.devSshKeys }) },
             // Read by the machine at every boot (rename in the app = update this).
             ...(options.nickname ? [{ key: 'cg-nickname', value: options.nickname }] : []),
             { key: 'sunshine-username', value: options.sunshineUsername },
@@ -583,6 +583,7 @@ export class GCPProvider extends CloudProvider {
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
       nickname: options.nickname,
+      addons: options.addons,
     });
   }
 
@@ -614,7 +615,7 @@ export class GCPProvider extends CloudProvider {
    * current script here upgrades the machine at its next start. Finished
    * setup steps are skipped; games and settings are untouched.
    */
-  async refreshSetupScript(instanceId: string, opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string }): Promise<boolean> {
+  async refreshSetupScript(instanceId: string, opts: { sunshineUsername?: string; sunshinePassword?: string; autoStopMinutes: number; displayDriver: 'standard' | 'grid'; nickname?: string; addons?: unknown }): Promise<boolean> {
     const { zone, name } = this.splitId(instanceId);
     const [inst] = await this.instances.get({ project: this.projectId, zone, instance: name });
     const items: Array<{ key: string; value: string }> = inst.metadata?.items || [];
@@ -622,7 +623,7 @@ export class GCPProvider extends CloudProvider {
     const sunshineUsername = opts.sunshineUsername || get('sunshine-username');
     const sunshinePassword = opts.sunshinePassword || get('sunshine-password');
     if (!sunshineUsername || !sunshinePassword) throw new Error('The machine\'s streaming login isn\'t stored with it, so its script can\'t be rebuilt.');
-    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes: opts.autoStopMinutes, displayDriver: opts.displayDriver, gridSource: 'gcp', serverName: opts.nickname || get('cg-nickname'), devSshKeys: this.devSshKeys });
+    const script = buildSetupScript({ sunshineUsername, sunshinePassword, autoStopMinutes: opts.autoStopMinutes, displayDriver: opts.displayDriver, gridSource: 'gcp', serverName: opts.nickname || get('cg-nickname'), addons: opts.addons, devSshKeys: this.devSshKeys });
     const next = items.filter((i) => i.key !== 'startup-script');
     next.push({ key: 'startup-script', value: script });
     await this.report('info', `Writing the current setup script to ${name} (used from its next start)…`);
@@ -1038,6 +1039,7 @@ export class GCPProvider extends CloudProvider {
       autoStopMinutes: opts.autoStopMinutes,
       displayDriver: opts.displayDriver,
       nickname: opts.nickname,
+      addons: opts.addons,
     });
     return { instanceId, ipAddress };
   }

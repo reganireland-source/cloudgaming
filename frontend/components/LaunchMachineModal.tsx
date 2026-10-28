@@ -24,6 +24,7 @@ import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
 import ThemedSelect from './ThemedSelect';
 import { defaultNickname, NICKNAME_RE } from '@/lib/nickname';
+import { AddonPicker, addonsBody, type AddonCatalog, type AddonChoice } from './AddonPicker';
 import { byDistance, useMyPlace } from '@/lib/myPlace';
 import { ACCESS_STYLE, RUN_MODES, fetchRegionAccess, indexAccess, statusFor, type RegionAccess, type RunMode } from '@/lib/regionAccess';
 
@@ -45,7 +46,7 @@ interface ProviderOption {
   minDiskGb: number; diskPerGbMonth: number; snapshotPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
   bigScreen?: { available: boolean; extraPerHour: number; note: string; notOnGpus?: string[] };
 }
-interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[] }
+interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[]; addonCatalog?: AddonCatalog }
 
 const QUALITY_HINT: Record<string, string> = {
   budget: '720p30 · ~1.4 GB/hour of data',
@@ -68,6 +69,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [diskGb, setDiskGb] = useState(150);
   const [spot, setSpot] = useState(false);
   const [bigScreen, setBigScreen] = useState(false); // EXPERIMENTAL GRID driver
+  const [addons, setAddons] = useState<AddonChoice>({});
   const [nickname, setNickname] = useState(''); // empty = the default name shown as the placeholder
   const [game, setGame] = useState(preset?.game || '');
   const [quality, setQuality] = useState(preset?.quality || 'high');
@@ -165,7 +167,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
     try {
       const res = await apiFetch<{ machineId: string; operationId: string }>('/machines', {
         method: 'POST',
-        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null, bigScreen: bigScreen && bigOk, nickname: nickname.trim() || undefined },
+        body: { provider, region, shapeId, diskSizeGb: diskGb, spot, gameTitle: game || undefined, quality, autoStopMinutes: autoStop, autoShelveDays: autoShelve || null, bigScreen: bigScreen && bigOk, nickname: nickname.trim() || undefined, addons: addonsBody(addons) },
       });
       setOperationId(res.operationId);
       onLaunched(); // show the new "creating" machine in the list straight away
@@ -437,6 +439,8 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                     <p className="text-xs text-slate-400 mt-1">Shelved when you&apos;re not using it: ≈USD {shelfLow.toFixed(2)}–{shelfHigh.toFixed(2)}/month.</p>
                     <p className="text-xs text-slate-500 mt-1">{current.priceNote} Billed by {current.label} to your account — stop the machine when you're done playing.</p>
                   </div>
+
+                  {options.addonCatalog && <AddonPicker catalog={options.addonCatalog} chosen={addons} onChange={setAddons} />}
 
                   </div>
                   </div>

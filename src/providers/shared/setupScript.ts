@@ -93,6 +93,8 @@ export interface SetupScriptOptions {
    * the app) and falls back to this one.
    */
   serverName?: string;
+  /** Optional add-ons chosen at launch (validated in addons.ts). */
+  addons?: unknown;
 }
 
 /** Characters allowed in a nickname (also safe inside quotes in bash and YAML). */
@@ -146,13 +148,46 @@ export function buildSetupScript(opts: SetupScriptOptions): string {
     .split('__CG_AGENT__').join(opts.agentUrl ? '' : AGENT_SOURCE.replace(/\n$/, ''))
     .split('__CG_AGENT_URL__').join(opts.agentUrl || '')
     .split('__CG_AGENT_SHA__').join(AGENT_SHA256)
-    .split('__CG_DEVTOOLS__').join(opts.agentUrl ? '' : DEV_TOOLS_SCRIPT.replace(/\n$/, ''))
-    .split('__CG_DEVTOOLS_SHA__').join(DEV_TOOLS_SHA256)
+    .split('__CG_ADDONS_BLOCK__').join(addonsBlock(opts))
     .split('__CG_MLPAIR__').join(opts.agentUrl ? '' : MLWEB_PAIR_SOURCE.replace(/\n$/, ''))
     .split('__CG_MLPAIR_SHA__').join(MLWEB_PAIR_SHA256)
     .split('__CG_ADDAPPS__').join(opts.agentUrl ? '' : ADD_APPS_SOURCE.replace(/\n$/, ''))
     .split('__CG_ADDAPPS_SHA__').join(ADD_APPS_SHA256)
     .split('__DEV_SSH_KEYS__').join(devSshKeyLines(opts.devSshKeys || []));
+}
+
+/**
+ * Optional add-ons (see addons.ts): a small runner that fetches each chosen
+ * add-on by URL (hash-checked) and runs them in order in the background once
+ * the machine is playable. Nothing at all when none were chosen.
+ */
+function addonsBlock(opts: SetupScriptOptions): string {
+  if (!opts.agentUrl) return '';
+  const lines = addonRunnerLines(opts.addons);
+  if (!lines) return '';
+  return String.raw`
+mkdir -p /opt/cg-addons /var/lib/cg-addons
+cat > /opt/cg-addons/run.sh <<'CGA'
+#!/bin/bash
+U="$(dirname '${opts.agentUrl}')/addons"
+cg_addon() {
+  id=$1; want=$2; envs=$3
+  f=/opt/cg-addons/$id.sh; st=/var/lib/cg-addons/$id.state
+  for try in 1 2 3; do
+    curl -fsSL --retry 3 -m 120 "$U/$id.sh" -o $f.new 2>/dev/null && [ "$(sha256sum < $f.new | cut -c1-64)" = "$want" ] && break
+    rm -f $f.new; sleep 90
+  done
+  [ -f $f.new ] || { echo "failed: download" > $st; echo "[addons] $id: could not download a matching copy"; return; }
+  mv $f.new $f
+  [ "$(cat $st 2>/dev/null)" = "ok $want $envs" ] && return
+  echo "== $id $(date -u +%FT%TZ)"
+  if env $envs bash $f; then echo "ok $want $envs" > $st; else echo "failed: see /var/log/cg-addons.log" > $st; fi
+}
+${lines}
+echo "== all add-ons finished $(date -u +%FT%TZ)"
+CGA
+systemd-run --unit=cg-addons --collect --quiet -p Nice=10 -p IOSchedulingClass=idle sh -c 'bash /opt/cg-addons/run.sh >> /var/log/cg-addons.log 2>&1' >/dev/null 2>&1 || true
+`;
 }
 
 /** Validated keys → "type base64 cg-app:comment" lines (anything else is dropped). */
@@ -1311,29 +1346,12 @@ ODESK
 chmod 755 /usr/local/bin/on-desktop
 mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix && ln -sfn "$SUN_DIR/x11/X42" /tmp/.X11-unix/X42
 
-# ============================================================================
-# 6. Developer tools (Godot, WINE, Python; user "dev"): in the background,
-#    once, after the machine is playable. Log: /var/log/cg-devtools.log
-# ============================================================================
-D=/opt/devtools/install.sh
-mkdir -p /opt/devtools
-cat > $D.new <<'CGD'
-__CG_DEVTOOLS__
-CGD
-grep -q godot $D.new || curl -fsSL --retry 3 -m 60 "$(dirname '__CG_AGENT_URL__')/dev-tools.sh" -o $D.new 2>/dev/null
-S=$(sha256sum < $D.new | cut -c1-64)
-if [ "$S" = '__CG_DEVTOOLS_SHA__' ]; then
-  mv $D.new $D
-  [ "$(cat /opt/devtools/installed.sha 2>/dev/null)" = "$S" ] || systemd-run --unit=cg-devtools --collect --quiet -p Nice=10 -p IOSchedulingClass=idle \
-    sh -c "bash $D > /var/log/cg-devtools.log 2>&1 && echo $S > /opt/devtools/installed.sha" >/dev/null 2>&1 || true
-else
-  rm -f $D.new
-fi
+__CG_ADDONS_BLOCK__
 `;
 
 import type { SetupStage } from './types';
 import { AGENT_SOURCE, AGENT_SHA256 } from './agent';
-import { DEV_TOOLS_SCRIPT, DEV_TOOLS_SHA256 } from './devTools';
+import { addonRunnerLines } from './addons';
 import { MLWEB_PAIR_SOURCE, MLWEB_PAIR_SHA256 } from './mlwebPair';
 import { ADD_APPS_SOURCE, ADD_APPS_SHA256 } from './addApps';
 export type { SetupStage };

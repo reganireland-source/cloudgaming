@@ -472,6 +472,7 @@ export class AWSProvider extends CloudProvider {
       autoStopMinutes?: number;
       displayDriver?: 'standard' | 'grid';
       nickname?: string;
+      addons?: unknown;
       /** Boot from this image instead of the newest Ubuntu (used by restore). */
       image?: { imageId: string; rootDeviceName: string; label: string };
     }
@@ -523,6 +524,7 @@ export class AWSProvider extends CloudProvider {
       displayDriver: options.displayDriver,
       gridSource: 'aws',
       serverName: options.nickname,
+      addons: options.addons,
       devSshKeys: this.devSshKeys,
       // The telemetry agent doesn't fit in AWS's 16 KB: the machine downloads it from this app
       // (no API_PUBLIC_URL = no telemetry on AWS machines; everything else works).
@@ -656,6 +658,7 @@ export class AWSProvider extends CloudProvider {
       autoStopMinutes: options.autoStopMinutes,
       displayDriver: options.displayDriver,
       nickname: options.nickname,
+      addons: options.addons,
     });
   }
 
@@ -880,6 +883,7 @@ export class AWSProvider extends CloudProvider {
         autoStopMinutes: opts.autoStopMinutes,
         displayDriver: opts.displayDriver,
         nickname: opts.nickname,
+        addons: opts.addons,
         image: { imageId, rootDeviceName, label: `restore of ${snapId}` },
       });
       return { instanceId, ipAddress };
