@@ -30,6 +30,7 @@
  * ============================================================================
  */
 
+import { PURPOSES } from '../../providers/shared/purposes';
 import { addonCatalog } from '../../providers/shared/addons';
 import { Router, Request, Response } from 'express';
 import { query } from '../../config/database';
@@ -154,7 +155,7 @@ router.get('/options', async (req: Request, res: Response) => {
         }))),
       };
     }));
-    res.json({ providers, games: games.rows, qualities: ['budget', 'good', 'high', 'ultra'], addonCatalog: addonCatalog() });
+    res.json({ providers, games: games.rows, qualities: ['budget', 'good', 'high', 'ultra'], addonCatalog: addonCatalog(), purposes: PURPOSES });
   } catch (error) {
     sendRouteError(res, error, 'Failed to load launch options');
   }

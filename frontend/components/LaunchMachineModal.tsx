@@ -24,6 +24,7 @@ import OperationConsole from './OperationConsole';
 import FriendlyErrorCard from './FriendlyErrorCard';
 import ThemedSelect from './ThemedSelect';
 import { defaultNickname, NICKNAME_RE } from '@/lib/nickname';
+import { PurposePicker, type Purpose, type Intensity } from './PurposePicker';
 import { AddonPicker, addonsBody, type AddonCatalog, type AddonChoice } from './AddonPicker';
 import { byDistance, useMyPlace } from '@/lib/myPlace';
 import { ACCESS_STYLE, RUN_MODES, fetchRegionAccess, indexAccess, statusFor, type RegionAccess, type RunMode } from '@/lib/regionAccess';
@@ -46,7 +47,7 @@ interface ProviderOption {
   minDiskGb: number; diskPerGbMonth: number; snapshotPerGbMonth: number; priceNote: string; regions: Region[]; shapes: Shape[];
   bigScreen?: { available: boolean; extraPerHour: number; note: string; notOnGpus?: string[] };
 }
-interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[]; addonCatalog?: AddonCatalog }
+interface Options { providers: ProviderOption[]; games: Array<{ title: string }>; qualities: string[]; addonCatalog?: AddonCatalog; purposes?: Purpose[] }
 
 const QUALITY_HINT: Record<string, string> = {
   budget: '720p30 · ~1.4 GB/hour of data',
@@ -70,6 +71,11 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
   const [spot, setSpot] = useState(false);
   const [bigScreen, setBigScreen] = useState(false); // EXPERIMENTAL GRID driver
   const [addons, setAddons] = useState<AddonChoice>({});
+  // "What is this machine for?": sets size requirements, disk and add-ons; all stay editable.
+  const [purposeId, setPurposeId] = useState('');
+  const [intensity, setIntensity] = useState<Intensity>('standard');
+  const [toggles, setToggles] = useState<Record<string, boolean>>({});
+  const shapePicked = useRef(false); // a size clicked by hand wins over the purpose's pick
   const [nickname, setNickname] = useState(''); // empty = the default name shown as the placeholder
   const [game, setGame] = useState(preset?.game || '');
   const [quality, setQuality] = useState(preset?.quality || 'high');
@@ -141,6 +147,36 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
     if (!shapesHere.some((s) => s.id === shapeId)) setShapeId(shapesHere[0]?.id || '');
   }, [shapesHere, shapeId]);
 
+  const purpose = options?.purposes?.find((p) => p.id === purposeId);
+  const pickPurpose = (id: string) => {
+    setPurposeId(id);
+    shapePicked.current = false;
+    const p = options?.purposes?.find((x) => x.id === id);
+    setToggles(Object.fromEntries((p?.toggles || []).map((t) => [t.id, t.default])));
+    if (p?.quality) setQuality(p.quality);
+    if (p?.diskGb) setDiskGb((d) => Math.max(d, p.diskGb));
+  };
+  // Software: the purpose's add-ons plus its ticked extras (options typed in "Extra tools" are kept).
+  useEffect(() => {
+    if (!purpose) return;
+    const ids = [...purpose.addons, ...purpose.toggles.filter((t) => toggles[t.id]).flatMap((t) => t.addons)];
+    setAddons((old) => Object.fromEntries(ids.map((id) => [id, old[id] || {}])));
+  }, [purposeId, toggles]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Machine: the size that meets the purpose's needs, by cost (Light = cheapest, Heavy = strongest).
+  useEffect(() => {
+    if (!purpose || shapePicked.current) return;
+    const need = purpose.size;
+    const fits = (s: Shape, devOk: boolean) => s.vcpus >= (need.minVcpus || 0) && s.memoryGb >= (need.minMemoryGb || 0) && (!devOk || !need.devTier || s.dev || s.alsoDev);
+    let pool = shapesHere.filter((s) => fits(s, true));
+    if (!pool.length) pool = shapesHere.filter((s) => fits(s, false));
+    if (!need.devTier && purpose.id === 'play') pool = shapesHere.filter((s) => !s.dev);
+    if (!pool.length) return;
+    const cost = (s: Shape) => s.prices[region]?.onDemand ?? Infinity;
+    pool = [...pool].sort((a, b) => cost(a) - cost(b));
+    const pick = intensity === 'light' ? pool[0] : intensity === 'heavy' ? pool[pool.length - 1] : pool[Math.floor((pool.length - 1) / 2)];
+    if (pick) setShapeId(pick.id);
+  }, [purposeId, intensity, shapesHere, region]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const shape = shapesHere.find((s) => s.id === shapeId);
   // DEV machines suggest a bigger disk (projects, imports, build output): raise it, never shrink it.
   const suggestedDisk = shape?.defaultDiskGb || 0;
@@ -207,6 +243,11 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
             </>
           ) : options && (
             <>
+              {options.purposes && options.purposes.length > 0 && (
+                <PurposePicker purposes={options.purposes} purposeId={purposeId} onPurpose={pickPurpose} intensity={intensity} onIntensity={(i) => { shapePicked.current = false; setIntensity(i); }}
+                  toggles={toggles} onToggle={(id, on) => setToggles((t) => ({ ...t, [id]: on }))} />
+              )}
+
               {/* Cloud */}
               <div>
                 <p className="label mb-2">1 · Cloud</p>
@@ -292,7 +333,7 @@ export default function LaunchMachineModal({ onClose, onLaunched, preset }: { on
                           <button
                             key={s.id}
                             type="button"
-                            onClick={() => setShapeId(s.id)}
+                            onClick={() => { shapePicked.current = true; setShapeId(s.id); }}
                             className={`rounded border px-3 py-2 text-left text-xs transition ${
                               shapeId === s.id ? 'border-neon-cyan bg-neon-cyan/[0.06]' : 'border-white/10 hover:border-white/30'
                             }`}
