@@ -12,6 +12,8 @@ const nextConfig = {
       // The stats page under the game's player-facing name; /rocjob-stats keeps working (same page).
       { source: '/facemelters-stats', destination: '/rocjob-stats/index.html' },
       { source: '/rocjob-stats', destination: '/rocjob-stats/index.html' },
+      // The Scud Race lap-time leaderboard page (public/scudrace/).
+      { source: '/scudrace', destination: '/scudrace/index.html' },
       // The game page under its player-facing name; /rocjob keeps working (same page).
       { source: '/facemelters', destination: '/rocjob/index.html' },
     ];

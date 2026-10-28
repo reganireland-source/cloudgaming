@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#070b24">
+<title>Scud Race - lap times</title>
+<style>
+  :root {
+    --bg: #070b24; --bg2: #0d1440; --panel: #101a52; --line: #243a8f;
+    --gold: #ffcf1f; --gold-2: #ff9d00; --cyan: #19e3ff; --ink: #e9f2ff; --dim: #8ea3d9;
+    --led: #ffb21a; --led-bg: #120a00; --silver: #cfd8ea; --bronze: #d9894a; --bad: #ff6b81;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body { margin: 0; color: var(--ink); font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: radial-gradient(1200px 500px at 50% -10%, #1b2a86 0%, rgba(27,42,134,0) 60%), var(--bg); min-height: 100vh; }
+  main { max-width: 900px; margin: 0 auto; padding: 22px 16px 56px; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px; }
+  h1 { margin: 0; font-size: clamp(30px, 8vw, 46px); font-style: italic; font-weight: 900; letter-spacing: .03em; text-transform: uppercase;
+    color: var(--gold); text-shadow: 0 2px 0 #b36b00, 0 0 18px rgba(255,207,31,.35); line-height: 1; }
+  h1 small { display: block; font-size: .32em; letter-spacing: .3em; color: var(--cyan); text-shadow: none; margin-top: 6px; font-style: normal; font-weight: 700; }
+  .stripe { height: 6px; background: repeating-linear-gradient(135deg, var(--gold) 0 14px, #1b2a86 14px 28px); border-radius: 3px; }
+  .group { display: flex; align-items: center; gap: 8px; }
+  label.cap { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--dim); }
+  input, select, button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+  .tabs, .courses { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tab { cursor: pointer; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; font-style: italic; padding: 9px 16px; }
+  .tab[aria-selected="true"] { background: linear-gradient(#ffd93d, #ff9d00); color: #1a1000; border-color: #ffe27a; box-shadow: 0 0 14px rgba(255,170,0,.35); }
+  .chip { cursor: pointer; font-size: 13px; padding: 7px 12px; color: var(--cyan); border-color: #1a6f88; background: transparent; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+  .chip[aria-pressed="true"] { background: rgba(25,227,255,.14); border-color: var(--cyan); color: #fff; box-shadow: 0 0 10px rgba(25,227,255,.3); }
+  .filters { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }
+  .filters .f { display: grid; gap: 4px; }
+  .board { background: linear-gradient(var(--bg2), var(--bg)); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--cyan); padding: 10px 12px; border-bottom: 1px solid var(--line); background: rgba(16,26,82,.6); }
+  td { padding: 9px 12px; border-bottom: 1px solid rgba(36,58,143,.45); }
+  tr:last-child td { border-bottom: 0; }
+  td.rank { width: 56px; font-weight: 900; font-style: italic; font-size: 18px; color: var(--dim); }
+  tr.r1 td.rank { color: var(--gold); text-shadow: 0 0 10px rgba(255,207,31,.5); } tr.r2 td.rank { color: var(--silver); } tr.r3 td.rank { color: var(--bronze); }
+  td.ini { font-weight: 900; letter-spacing: .2em; font-size: 17px; }
+  .led { display: inline-block; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 700; font-size: 18px; letter-spacing: .08em;
+    color: var(--led); background: var(--led-bg); border: 1px solid #3a2400; border-radius: 5px; padding: 2px 9px; text-shadow: 0 0 8px rgba(255,178,26,.8); font-variant-numeric: tabular-nums; }
+  tr.r1 .led { color: #fff3b0; border-color: var(--gold); text-shadow: 0 0 10px rgba(255,207,31,.95); }
+  td.dim { color: var(--dim); font-size: 13px; }
+  .tbl { overflow-x: auto; }
+  .state { padding: 26px 16px; text-align: center; color: var(--dim); }
+  .state.err { color: var(--bad); }
+  .foot { color: var(--dim); font-size: 12.5px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 560px) { td.hide-s, th.hide-s { display: none; } td, th { padding: 8px 8px; } .led { font-size: 16px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Scud Race<small>LAP TIMES</small></h1>
+    <div class="group">
+      <div class="f" style="display:grid;gap:4px"><label class="cap" for="group">Group code</label><input id="group" autocomplete="off" spellcheck="false" placeholder="friends code" size="16"></div>
+    </div>
+  </header>
+  <div class="stripe" aria-hidden="true"></div>
+
+  <div class="tabs" role="tablist" aria-label="Mode" id="modes"></div>
+  <div class="courses" id="courses" role="group" aria-label="Course"></div>
+  <div class="filters">
+    <div class="f"><label class="cap" for="car">Car</label><select id="car"></select></div>
+    <div class="f"><label class="cap" for="trans">Transmission</label><select id="trans"><option value="">All</option><option value="auto">Auto</option><option value="manual">Manual</option></select></div>
+  </div>
+
+  <section class="board" aria-live="polite">
+    <div class="tbl"><table id="tbl" hidden>
+      <thead><tr><th>#</th><th>Driver</th><th>Lap</th><th>Car</th><th class="hide-s">Gearbox</th><th class="hide-s">Build</th><th class="hide-s">Date</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="state" id="state">Enter your group code to see the boards.</div>
+  </section>
+  <p class="foot">Each driver shows once per board, with their best lap. Boards are separate for each mode and course. Only initials and times are shown.</p>
+</main>
+<script>
+(function () {
+  // Where the numbers come from. Change only if the backend moves (or add ?api=https://host/api to try another).
+  var API = new URLSearchParams(location.search).get('api') || 'https://cloudgaming-production.up.railway.app/api';
+  var MODES = [['rebuilt', 'Rebuilt'], ['remaster', 'Remaster'], ['reimagined', 'Reimagined']];
+  var COURSES = [['beginner_day', 'Beginner day'], ['beginner_night', 'Beginner night'], ['medium', 'Medium'], ['expert', 'Expert']];
+  var CARS = [['', 'All cars'], ['ferrari', 'Ferrari'], ['mclaren', 'McLaren'], ['porsche', 'Porsche'], ['viper', 'Viper']];
+  var $ = function (id) { return document.getElementById(id); };
+  var st = { mode: 'rebuilt', course: 'medium', car: '', trans: '' };
+  var timer = null, seq = 0;
+
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function lapText(ms) { var m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), r = ms % 1000; return m + ':' + String(s).padStart(2, '0') + '.' + String(r).padStart(3, '0'); }
+  function nice(v) { return v ? v.charAt(0).toUpperCase() + v.slice(1) : ''; }
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+  function setState(text, err) { var s = $('state'); s.textContent = text; s.className = 'state' + (err ? ' err' : ''); s.hidden = !text; }
+
+  function render(list) {
+    var tb = $('rows'); tb.textContent = '';
+    if (!list.length) { $('tbl').hidden = true; return setState('No laps on this board yet. Be the first.'); }
+    setState('');
+    $('tbl').hidden = false;
+    list.forEach(function (e) {
+      var tr = el('tr', e.rank <= 3 ? 'r' + e.rank : '');
+      tr.appendChild(el('td', 'rank', String(e.rank)));
+      tr.appendChild(el('td', 'ini', e.initials));
+      var t = el('td'); t.appendChild(el('span', 'led', lapText(e.lap_ms))); tr.appendChild(t);
+      tr.appendChild(el('td', null, nice(e.car)));
+      tr.appendChild(el('td', 'dim hide-s', nice(e.transmission)));
+      tr.appendChild(el('td', 'dim hide-s', e.build));
+      tr.appendChild(el('td', 'dim hide-s', new Date(e.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })));
+      tb.appendChild(tr);
+    });
+  }
+
+  function load() {
+    var g = $('group').value.trim();
+    if (!g) { $('tbl').hidden = true; return setState('Enter your group code to see the boards.'); }
+    var mine = ++seq;
+    var q = 'group=' + encodeURIComponent(g) + '&mode=' + st.mode + '&course=' + st.course + '&limit=100' + (st.car ? '&car=' + st.car : '') + (st.trans ? '&transmission=' + st.trans : '');
+    fetch(API + '/scudrace/leaderboard?' + q, { cache: 'no-store' }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) { return { status: r.status, body: j }; });
+    }).then(function (x) {
+      if (mine !== seq) return;
+      if (x.status === 403) { $('tbl').hidden = true; return setState('That group code is not known.', true); }
+      if (x.status === 503) { $('tbl').hidden = true; return setState('The leaderboard is not switched on yet.', true); }
+      if (x.status !== 200 || !Array.isArray(x.body)) { $('tbl').hidden = true; return setState('Could not load the board (' + x.status + '). Trying again soon.', true); }
+      store('scudrace.group', g);
+      render(x.body);
+    }).catch(function () { if (mine === seq) { $('tbl').hidden = true; setState('Could not reach the server. Trying again soon.', true); } });
+  }
+  function schedule() { clearInterval(timer); timer = setInterval(function () { if (document.visibilityState === 'visible') load(); }, 30000); }
+
+  function build() {
+    var tabs = $('modes');
+    MODES.forEach(function (m) {
+      var b = el('button', 'tab', m[1]); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(m[0] === st.mode));
+      b.addEventListener('click', function () { st.mode = m[0]; Array.prototype.forEach.call(tabs.children, function (c) { c.setAttribute('aria-selected', String(c === b)); }); load(); });
+      tabs.appendChild(b);
+    });
+    var cs = $('courses');
+    COURSES.forEach(function (c) {
+      var b = el('button', 'chip', c[1]); b.type = 'button'; b.setAttribute('aria-pressed', String(c[0] === st.course));
+      b.addEventListener('click', function () { st.course = c[0]; Array.prototype.forEach.call(cs.children, function (x) { x.setAttribute('aria-pressed', String(x === b)); }); load(); });
+      cs.appendChild(b);
+    });
+    CARS.forEach(function (c) { var o = el('option', null, c[1]); o.value = c[0]; $('car').appendChild(o); });
+    $('car').addEventListener('change', function () { st.car = this.value; load(); });
+    $('trans').addEventListener('change', function () { st.trans = this.value; load(); });
+    var gi = $('group');
+    var h = new URLSearchParams((location.hash || '').replace(/^#/, '')).get('group');
+    gi.value = h || store('scudrace.group') || '';
+    gi.addEventListener('change', load);
+    gi.addEventListener('keydown', function (e) { if (e.key === 'Enter') load(); });
+    load(); schedule();
+  }
+  build();
+})();
+</script>
+</body>
+</html>
