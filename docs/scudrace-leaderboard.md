@@ -4,7 +4,7 @@ A small leaderboard for the Scud Race hobby game (Unity, Mac and Windows, a few 
 
 - **API base:** `https://cloudgaming-production.up.railway.app/api/scudrace`
 - **Web page:** `https://cloudgaming-alpha.vercel.app/scudrace/` (group code in a box, or in the address: `/scudrace/#group=<code>`)
-- **Code:** `src/api/routes/scudrace.ts`, `src/services/ScudraceBoard.ts`, `database/migrations/029_scudrace_scores.sql`, page in `frontend/public/scudrace/`.
+- **Code:** `src/api/routes/scudrace.ts`, `src/services/ScudraceBoard.ts`, `database/migrations/029_scudrace_scores.sql` (+ `032_scudrace_endurance.sql`), page in `frontend/public/scudrace/`.
 
 ## Switching it on (Railway, backend service, Variables)
 
@@ -26,9 +26,9 @@ Body (JSON, max 2 KB):
   "lap_ms": 80123, "total_ms": 250000, "build": "0.3.1", "replay_hash": "optional" }
 ```
 
-- `mode`: `rebuilt` | `remaster` | `reimagined`. `course`: `beginner_day` | `beginner_night` | `medium` | `expert`. `car`: `ferrari` | `mclaren` | `porsche` | `viper`. `transmission`: `auto` | `manual`.
+- `mode`: `rebuilt` | `remaster` | `reimagined` | `endurance` (see "Endurance mode" below). `course`: `beginner_day` | `beginner_night` | `medium` | `expert`. `car`: `ferrari` | `mclaren` | `porsche` | `viper`. `transmission`: `auto` | `manual`.
 - `initials`: 3 characters A-Z or 0-9 (lower case is accepted and stored upper case).
-- `lap_ms`: whole milliseconds, 20000 to 600000. `total_ms` (optional): whole number, not less than `lap_ms`, up to 3600000.
+- `lap_ms`: whole milliseconds, 20000 to 600000. `total_ms` (optional; **required for `endurance`**): whole number, not less than `lap_ms`, up to 3600000 (up to 2700000 for `endurance`).
 - `build`: up to 32 of `A-Z a-z 0-9 . _ + -`.
 - `replay_hash` (optional): 16 hex characters (lower case; upper case is accepted and lowered). A full 64-hex SHA-256 is also accepted and the first 16 characters are kept. A resend of the same lap may bring a hash the first send lacked.
 
@@ -45,8 +45,26 @@ curl -s -X POST https://cloudgaming-production.up.railway.app/api/scudrace/score
   -d '{"install_id":"3f6c1a7e-9b0d-4c2a-8e51-0d7a2b9f4c10","group":"abc123xyz","initials":"REG","mode":"rebuilt","course":"medium","car":"ferrari","transmission":"auto","lap_ms":80123,"build":"0.3.1"}'
 ```
 
+#### Endurance mode (`mode: "endurance"`)
+An Endurance Cup (16 or 24 laps) or marathon run. One row per run; the board for a group, course is ranked by **`total_ms`, lowest first** (the other modes still rank by `lap_ms`).
+- `total_ms` is **required**, not less than `lap_ms`, **at most 2700000 (45 minutes)**. `lap_ms` stays the run's best single lap (same 20000 to 600000 bounds).
+- Optional extras, stored and shown but not ranked: `stops` (whole number 0 to 5), `laps` (whole number 1 to 100; then `total_ms` must be at least `laps * lap_ms`), `tyre_class` (up to 16 of `A-Z a-z 0-9 _ -`). They are ignored for the other modes.
+- In the answer, `best_for_install` is this install's best **total** (the ranking value) on that endurance board.
+- Replays for an endurance run may be up to **65536 bytes** (see `POST /replays`); the other modes stay at 16384.
+- The unique-lap check is the same (install, group, mode, course, car, transmission, `lap_ms`, `total_ms`), so a retry is stored once.
+
+Test vector (answer on an empty board for this group):
+
+```bash
+curl -s -X POST https://cloudgaming-production.up.railway.app/api/scudrace/scores \
+  -H 'Content-Type: application/json' \
+  -d '{"install_id":"3f6c1a7e-9b0d-4c2a-8e51-0d7a2b9f4c10","group":"abc123xyz","initials":"REG","mode":"endurance","course":"medium","car":"ferrari","transmission":"auto","lap_ms":78000,"total_ms":1900000,"stops":2,"laps":24,"tyre_class":"medium","build":"0.4.0"}'
+# 200 {"rank":1,"best_for_install":1900000,"total_entries":1,"id":<n>,"replay_wanted":false}
+# Rejected (400): the same without total_ms; total_ms 2700001; stops 6; laps 24 with total_ms 1000000 (24 x 78000 = 1872000 > total).
+```
+
 ### `GET /leaderboard`
-`?group=&mode=&course=` (required) and `&car=` `&transmission=` `&limit=` (optional, default 50, max 200). Returns entries sorted fastest first, **each install once** (its best lap within the filters). `id` is the score row id; `replay` is `true` exactly when a replay blob is stored for that row:
+`?group=&mode=&course=` (required) and `&car=` `&transmission=` `&limit=` (optional, default 50, max 200). Returns entries sorted fastest first, **each install once** (its best lap within the filters; for `mode=endurance` its best total, and each entry also has `total_ms`, `stops`, `laps`, `tyre_class`). `id` is the score row id; `replay` is `true` exactly when a replay blob is stored for that row:
 
 ```json
 [ { "rank": 1, "id": 412, "replay": true, "initials": "REG", "lap_ms": 78000, "car": "ferrari", "transmission": "manual", "build": "0.3.0", "created_at": "2026-10-28T08:15:00.000Z" } ]
@@ -59,7 +77,7 @@ curl -s 'https://cloudgaming-production.up.railway.app/api/scudrace/leaderboard?
 ### `POST /replays` (a lap's replay / ghost)
 `?id=<score id>&install_id=<uuid>[&group=<code>]`. The body is the **raw bytes**, `Content-Type: application/vnd.scudrace.replay` (not JSON, not base64). Checks, in this order:
 
-1. Body larger than 16384 bytes: `413`.
+1. Body larger than 16384 bytes: `413`, unless the row is an `endurance` run's (then up to 65536 bytes). Anything above 65536 is always `413`.
 2. The row `id` does not exist, does not belong to `install_id` (and `group`, if given), or has no `replay_hash`: `404 {"error":"not_found"}`. An unknown `group` is `403`.
 3. The first 16 hex characters of SHA-256 of the body differ from the row's `replay_hash`: `409 {"error":"hash_mismatch"}`.
 4. The blob header is wrong: bytes 0-3 must be `SRPL` (53 52 50 4C), byte 4 must be `1`, and the little-endian CRC-32 of everything before the last 4 bytes must equal the last 4 bytes: `400 {"error":"bad_blob"}`. A body not sent as raw bytes with this content type is also `400 bad_blob`.
@@ -98,7 +116,7 @@ curl -s -X DELETE 'https://cloudgaming-production.up.railway.app/api/scudrace/sc
 ## Decisions
 - **One row per install on a board.** Boards are separate per group, mode and course. With no `car` filter an install's best lap in any car counts. Transmission is stored and can be filtered; it does not split the boards.
 - **Storage.** Postgres table `scudrace_scores`; each install keeps its best 5 laps per mode, course, car and transmission (the rest are pruned). An identical resend (same install, lap and total) is stored once, so retries are safe.
-- **Replay storage.** One blob per score row in `scudrace_replays` (Postgres `bytea`), removed with its row, so it goes when the row is pushed out of the install's best 5 or cleared by the admin route. At most 16 KiB each, 200 per install (oldest go first) and 25 MB per group (oldest outside the top 10 of their board go first). Request bodies are never logged. A nullable `verified` column exists on `scudrace_scores` for later checking; nothing sets it yet.
+- **Replay storage.** One blob per score row in `scudrace_replays` (Postgres `bytea`), removed with its row, so it goes when the row is pushed out of the install's best 5 or cleared by the admin route. At most 16 KiB each (64 KiB for an endurance run), 200 per install (oldest go first) and 25 MB per group (oldest outside the top 10 of their board go first). Request bodies are never logged. A nullable `verified` column exists on `scudrace_scores` for later checking; nothing sets it yet.
 - **Limits.** 120 posts an hour per install and 120 requests a minute per address (memory only, never stored), plus a safety cap of 5000 laps a day per group.
 - **Privacy.** Stored: random install id, group code, initials, mode, course, car, transmission, lap, optional total, build, optional replay hash, time. No address, user agent or hardware id.
 - **Trust.** Laps are not verified; a determined friend can post a fake time. The `replay_hash` field is stored for later checking. The owner can clear a group or a mode with the admin route.

@@ -77,13 +77,13 @@
     </table></div>
     <div class="state" id="state">Enter your group code to see the boards.</div>
   </section>
-  <p class="foot">Each driver shows once per board, with their best lap. Boards are separate for each mode and course. Only initials and times are shown.</p>
+  <p class="foot">Each driver shows once per board, with their best lap (Endurance: their best total time). Boards are separate for each mode and course. Only initials and times are shown.</p>
 </main>
 <script>
 (function () {
   // Where the numbers come from. Change only if the backend moves (or add ?api=https://host/api to try another).
   var API = new URLSearchParams(location.search).get('api') || 'https://cloudgaming-production.up.railway.app/api';
-  var MODES = [['rebuilt', 'Rebuilt'], ['remaster', 'Remaster'], ['reimagined', 'Reimagined']];
+  var MODES = [['rebuilt', 'Rebuilt'], ['remaster', 'Remaster'], ['reimagined', 'Reimagined'], ['endurance', 'Endurance']];
   var COURSES = [['beginner_day', 'Beginner day'], ['beginner_night', 'Beginner night'], ['medium', 'Medium'], ['expert', 'Expert']];
   var CARS = [['', 'All cars'], ['ferrari', 'Ferrari'], ['mclaren', 'McLaren'], ['porsche', 'Porsche'], ['viper', 'Viper']];
   var $ = function (id) { return document.getElementById(id); };
@@ -106,7 +106,12 @@
       var tr = el('tr', e.rank <= 3 ? 'r' + e.rank : '');
       tr.appendChild(el('td', 'rank', String(e.rank)));
       tr.appendChild(el('td', 'ini', e.initials));
-      var t = el('td'); t.appendChild(el('span', 'led', lapText(e.lap_ms))); tr.appendChild(t);
+      var t = el('td');
+      if (e.total_ms != null) { // endurance: ranked by the run's total time; the best lap and the run's extras follow
+        t.appendChild(el('span', 'led', lapText(e.total_ms)));
+        t.appendChild(el('span', 'dim', ' best lap ' + lapText(e.lap_ms) + (e.laps ? ' · ' + e.laps + ' laps' : '') + (e.stops != null ? ' · ' + e.stops + ' stop' + (e.stops === 1 ? '' : 's') : '') + (e.tyre_class ? ' · ' + e.tyre_class : '')));
+      } else t.appendChild(el('span', 'led', lapText(e.lap_ms)));
+      tr.appendChild(t);
       tr.appendChild(el('td', null, nice(e.car)));
       tr.appendChild(el('td', 'dim hide-s', nice(e.transmission)));
       tr.appendChild(el('td', 'dim hide-s', e.build));

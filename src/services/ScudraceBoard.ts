@@ -21,13 +21,15 @@
 import crypto from 'crypto';
 import { query } from '../config/database';
 
-export const MODES = ['rebuilt', 'remaster', 'reimagined'] as const;
+export const MODES = ['rebuilt', 'remaster', 'reimagined', 'endurance'] as const;
 export const COURSES = ['beginner_day', 'beginner_night', 'medium', 'expert'] as const;
 export const CARS = ['ferrari', 'mclaren', 'porsche', 'viper'] as const;
 export const TRANSMISSIONS = ['auto', 'manual'] as const;
 export const LAP_MIN_MS = 20_000;       // faster than this is not a real lap
 export const LAP_MAX_MS = 600_000;      // ten minutes
 export const TOTAL_MAX_MS = 3_600_000;
+export const ENDURANCE_TOTAL_MAX_MS = 2_700_000;   // 45 minutes; endurance boards rank by total_ms
+const TYRE_CLASS = /^[A-Za-z0-9_-]{1,16}$/;
 const KEEP_PER_COMBO = 5;               // best laps kept per install / mode / course / car / transmission
 const DAILY_ROW_CAP = 5000;             // safety net per group
 
@@ -53,7 +55,7 @@ export function allow(key: string, limit: number, ms: number): boolean {
 }
 setInterval(() => { const now = Date.now(); for (const [k, w] of windows) if (w.reset <= now) windows.delete(k); }, 5 * 60_000).unref();
 
-export interface Score { install: string; grp: string; initials: string; mode: string; course: string; car: string; transmission: string; lapMs: number; totalMs: number | null; build: string; replayHash: string | null }
+export interface Score { install: string; grp: string; initials: string; mode: string; course: string; car: string; transmission: string; lapMs: number; totalMs: number | null; build: string; replayHash: string | null; stops: number | null; laps: number | null; tyreClass: string | null }
 
 /** The score if the body is exactly the contract, else a short reason. */
 export function parseScore(b: any): { ok: true; score: Score } | { ok: false; error: string } {
@@ -68,10 +70,29 @@ export function parseScore(b: any): { ok: true; score: Score } | { ok: false; er
   if (!CARS.includes(b.car)) return { ok: false, error: `car must be one of ${CARS.join(', ')}.` };
   if (!TRANSMISSIONS.includes(b.transmission)) return { ok: false, error: 'transmission must be auto or manual.' };
   if (!Number.isInteger(b.lap_ms) || b.lap_ms < LAP_MIN_MS || b.lap_ms > LAP_MAX_MS) return { ok: false, error: `lap_ms must be a whole number between ${LAP_MIN_MS} and ${LAP_MAX_MS}.` };
+  const endurance = b.mode === 'endurance';
+  const totalMax = endurance ? ENDURANCE_TOTAL_MAX_MS : TOTAL_MAX_MS;
   let totalMs: number | null = null;
   if (b.total_ms !== undefined && b.total_ms !== null) {
-    if (!Number.isInteger(b.total_ms) || b.total_ms < b.lap_ms || b.total_ms > TOTAL_MAX_MS) return { ok: false, error: 'total_ms must be a whole number, not less than lap_ms.' };
+    if (!Number.isInteger(b.total_ms) || b.total_ms < b.lap_ms || b.total_ms > totalMax) return { ok: false, error: `total_ms must be a whole number, not less than lap_ms, up to ${totalMax}.` };
     totalMs = b.total_ms;
+  } else if (endurance) return { ok: false, error: 'total_ms is required for mode endurance.' };
+  // Endurance extras: stored, not ranked. (Ignored for the other modes.)
+  let stops: number | null = null, laps: number | null = null, tyreClass: string | null = null;
+  if (endurance) {
+    if (b.stops !== undefined && b.stops !== null) {
+      if (!Number.isInteger(b.stops) || b.stops < 0 || b.stops > 5) return { ok: false, error: 'stops must be a whole number from 0 to 5.' };
+      stops = b.stops;
+    }
+    if (b.laps !== undefined && b.laps !== null) {
+      if (!Number.isInteger(b.laps) || b.laps < 1 || b.laps > 100) return { ok: false, error: 'laps must be a whole number from 1 to 100.' };
+      if (b.laps * b.lap_ms > totalMs!) return { ok: false, error: 'total_ms cannot be less than laps times lap_ms.' };
+      laps = b.laps;
+    }
+    if (b.tyre_class !== undefined && b.tyre_class !== null) {
+      if (typeof b.tyre_class !== 'string' || !TYRE_CLASS.test(b.tyre_class)) return { ok: false, error: 'tyre_class must be up to 16 of A-Z a-z 0-9 _ -.' };
+      tyreClass = b.tyre_class;
+    }
   }
   if (typeof b.build !== 'string' || !BUILD.test(b.build)) return { ok: false, error: 'build must be a short version string.' };
   let replayHash: string | null = null;
@@ -79,8 +100,11 @@ export function parseScore(b: any): { ok: true; score: Score } | { ok: false; er
     if (typeof b.replay_hash !== 'string' || !HASH.test(b.replay_hash)) return { ok: false, error: 'replay_hash must be 16 hex characters (or 64: the first 16 are kept).' };
     replayHash = b.replay_hash.slice(0, 16).toLowerCase();
   }
-  return { ok: true, score: { install: b.install_id.toLowerCase(), grp, initials, mode: b.mode, course: b.course, car: b.car, transmission: b.transmission, lapMs: b.lap_ms, totalMs, build: b.build, replayHash } };
+  return { ok: true, score: { install: b.install_id.toLowerCase(), grp, initials, mode: b.mode, course: b.course, car: b.car, transmission: b.transmission, lapMs: b.lap_ms, totalMs, build: b.build, replayHash, stops, laps, tyreClass } };
 }
+
+/** What a board ranks by: endurance = the run's total time, the other modes = the best lap. */
+const rankCol = (mode: string) => (mode === 'endurance' ? 'total_ms' : 'lap_ms');
 
 /** true = this group has already had its daily limit of laps. */
 export async function groupFull(grp: string): Promise<boolean> {
@@ -91,9 +115,9 @@ export async function groupFull(grp: string): Promise<boolean> {
 /** Stores the lap (a repeat of the same lap is ignored), keeps only each install's best few per combination, and says where it stands. */
 export async function submit(s: Score) {
   await query(
-    `INSERT INTO scudrace_scores (install, grp, initials, mode, course, car, transmission, lap_ms, total_ms, build, replay_hash)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-    [s.install, s.grp, s.initials, s.mode, s.course, s.car, s.transmission, s.lapMs, s.totalMs, s.build, s.replayHash],
+    `INSERT INTO scudrace_scores (install, grp, initials, mode, course, car, transmission, lap_ms, total_ms, build, replay_hash, stops, laps, tyre_class)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`,
+    [s.install, s.grp, s.initials, s.mode, s.course, s.car, s.transmission, s.lapMs, s.totalMs, s.build, s.replayHash, s.stops, s.laps, s.tyreClass],
   );
   // A resend of the same lap may bring the replay hash the first one lacked.
   if (s.replayHash) {
@@ -102,16 +126,17 @@ export async function submit(s: Score) {
       [s.install, s.grp, s.mode, s.course, s.car, s.transmission, s.lapMs, s.totalMs, s.replayHash],
     );
   }
+  const rc = rankCol(s.mode);
   await query(
     `DELETE FROM scudrace_scores WHERE id IN (
-       SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY lap_ms, created_at) AS rn FROM scudrace_scores
+       SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY ${rc}, created_at) AS rn FROM scudrace_scores
                        WHERE install = $1 AND grp = $2 AND mode = $3 AND course = $4 AND car = $5 AND transmission = $6) x WHERE rn > $7)`,
     [s.install, s.grp, s.mode, s.course, s.car, s.transmission, KEEP_PER_COMBO],
   );
   // The board: each install once, with its best lap on this group's mode and course (any car).
-  const best = Number((await query(`SELECT MIN(lap_ms) AS b FROM scudrace_scores WHERE install = $1 AND grp = $2 AND mode = $3 AND course = $4`, [s.install, s.grp, s.mode, s.course])).rows[0].b);
+  const best = Number((await query(`SELECT MIN(${rc}) AS b FROM scudrace_scores WHERE install = $1 AND grp = $2 AND mode = $3 AND course = $4`, [s.install, s.grp, s.mode, s.course])).rows[0].b);
   const r = (await query(
-    `WITH b AS (SELECT install, MIN(lap_ms) AS best FROM scudrace_scores WHERE grp = $1 AND mode = $2 AND course = $3 GROUP BY install)
+    `WITH b AS (SELECT install, MIN(${rc}) AS best FROM scudrace_scores WHERE grp = $1 AND mode = $2 AND course = $3 GROUP BY install)
      SELECT (SELECT COUNT(*) FROM b WHERE best < $4)::int + 1 AS rank, (SELECT COUNT(*) FROM b)::int AS total`,
     [s.grp, s.mode, s.course, best],
   )).rows[0];
@@ -137,15 +162,16 @@ export async function board(q: BoardQuery) {
   if (q.car) { args.push(q.car); extra += ` AND car = $${args.length}`; }
   if (q.transmission) { args.push(q.transmission); extra += ` AND transmission = $${args.length}`; }
   args.push(q.limit);
+  const rc = rankCol(q.mode);
   const rows = (await query(
-    `SELECT id, initials, lap_ms, car, transmission, build, created_at, replay FROM (
-       SELECT DISTINCT ON (s.install) s.id, s.initials, s.lap_ms, s.car, s.transmission, s.build, s.created_at, (r.score_id IS NOT NULL) AS replay
+    `SELECT id, initials, lap_ms, total_ms, stops, laps, tyre_class, car, transmission, build, created_at, replay FROM (
+       SELECT DISTINCT ON (s.install) s.id, s.initials, s.lap_ms, s.total_ms, s.stops, s.laps, s.tyre_class, s.car, s.transmission, s.build, s.created_at, (r.score_id IS NOT NULL) AS replay
        FROM scudrace_scores s LEFT JOIN scudrace_replays r ON r.score_id = s.id
        WHERE s.grp = $1 AND s.mode = $2 AND s.course = $3${extra.replace(/ AND car/g, ' AND s.car').replace(/ AND transmission/g, ' AND s.transmission')}
-       ORDER BY s.install, s.lap_ms, s.created_at) best
-     ORDER BY lap_ms, created_at LIMIT $${args.length}`, args,
+       ORDER BY s.install, s.${rc}, s.created_at) best
+     ORDER BY ${rc}, created_at LIMIT $${args.length}`, args,
   )).rows;
-  return rows.map((r, i) => ({ rank: i + 1, id: Number(r.id), replay: !!r.replay, initials: String(r.initials), lap_ms: r.lap_ms as number, car: r.car as string, transmission: r.transmission as string, build: r.build as string, created_at: new Date(r.created_at).toISOString() }));
+  return rows.map((r, i) => ({ rank: i + 1, id: Number(r.id), replay: !!r.replay, initials: String(r.initials), lap_ms: r.lap_ms as number, ...(q.mode === 'endurance' ? { total_ms: r.total_ms as number, stops: r.stops as number | null, laps: r.laps as number | null, tyre_class: r.tyre_class as string | null } : {}), car: r.car as string, transmission: r.transmission as string, build: r.build as string, created_at: new Date(r.created_at).toISOString() }));
 }
 
 /** Owner only: removes a group's scores (optionally just one mode / course). */
@@ -162,6 +188,7 @@ export async function clear(grp: string, mode?: string, course?: string): Promis
 
 export const REPLAY_TYPE = 'application/vnd.scudrace.replay';
 export const REPLAY_MAX_BYTES = 16384;
+export const REPLAY_MAX_BYTES_ENDURANCE = 65536;   // an endurance run is longer than one lap
 const PER_INSTALL_BLOBS = 200;
 const PER_GROUP_BYTES = 25 * 1024 * 1024;
 
@@ -183,11 +210,13 @@ export function blobLooksValid(b: Buffer): boolean {
 
 export const sha16 = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex').slice(0, 16);
 
-export type ReplayResult = { status: 200; body: { status: 'stored'; bytes: number } | { status: 'exists' } } | { status: 400 | 404 | 409; body: { error: string } };
+export type ReplayResult = { status: 200; body: { status: 'stored'; bytes: number } | { status: 'exists' } } | { status: 400 | 404 | 409 | 413; body: { error: string } };
 
 /** Checks, in order: the row exists and belongs to this install (and group); the hash matches; the blob header is sound. */
 export async function storeReplay(id: number, install: string, grp: string | null, body: Buffer | null): Promise<ReplayResult> {
-  const row = (await query(`SELECT id, grp, replay_hash FROM scudrace_scores WHERE id = $1 AND install = $2`, [id, install])).rows[0];
+  const row = (await query(`SELECT id, grp, mode, replay_hash FROM scudrace_scores WHERE id = $1 AND install = $2`, [id, install])).rows[0];
+  // Over 16 KiB is only allowed for an endurance run's replay (up to 64 KiB). The body reader lets up to 64 KiB through.
+  if (body && body.length > REPLAY_MAX_BYTES && (!row || row.mode !== 'endurance')) return { status: 413, body: { error: 'too_large' } };
   if (!row || (grp && row.grp !== grp) || !row.replay_hash) return { status: 404, body: { error: 'not_found' } };
   if (!body) return { status: 400, body: { error: 'bad_blob' } }; // not sent as raw bytes with the replay content type
   if (sha16(body) !== row.replay_hash) return { status: 409, body: { error: 'hash_mismatch' } };
