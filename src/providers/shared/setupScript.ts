@@ -554,6 +554,9 @@ PCI_ID="$((16#$P_BUS))@$((16#$P_DOMAIN)):$((16#$P_DEV)):$((16#$P_FN))"
 HOST_DRIVER=$(cat /sys/module/nvidia/version)
 CONTAINER_DRIVER_TYPE=datacenter; SCREEN_MAX_W=2560; SCREEN_MAX_H=1600
 SUN_EXTRA=""
+# L4 (and other newer datacenter GPUs): Sunshine picks NvFBC and crash-loops
+# ("Couldn't release NvFBC context from current thread"); X11 capture works.
+case "$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)" in *L4*) SUN_EXTRA="capture = x11";; esac
 if [ "$DISPLAY_DRIVER" = "grid" ]; then
   # GRID drivers enable NvFBC, which Sunshine then picks for capture and
   # crashes in ("Couldn't release NvFBC context from current thread", exit
