@@ -540,6 +540,17 @@ chmod 1777 "$SUN_DIR/fps" "$SUN_DIR/x11"
 # is recreated. Keep them on the machine's disk like Steam and the home
 # folder, so you log in once per machine. (Owned by the container's user,
 # uid 1001.)
+# Sunshine's certificate and key. An empty or unreadable pair makes Sunshine
+# abort at start ("use_certificate_chain_file: no start line"), so make a valid
+# pair here when it is missing or broken (a new pair means a new pairing).
+SC="$SUN_DIR/data/sunshine"
+mkdir -p "$SC"
+if ! openssl x509 -in "$SC/cert.pem" -noout >/dev/null 2>&1 || ! openssl pkey -in "$SC/pkey.pem" -noout >/dev/null 2>&1; then
+  rm -f "$SC/cert.pem" "$SC/pkey.pem" "$SC/sunshine_state.json"
+  openssl req -x509 -nodes -newkey rsa:2048 -days 3650 -subj "/CN=Sunshine Gamestream Host" -keyout "$SC/pkey.pem" -out "$SC/cert.pem" >/dev/null 2>&1 || say "WARNING: couldn't create Sunshine's certificate"
+  chmod 600 "$SC/pkey.pem"
+  chown 1001:1001 "$SC/cert.pem" "$SC/pkey.pem" 2>/dev/null || true
+fi
 KEEP_CONF="google-chrome discord lutris"
 for d in $KEEP_CONF; do mkdir -p "$SUN_DIR/conf/$d"; done
 
@@ -1263,8 +1274,8 @@ for i in $(seq 1 120); do
     LAST=$(docker logs --tail 40 cloudy 2>&1 | tr -d '\r' | grep -v -i -E 'pass|secret|token|credential' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
     # Why the health check fails (its own output), when it says so.
     WHY=$(docker inspect -f '{{if .State.Health}}{{range .State.Health.Log}}{{.Output}}{{end}}{{end}}' cloudy 2>/dev/null | tr -d '\r' | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-120)
-    SLOG=$(docker exec cloudy sh -c 'cat /home/cloudy/.config/sunshine/sunshine.log /cloudy/conf/sunshine/sunshine.log 2>/dev/null' 2>/dev/null)
-    SERR=$(printf '%s\n' "$SLOG" | grep -E '(Error|Fatal):' | tail -1 | cut -c1-140)
+    SLOG=$(docker exec cloudy sh -c 'cat /home/cloudy/.config/sunshine/sunshine.log /cloudy/conf/sunshine/sunshine.log /cloudy/log/sunshine.log /cloudy/log/sunshine.err.log 2>/dev/null' 2>/dev/null)
+    SERR=$(printf '%s\n' "$SLOG" | grep -E '(Error|Fatal):|what\(\)' | tail -1 | cut -c1-140)
     # No error line (a crash logs none): its last line shows what it was doing.
     [ -n "$SERR" ] || SERR=$(printf '%s\n' "$SLOG" | grep -v -E '^[[:space:]]*$' | tail -1 | cut -c1-140)
     say "CLOUDGAMING_DETAIL $((i / 6)) min, container $HEALTH: $LAST$([ -n "$WHY" ] && [ "$HEALTH" != "healthy" ] && echo " | health check: $WHY")$([ -n "$SERR" ] && [ "$HEALTH" != "healthy" ] && echo " | Sunshine: $SERR")"
