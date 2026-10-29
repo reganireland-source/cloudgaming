@@ -38,7 +38,7 @@ import crypto from 'crypto';
 export const AGENT_PS1 = String.raw`# GGGH agent for a local Windows PC. Connects out to GGGH; opens nothing.
 param([string]$Mode = 'service', [string]$Sid = '', [int]$Port = 22, [string]$TargetHost = '127.0.0.1')
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '14'
+$AgentVersion = '15'
 $Dir = Join-Path $env:ProgramData 'GGGH'
 $DispDir = Join-Path $Dir 'display'
 $Log = Join-Path $Dir 'agent.log'
@@ -379,6 +379,76 @@ function Ping-Gateway($gw, $count) {
   return $res
 }
 
+# Slower readings, taken at most every 20 seconds: busiest core, disk latency, GPU programs, ping to the
+# streaming device, what Sunshine is streaming, PCIe link. Every part is optional; a failure just leaves it out.
+function Last-Match($lines, $pattern) {
+  $m = $null
+  foreach ($l in $lines) { if ($l -match $pattern) { $m = $Matches[1] } }
+  return $m
+}
+
+function Get-Extras($streaming) {
+  $x = @{}
+  try {
+    $cores = @(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -ErrorAction Stop | Where-Object { $_.Name -ne '_Total' })
+    if ($cores.Count) { $x.cores = $cores.Count; $x.topCore = [int](($cores | Measure-Object -Property PercentProcessorTime -Maximum).Maximum) }
+  } catch { }
+  try {
+    $cs = (Get-Counter -Counter '\PhysicalDisk(_Total)\Avg. Disk sec/Read', '\PhysicalDisk(_Total)\Avg. Disk sec/Write', '\PhysicalDisk(_Total)\Current Disk Queue Length' -ErrorAction Stop).CounterSamples
+    if (@($cs).Count -ge 3) { $x.diskLat = @([Math]::Round($cs[0].CookedValue * 1000, 1), [Math]::Round($cs[1].CookedValue * 1000, 1), [int]$cs[2].CookedValue) }
+  } catch { }
+  try {
+    $mem = @{}; $eng = @{}
+    foreach ($m in @(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory -ErrorAction Stop)) {
+      if ($m.Name -match '^pid_(\d+)_') { $k = $Matches[1]; if (-not $mem.ContainsKey($k)) { $mem[$k] = 0.0 }; $mem[$k] += [double]$m.DedicatedUsage }
+    }
+    foreach ($e in @(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -ErrorAction Stop)) {
+      if ($e.Name -match '^pid_(\d+)_') { $k = $Matches[1]; if (-not $eng.ContainsKey($k) -or $eng[$k] -lt [double]$e.UtilizationPercentage) { $eng[$k] = [double]$e.UtilizationPercentage } }
+    }
+    $rows = @()
+    foreach ($k in @($mem.Keys)) {
+      $nm = '?'; try { $nm = (Get-Process -Id ([int]$k) -ErrorAction Stop).ProcessName } catch { }
+      $pc = $null; if ($eng.ContainsKey($k)) { $pc = [Math]::Round($eng[$k], 0) }
+      $rows += ,@($nm, [int]($mem[$k] / 1MB), $pc)
+    }
+    if ($rows.Count) { $x.gpuProcs = @($rows | Sort-Object { -$_[1] } | Select-Object -First 4) }
+  } catch { }
+  try {
+    $q = Smi 'pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current,pcie.link.width.max'
+    if ($q -and $q.Count -ge 4) { $x.pcie = @{ lg = (N $q[0]); lx = (N $q[1]); lw = (N $q[2]); lm = (N $q[3]) } }
+    $f = Smi 'fan.speed'; if ($f) { $fv = N $f[0]; if ($null -ne $fv) { $x.fan = $fv } }
+  } catch { }
+  try {
+    $lines = @(Tail-Lines $SunshineLog 600 120000)
+    $b = Last-Match $lines 'Streaming bitrate is (\d+)'
+    $st = @{}
+    if ($b) { $st.b = [Math]::Round([double]$b / 1e6, 1) }
+    $en = Last-Match $lines 'Creating encoder \[([A-Za-z0-9_]+)\]'; if ($en) { $st.e = $en }
+    $cd = Last-Match $lines 'Color depth: (\d+)-bit'; if ($cd) { $st.d = $cd }
+    $rs = Last-Match $lines '(\d{3,5}x\d{3,5})'; if ($rs) { $st.r = $rs }
+    $fr = Last-Match $lines '(?:[Ff]rame ?rate|fps)[^0-9]{0,12}(\d{2,3})'; if ($fr) { $st.f = [int]$fr }
+    if ($st.Count) { $x.stream = $st }
+  } catch { }
+  # The streaming device: seen on Sunshine's ports; ping it a few times while somebody is streaming.
+  try {
+    $c = @(Get-NetTCPConnection -LocalPort 47984, 47989, 48010 -ErrorAction Stop | Where-Object { $_.RemoteAddress -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_.RemoteAddress -notmatch '^(127\.|0\.)' } | Select-Object -First 1)
+    if ($c.Count) { $script:clientIp = $c[0].RemoteAddress }
+    if (-not $streaming) { $script:clientIp = $null }
+    if ($script:clientIp) {
+      $p = New-Object Net.NetworkInformation.Ping; $t = @(); $lost = 0
+      for ($i = 0; $i -lt 4; $i++) {
+        try { $r = $p.Send($script:clientIp, 800); if ($r.Status -eq 'Success') { $t += [double]$r.RoundtripTime } else { $lost++ } } catch { $lost++ }
+        Start-Sleep -Milliseconds 150
+      }
+      if ($t.Count) {
+        $avg = ($t | Measure-Object -Average).Average
+        $x.rtt = @{ r = [Math]::Round($avg, 1); j = [Math]::Round((($t | ForEach-Object { [Math]::Abs($_ - $avg) } | Measure-Object -Average).Average), 1); l = [Math]::Round(100 * $lost / 4, 0) }
+      } else { $x.rtt = @{ o = 1 } }
+    }
+  } catch { }
+  return $x
+}
+
 function Get-Status {
   $s = @{ agentVersion = $AgentVersion; host = $env:COMPUTERNAME; canUpdate = $true; agentSha = (Hash-Of $AgentFile); bootSha = (Hash-Of $BootFile) }
   try {
@@ -411,6 +481,11 @@ function Get-Status {
       if ($tx -ge $script:netTx) { $s.txMbps = [Math]::Round((($tx - $script:netTx) * 8 / 1e6) / $secs, 2) }
       if ($rx -ge $script:netRx) { $s.rxMbps = [Math]::Round((($rx - $script:netRx) * 8 / 1e6) / $secs, 2) }
     }
+    $s.txGb = [Math]::Round($tx / 1GB, 3)
+    $er = [double](($ad | Measure-Object -Property OutboundPacketErrors, ReceivedPacketErrors -Sum | Measure-Object -Property Sum -Sum).Sum)
+    $dr2 = [double](($ad | Measure-Object -Property OutboundDiscardedPackets, ReceivedDiscardedPackets -Sum | Measure-Object -Property Sum -Sum).Sum)
+    if ($null -ne $script:netErrPrev -and $er -ge $script:netErrPrev -and $dr2 -ge $script:netDropPrev) { $s.netErr = @([int]($er - $script:netErrPrev), [int]($dr2 - $script:netDropPrev), 0) }
+    $script:netErrPrev = $er; $script:netDropPrev = $dr2
     if (-not $script:netAt -or ($now - $script:netAt).TotalSeconds -ge 5) { $script:netAt = $now; $script:netTx = $tx; $script:netRx = $rx }
   } catch { }
   try { $dr = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':')) -ErrorAction Stop; $s.diskUsedGb = [Math]::Round($dr.Used / 1GB, 0); $s.diskTotalGb = [Math]::Round(($dr.Used + $dr.Free) / 1GB, 0) } catch { }
@@ -435,6 +510,13 @@ function Get-Status {
   $vi = Get-VirtualInfo
   $s.display = @{ mode = $(if (Test-Path $HeadlessFile) { 'headless' } else { 'mirror' }); virtual = [bool]$vi.virtual; virtualState = [string]$vi.state; seen = @($vi.seen) }
   try { $sv = Get-Service -Name 'SunshineService' -ErrorAction Stop; $s.sunshine = $sv.Status.ToString() } catch { $s.sunshine = 'NotInstalled' }
+  try {
+    if (-not $script:extrasAt -or ((Get-Date) - $script:extrasAt).TotalSeconds -ge 20) {
+      $script:extras = Get-Extras ($s.streaming -eq $true)
+      $script:extrasAt = Get-Date
+    }
+    foreach ($k in @($script:extras.Keys)) { $s[$k] = $script:extras[$k] }
+  } catch { }
   return $s
 }
 

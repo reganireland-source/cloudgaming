@@ -1383,7 +1383,19 @@ export interface TelemetrySample {
   d?: [number, number]; dr?: number | null; dw?: number | null; ni?: number | null; no?: number | null;
   g?: Record<string, number | string | null> | null; ct?: number | null; up?: number | null;
   /** The game's own frame rate (MangoHud log): game, avg fps, lowest 1-s fps, worst frame time ms. */
-  gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null;
+  gf?: { n: string; f: number | null; lo: number | null; ft: number | null; p1?: number | null; sc?: number | null; w?: number } | null;
+  /** Busiest CPU core % and core count; CPU steal %; I/O wait %. */
+  cc?: [number, number] | null; cs?: number | null; cw?: number | null;
+  /** Pressure stall % (cpu, memory, io); disk [read ms, write ms, queue]; NIC [errors, drops, UDP errors] this interval; GB sent since boot. */
+  pr?: Array<number | null> | null; dl?: Array<number | null> | null; ne?: number[] | null; tx?: number | null;
+  /** Ping to the streaming client: avg ms, jitter, loss %; o = it doesn't answer ping. */
+  rt?: { r?: number | null; j?: number | null; l?: number | null; o?: number } | null;
+  /** Busiest programs on the GPU: [name, VRAM MiB, GPU %]. */
+  gp?: Array<[string, number, number | null]> | null;
+  /** What Sunshine is streaming: Mbit/s, encoder, bit depth, resolution, fps. */
+  ss?: { b?: number | null; e?: string | null; d?: string | null; r?: string | null; f?: number | null } | null;
+  /** Spot reclaim notice from the cloud's metadata service. */
+  sp?: string | null;
   /** Once a minute: Sunshine's last error lines and recent exits (crash loop). */
   sn?: { e: string[]; x: number; l?: string[] } | null;
   x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;

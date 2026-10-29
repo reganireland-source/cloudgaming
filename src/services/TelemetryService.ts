@@ -23,6 +23,7 @@
 import { query } from '../config/database';
 import { providerFor } from './CredentialService';
 import type { TelemetrySample } from '../providers/shared/setupScript';
+import { CATALOGS } from '../providers/registry';
 
 export interface TelemetryAlert { level: 'critical' | 'warning' | 'info'; key: string; text: string }
 
@@ -73,6 +74,33 @@ export function alertsFor(s: TelemetrySample | null, prev?: TelemetrySample | nu
   if (s.d && s.d[1] && s.d[0] / s.d[1] >= 0.9) a.push({ level: s.d[0] / s.d[1] >= 0.97 ? 'critical' : 'warning', key: 'disk', text: `Disk ${Math.round((s.d[0] / s.d[1]) * 100)}% full — enlarge it on the Machines page` });
   if (s.gf?.f != null && s.gf.f < 30) a.push({ level: 'warning', key: 'fps', text: `${s.gf.n} is running at ${Math.round(s.gf.f)} fps — lower its graphics settings, or try a bigger tier` });
   else if (s.gf?.lo != null && s.gf.f != null && s.gf.lo < s.gf.f * 0.5) a.push({ level: 'info', key: 'stutter', text: `${s.gf.n} stutters: dips to ${Math.round(s.gf.lo)} fps (worst frame ${Math.round(s.gf.ft ?? 0)} ms)` });
+  // Why the frame rate is what it is: only when a game is running.
+  const top = s.cc?.[0] ?? null, gpuU = num(g?.u);
+  if (s.gf?.f != null && gpuU != null) {
+    if (gpuU >= 95) a.push({ level: 'info', key: 'bottleneck', text: `${s.gf.n} is GPU-bound (GPU at ${Math.round(gpuU)}%): lower its graphics settings, or use a bigger GPU tier` });
+    else if (top != null && top >= 90) a.push({ level: 'info', key: 'bottleneck', text: `${s.gf.n} is CPU-bound: one core is at ${Math.round(top)}% (the CPU is only ${Math.round(s.c ?? 0)}% overall) — more cores won't help, a faster core would` });
+    else if (gpuU < 70 && (top == null || top < 70)) a.push({ level: 'info', key: 'bottleneck', text: `${s.gf.n} is limited by the game itself (frame cap or v-sync): neither the GPU (${Math.round(gpuU)}%) nor the CPU is the limit` });
+  } else if (top != null && top >= 95 && (s.c ?? 100) < 60 && num(g?.es)) {
+    a.push({ level: 'info', key: 'core', text: `One CPU core is maxed out (${Math.round(top)}%) while the whole CPU is at ${Math.round(s.c ?? 0)}%: a single-threaded program is the limit` });
+  }
+  if (s.sp) a.push({ level: 'critical', key: 'spot', text: `The cloud is taking back this spot machine (${s.sp}). It stops within a minute or two: save your work now` });
+  if (s.ne && (s.ne[0] + s.ne[1] >= 10 || s.ne[2] >= 5)) a.push({ level: 'warning', key: 'neterr', text: `Network trouble on the machine: ${s.ne[0]} errors, ${s.ne[1]} dropped packets and ${s.ne[2]} UDP errors in the last 15 s — it can show up as stream stutter` });
+  if (s.rt && !s.rt.o) {
+    if ((s.rt.l ?? 0) >= 2) a.push({ level: 'warning', key: 'loss', text: `${s.rt.l}% packet loss to your device — expect stream glitches; try a wired connection or a lower bitrate` });
+    if ((s.rt.r ?? 0) >= 80) a.push({ level: 'warning', key: 'latency', text: `Ping to your device is ${Math.round(s.rt.r!)} ms — pick a region nearer to you` });
+    else if ((s.rt.j ?? 0) >= 15) a.push({ level: 'info', key: 'jitter', text: `Uneven connection to your device (jitter ${Math.round(s.rt.j!)} ms)` });
+  }
+  const pr = s.pr || [];
+  if ((pr[0] ?? 0) >= 25) a.push({ level: 'warning', key: 'psi-cpu', text: `Programs spend ${Math.round(pr[0]!)}% of the time waiting for CPU time` });
+  if ((pr[1] ?? 0) >= 10) a.push({ level: 'warning', key: 'psi-mem', text: `The machine is short of memory: programs wait ${Math.round(pr[1]!)}% of the time for it` });
+  if ((pr[2] ?? 0) >= 25) a.push({ level: 'warning', key: 'psi-io', text: `The disk is the bottleneck: programs wait ${Math.round(pr[2]!)}% of the time for it` });
+  if ((s.cs ?? 0) >= 10) a.push({ level: 'warning', key: 'steal', text: `Other customers sharing this host are taking about ${Math.round(s.cs!)}% of your CPU (steal) — a different machine type or region may help` });
+  const dl = s.dl || [];
+  if ((dl[0] ?? 0) >= 50 || (dl[1] ?? 0) >= 50) a.push({ level: 'warning', key: 'disklat', text: `The disk is slow: ${Math.round(Math.max(dl[0] ?? 0, dl[1] ?? 0))} ms per operation` });
+  const lw = num(g?.lw), lm = num(g?.lm), lg = num(g?.lg), lx = num(g?.lx);
+  if (gpuU != null && gpuU >= 30 && ((lw != null && lm != null && lw < lm) || (lg != null && lx != null && lg < lx))) {
+    a.push({ level: 'info', key: 'pcie', text: `GPU link is running reduced under load (x${lw} of x${lm}, gen ${lg} of ${lx})` });
+  }
   if ((s.cm ?? 0) >= 97) a.push({ level: 'info', key: 'cpu', text: `CPU maxed out (peak ${s.cm}%) — a bigger machine may help CPU-heavy games` });
   if ((s.x ?? 0) > 0) a.push({ level: 'critical', key: 'xid', text: `${s.x} NVIDIA GPU error${s.x === 1 ? '' : 's'} (Xid) since boot${s.xl ? `: ${s.xl.replace(/^NVRM: /, '')}` : ''}` });
   if ((s.o ?? 0) > 0) a.push({ level: 'critical', key: 'oom', text: `${s.o} program${s.o === 1 ? ' was' : 's were'} killed for lack of memory since boot` });
@@ -90,9 +118,59 @@ export function alertsFor(s: TelemetrySample | null, prev?: TelemetrySample | nu
   return a;
 }
 
+/**
+ * Since the last boot: how long the machine has run, how long it actually streamed, how long it has been idle
+ * (and so when auto-stop will act), plus the egress price and a disk-full forecast. All from stored samples.
+ */
+async function usageFor(machine: any, latest: TelemetrySample) {
+  const up = Math.max(0, Math.round(latest.up ?? 0));
+  const out: Record<string, unknown> = {};
+  try {
+    const rows = (await query(
+      `SELECT EXTRACT(EPOCH FROM t)::bigint AS t, COALESCE((data->'g'->>'es')::float, 0) AS es FROM machine_telemetry
+        WHERE machine_id = $1 AND t > NOW() - ($2 || ' seconds')::interval ORDER BY t`,
+      [machine.id, String(Math.min(up || 3600, 7 * 86400))],
+    )).rows as Array<{ t: string; es: number }>;
+    let streaming = 0, lastStream: number | null = null;
+    rows.forEach((r, i) => {
+      if (r.es > 0) {
+        lastStream = Number(r.t);
+        const next = rows[i + 1];
+        streaming += Math.min(next ? Number(next.t) - Number(r.t) : 15, 60);
+      }
+    });
+    const now = Math.round(Date.now() / 1000);
+    out.usage = {
+      runningMin: Math.round(up / 60),
+      streamingMin: Math.round(streaming / 60),
+      idleMin: lastStream != null ? Math.round((now - lastStream) / 60) : Math.round(up / 60),
+      everStreamed: lastStream != null,
+      autoStopMin: machine.auto_stop_minutes ?? null,
+      costPerHour: Number(machine.cost_per_hour) || null,
+    };
+    const catalog = (CATALOGS as any)[machine.provider];
+    const egress = catalog?.regions?.find((r: any) => r.id === machine.region)?.egressPerGb;
+    if (typeof egress === 'number') out.egressPerGb = egress;
+    const d = (await query(
+      `SELECT MIN(EXTRACT(EPOCH FROM t))::bigint AS t0, MAX(EXTRACT(EPOCH FROM t))::bigint AS t1,
+              (ARRAY_AGG((data->'d'->>0)::float ORDER BY t ASC))[1] AS u0, (ARRAY_AGG((data->'d'->>0)::float ORDER BY t DESC))[1] AS u1
+         FROM machine_telemetry WHERE machine_id = $1 AND t > NOW() - INTERVAL '24 hours' AND data ? 'd'`,
+      [machine.id],
+    )).rows[0];
+    const span = d ? Number(d.t1) - Number(d.t0) : 0;
+    if (d && span >= 3 * 3600 && latest.d?.[1]) {
+      const perDay = ((Number(d.u1) - Number(d.u0)) / span) * 86400;
+      const days = perDay > 0.5 ? (latest.d[1] - latest.d[0]) / perDay : null;
+      if (days != null && days <= 60) out.diskFullDays = Math.max(0, Math.round(days * 10) / 10);
+    }
+  } catch { /* extras are optional */ }
+  return out;
+}
+
 /** The Monitor view for one machine. */
 export async function live(userId: string, machine: any, minutes = 30): Promise<{
   samples: TelemetrySample[]; latest: TelemetrySample | null; alerts: TelemetryAlert[]; readAt: string | null; note?: string;
+  usage?: unknown; egressPerGb?: number; diskFullDays?: number;
 }> {
   const mins = Math.max(5, Math.min(7 * 24 * 60, Math.round(minutes) || 30));
   let note: string | undefined;
@@ -122,8 +200,14 @@ export async function live(userId: string, machine: any, minutes = 30): Promise<
       ? 'No telemetry yet. Machines report every 15 seconds once their setup has started; machines launched before this feature need the newest on-machine script (Google: the “Update script” button next to Stop; other clouds: Shelve, then Restore).'
       : 'Start the machine to see live telemetry.';
   }
+  // Stream settings are logged once a minute, only while streaming: carry the newest onto the latest sample.
+  if (latest && !latest.ss && latest.g?.es) {
+    const ss = (await query(`SELECT data->'ss' AS ss FROM machine_telemetry WHERE machine_id = $1 AND data ? 'ss' AND data->'ss' <> 'null'::jsonb AND t > NOW() - INTERVAL '3 hours' ORDER BY t DESC LIMIT 1`, [machine.id])).rows[0]?.ss;
+    if (ss) latest.ss = ss;
+  }
+  const extras = latest ? await usageFor(machine, latest) : {};
   const at = lastRead.get(machine.id);
-  return { samples: rows, latest, alerts: alertsFor(latest, latestRow[1]?.data || null), readAt: at ? new Date(at).toISOString() : null, ...(note ? { note } : {}) };
+  return { samples: rows, latest, alerts: alertsFor(latest, latestRow[1]?.data || null), readAt: at ? new Date(at).toISOString() : null, ...extras, ...(note ? { note } : {}) };
 }
 
 /** Every minute: store new samples for each running machine; once an hour, drop rows older than 7 days. */

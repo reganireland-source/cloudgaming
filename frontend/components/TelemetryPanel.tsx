@@ -20,10 +20,16 @@ type G = Record<string, number | string | null>;
 interface Sample {
   t: number; c?: number | null; cm?: number | null; l?: number | null; m?: [number, number]; sw?: number | null;
   d?: [number, number]; dr?: number | null; dw?: number | null; ni?: number | null; no?: number | null;
-  g?: G | null; gf?: { n: string; f: number | null; lo: number | null; ft: number | null } | null; sn?: { e: string[]; x: number; l?: string[] } | null; ct?: number | null; up?: number | null; x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
+  g?: G | null; gf?: { n: string; f: number | null; lo: number | null; ft: number | null; p1?: number | null; sc?: number | null } | null;
+  cc?: [number, number] | null; cs?: number | null; cw?: number | null; pr?: Array<number | null> | null; dl?: Array<number | null> | null; ne?: number[] | null; tx?: number | null;
+  rt?: { r?: number | null; j?: number | null; l?: number | null; o?: number } | null; gp?: Array<[string, number, number | null]> | null;
+  ss?: { b?: number | null; e?: string | null; d?: string | null; r?: string | null; f?: number | null } | null; sp?: string | null; sn?: { e: string[]; x: number; l?: string[] } | null; ct?: number | null; up?: number | null; x?: number; xl?: string | null; o?: number; f?: string[]; k?: string[]; p?: Array<[string, string]>;
 }
 interface Alert { level: 'critical' | 'warning' | 'info'; key: string; text: string }
-interface Telemetry { samples: Sample[]; latest: Sample | null; alerts: Alert[]; readAt: string | null; note?: string }
+interface Usage { runningMin: number; streamingMin: number; idleMin: number; everStreamed: boolean; autoStopMin: number | null; costPerHour: number | null }
+interface Telemetry { samples: Sample[]; latest: Sample | null; alerts: Alert[]; readAt: string | null; note?: string; usage?: Usage; egressPerGb?: number; diskFullDays?: number }
+const mins = (m: number) => (m >= 120 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`);
+const gbText = (v: number) => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
 
 const RANGES = [{ m: 15, label: '15 min' }, { m: 60, label: '1 h' }, { m: 360, label: '6 h' }, { m: 1440, label: '24 h' }];
 const ALERT = {
@@ -94,7 +100,7 @@ function Tile({ label, value, sub, tone, children }: { label: string; value: str
       <p className={`text-base tabular-nums leading-tight ${tone === 'bad' ? 'text-neon-pink' : tone === 'warn' ? 'text-neon-amber' : 'text-slate-100'}`}>
         {value}{tone && <span className="sr-only"> ({tone === 'bad' ? 'critical' : 'warning'})</span>}
       </p>
-      <p className="text-[0.66rem] text-slate-500 tabular-nums truncate">{sub || ' '}</p>
+      <p className="text-[0.66rem] text-slate-500 tabular-nums break-words">{sub || ' '}</p>
       {children}
     </div>
   );
@@ -141,7 +147,7 @@ export default function TelemetryPanel({ machineId, status, compact = false, bas
         </Tile>
         {s.gf ? (
           <Tile label={`Game fps · ${s.gf.n}`} value={`${fmt(s.gf.f)} fps`} tone={s.gf.f != null && s.gf.f < 30 ? 'warn' : undefined}
-            sub={`low ${fmt(s.gf.lo)} · worst frame ${fmt(s.gf.ft, 0)} ms${es ? ` · stream ${fmt(num(g?.ef))} fps` : ''}`}>
+            sub={`low ${fmt(s.gf.lo)}${s.gf.p1 != null ? ` · 1% low ${fmt(s.gf.p1)}` : ''} · worst frame ${fmt(s.gf.ft, 0)} ms${s.gf.sc ? ` · ${s.gf.sc} stutters/min` : ''}${es ? ` · stream ${fmt(num(g?.ef))} fps` : ''}`}>
             <Spark samples={samples} pick={(x) => x.gf?.f ?? null} unit=" fps" />
           </Tile>
         ) : (
@@ -150,7 +156,7 @@ export default function TelemetryPanel({ machineId, status, compact = false, bas
             <Spark samples={samples} pick={(x) => (num(x.g?.es) ? num(x.g?.ef) : 0)} unit=" fps" />
           </Tile>
         )}
-        <Tile label="CPU" value={`${fmt(s.c ?? null)}%`} tone={(s.cm ?? 0) >= 97 ? 'warn' : undefined} sub={local ? '' : `peak ${fmt(s.cm ?? null)}% · load ${fmt(s.l ?? null, 1)}${s.ct != null ? ` · ${s.ct} °C` : ''}`}>
+        <Tile label="CPU" value={`${fmt(s.c ?? null)}%`} tone={(s.cm ?? 0) >= 97 ? 'warn' : undefined} sub={`${s.cc ? `busiest core ${fmt(s.cc[0])}% of ${s.cc[1]}` : ''}${local ? '' : `${s.cc ? ' · ' : ''}peak ${fmt(s.cm ?? null)}% · load ${fmt(s.l ?? null, 1)}${s.ct != null ? ` · ${s.ct} °C` : ''}`}`}>
           <Spark samples={samples} pick={(x) => x.c ?? null} unit="%" max={100} />
         </Tile>
         <Tile label="RAM" value={s.m ? `${s.m[0]} / ${s.m[1]} GB` : '—'} tone={ram >= 0.92 ? 'warn' : undefined} sub={s.sw ? `swap ${s.sw} GB` : `${Math.round(ram * 100)}% used`}>
@@ -160,12 +166,73 @@ export default function TelemetryPanel({ machineId, status, compact = false, bas
           <Spark samples={samples} pick={(x) => x.no ?? null} unit=" Mbit/s" digits={1} />
         </Tile>
         <Tile label="Disk" value={s.d ? `${s.d[0].toFixed(0)} / ${s.d[1].toFixed(0)} GB` : '—'} tone={disk >= 0.9 ? 'warn' : undefined}
-          sub={local ? `${s.d ? Math.round((s.d[0] / s.d[1]) * 100) : 0}% used` : `read ${fmt(s.dr ?? null, 1)} · write ${fmt(s.dw ?? null, 1)} MB/s`}>
+          sub={`${local ? `${s.d ? Math.round((s.d[0] / s.d[1]) * 100) : 0}% used` : `read ${fmt(s.dr ?? null, 1)} · write ${fmt(s.dw ?? null, 1)} MB/s`}${s.dl && s.dl[0] != null ? ` · ${fmt(s.dl[0], 1)}/${fmt(s.dl[1] ?? null, 1)} ms` : ''}${data?.diskFullDays != null ? ` · full in ~${data.diskFullDays} d` : ''}`}>
           {local ? <Spark samples={samples} pick={(x) => x.d?.[0] ?? null} unit=" GB" max={s.d?.[1]} /> : <Spark samples={samples} pick={(x) => (x.dr ?? 0) + (x.dw ?? 0)} unit=" MB/s" digits={1} />}
         </Tile>
       </div>
     );
-  }, [s, g, samples, compact, local]);
+  }, [s, g, samples, compact, local, data?.diskFullDays]);
+
+  // More detail (not in the compact view): the connection to you, errors, data sent, the session, stalls, GPU link.
+  const extra = useMemo(() => {
+    if (!s || compact) return null;
+    const out: React.ReactNode[] = [];
+    const rt = s.rt, streaming = !!num(g?.es);
+    if (rt || streaming) {
+      out.push(
+        <Tile key="rt" label="Connection to you" value={rt?.o ? 'no ping reply' : rt?.r != null ? `${fmt(rt.r, 0)} ms` : streaming ? 'measuring…' : '—'}
+          tone={(rt?.l ?? 0) >= 2 || (rt?.r ?? 0) >= 80 ? 'warn' : undefined}
+          sub={rt?.o ? 'your device ignores ping' : rt?.r != null ? `jitter ${fmt(rt.j ?? null, 1)} ms · loss ${fmt(rt.l ?? null, 0)}%` : 'measured while you stream'}>
+          <Spark samples={samples} pick={(x) => x.rt?.r ?? null} unit=" ms" digits={0} />
+        </Tile>,
+      );
+    }
+    if (s.ne) {
+      const bad = s.ne[0] + s.ne[1];
+      out.push(
+        <Tile key="ne" label="Network errors" value={bad ? `${bad} problem${bad === 1 ? '' : 's'}` : 'none'} tone={bad >= 10 || (s.ne[2] ?? 0) >= 5 ? 'warn' : undefined}
+          sub={`errors ${s.ne[0]} · drops ${s.ne[1]}${s.ne[2] ? ` · UDP ${s.ne[2]}` : ''} (last reading)`}>
+          <Spark samples={samples} pick={(x) => (x.ne ? x.ne[0] + x.ne[1] + (x.ne[2] || 0) : null)} unit="" />
+        </Tile>,
+      );
+    }
+    if (s.tx != null) {
+      const cost = data?.egressPerGb != null && !local ? s.tx * data.egressPerGb : null;
+      out.push(
+        <Tile key="tx" label="Data sent" value={`${gbText(s.tx)} GB`} sub={cost != null ? `since boot · ≈ USD ${cost.toFixed(2)} at USD ${data!.egressPerGb!.toFixed(2)}/GB` : 'since boot'}>
+          <Spark samples={samples} pick={(x) => x.tx ?? null} unit=" GB" digits={2} />
+        </Tile>,
+      );
+    }
+    const u = data?.usage;
+    if (u && !local) {
+      const pct = u.runningMin ? Math.round((u.streamingMin / u.runningMin) * 100) : 0;
+      const idleCost = u.costPerHour ? ((u.runningMin - u.streamingMin) / 60) * u.costPerHour : null;
+      const left = u.autoStopMin ? u.autoStopMin - u.idleMin : null;
+      out.push(
+        <Tile key="usage" label="This session" value={`${mins(u.streamingMin)} streaming`}
+          tone={left != null && left <= 5 && u.idleMin > 0 && !streaming && u.everStreamed ? 'warn' : undefined}
+          sub={`of ${mins(u.runningMin)} up (${pct}%)${idleCost != null ? ` · idle ≈ USD ${idleCost.toFixed(2)}` : ''}${!u.autoStopMin ? ' · auto-stop off' : streaming ? '' : u.everStreamed && left != null ? (left > 0 ? ` · auto-stop in ~${left} min` : ' · auto-stop due') : ' · auto-stop waits for your first stream'}`} />,
+      );
+    }
+    if (s.pr && s.pr.some((v) => v != null)) {
+      const worst = Math.max(...s.pr.map((v) => v ?? 0));
+      out.push(
+        <Tile key="pr" label="Waiting (stalls)" value={`${fmt(worst, 0)}%`} tone={worst >= 25 ? 'warn' : undefined}
+          sub={`cpu ${fmt(s.pr[0] ?? null, 0)} · memory ${fmt(s.pr[1] ?? null, 0)} · disk ${fmt(s.pr[2] ?? null, 0)}%${(s.cs ?? 0) >= 1 ? ` · steal ${fmt(s.cs ?? null, 0)}%` : ''}`}>
+          <Spark samples={samples} pick={(x) => (x.pr ? Math.max(...x.pr.map((v) => v ?? 0)) : null)} unit="%" max={100} />
+        </Tile>,
+      );
+    }
+    if (num(g?.lw) != null && num(g?.lm) != null) {
+      const reduced = num(g?.lw)! < num(g?.lm)! || (num(g?.lg) != null && num(g?.lx) != null && num(g?.lg)! < num(g?.lx)!);
+      out.push(
+        <Tile key="pcie" label="GPU link" value={`x${num(g?.lw)} · gen ${num(g?.lg) ?? '?'}`} tone={reduced && (num(g?.u) ?? 0) >= 30 ? 'warn' : undefined}
+          sub={`max x${num(g?.lm)} · gen ${num(g?.lx) ?? '?'}${reduced && (num(g?.u) ?? 0) < 30 ? ' (idle: saves power)' : ''}${num(g?.fs) != null ? ` · fan ${fmt(num(g?.fs))}%` : ''}`} />,
+      );
+    }
+    return out.length ? <div className="grid gap-2 grid-cols-2 md:grid-cols-4">{out}</div> : null;
+  }, [s, g, samples, compact, local, data?.usage, data?.egressPerGb]);
 
   if (!data && !error) return <p className="text-xs text-slate-500 animate-pulse">Reading telemetry…</p>;
   return (
@@ -191,13 +258,24 @@ export default function TelemetryPanel({ machineId, status, compact = false, bas
           ))}
         </ul>
       )}
+      {s?.ss && (
+        <p className="text-[0.72rem] text-slate-400 tabular-nums">
+          <span className="text-slate-500">Streaming now:</span>{' '}
+          {[s.ss.r ? s.ss.r.replace('x', '×') + (s.ss.f ? ` @ ${s.ss.f} fps` : '') : s.ss.f ? `${s.ss.f} fps` : null, s.ss.e, s.ss.d ? `${s.ss.d}-bit` : null, s.ss.b != null ? `target ${s.ss.b} Mbit/s` : null].filter(Boolean).join(' · ')}
+        </p>
+      )}
       {tiles}
+      {extra}
       {!compact && s && (
         <div className="grid gap-2 md:grid-cols-3 text-[0.72rem] text-slate-400">
           <div className="rounded border border-white/10 px-2.5 py-2 space-y-0.5">
             <p className="label mb-1">Busiest programs</p>
             {(s.p || []).map(([name, pct], i) => <p key={i} className="flex justify-between gap-2 tabular-nums"><span className="truncate text-slate-300">{name}</span><span>{pct}%</span></p>)}
             {!s.p?.length && <p>—</p>}
+            {!!s.gp?.length && <>
+              <p className="label mt-2 mb-1">On the GPU</p>
+              {s.gp.map(([name, mib, pct], i) => <p key={`g${i}`} className="flex justify-between gap-2 tabular-nums"><span className="truncate text-slate-300">{name}</span><span>{(mib / 1024).toFixed(1)} GB{pct != null ? ` · ${pct}%` : ''}</span></p>)}
+            </>}
           </div>
           <div className="rounded border border-white/10 px-2.5 py-2 space-y-0.5">
             <p className="label mb-1">Containers</p>

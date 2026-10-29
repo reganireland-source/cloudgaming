@@ -30,6 +30,7 @@ import { MachineRequestError } from './MachineService';
 import { encryptCredentials, decryptCredentials, encryptionReady } from './CredentialService';
 import { SUNSHINE_SETTINGS, evaluateReport, reportText, stats } from './LocalDiagnostics';
 import { AGENT_SHA256, BOOT_SHA256 } from '../providers/shared/localAgent';
+import { alertsFor } from './TelemetryService';
 
 const hash = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 const newToken = (prefix: string) => `${prefix}_${crypto.randomBytes(24).toString('base64url')}`;
@@ -294,7 +295,31 @@ export function sampleFromStatus(st: any): Record<string, unknown> {
     const g: Record<string, unknown> = {};
     const pairs: Array<[string, unknown]> = [['u', gpu.util], ['tp', gpu.tempC], ['vu', gpu.vramUsedMb], ['vt', gpu.vramTotalMb], ['pw', gpu.powerW], ['pl', gpu.powerLimitW], ['es', gpu.encoders]];
     for (const [k, v] of pairs) { const n = numOr(v); if (n !== undefined) g[k] = n; }
+    const pc = st?.pcie && typeof st.pcie === 'object' ? st.pcie : null;
+    if (pc) for (const [k, v] of [['lg', pc.lg], ['lx', pc.lx], ['lw', pc.lw], ['lm', pc.lm]] as Array<[string, unknown]>) { const n = numOr(v); if (n !== undefined) g[k] = n; }
+    const fan = numOr(st?.fan); if (fan !== undefined) g.fs = fan;
     out.g = g;
+  }
+  // The same extra stats the cloud machines report (see TelemetrySample): busiest core, disk latency, NIC errors, data sent, ping, GPU programs, stream settings.
+  const top = numOr(st?.topCore), cores = numOr(st?.cores); if (top !== undefined && cores !== undefined) out.cc = [top, cores];
+  if (Array.isArray(st?.diskLat) && st.diskLat.length === 3) out.dl = st.diskLat.map((v: unknown) => numOr(v) ?? null);
+  if (Array.isArray(st?.netErr) && st.netErr.length === 3) out.ne = st.netErr.map((v: unknown) => numOr(v) ?? 0);
+  const txGb = numOr(st?.txGb); if (txGb !== undefined) out.tx = txGb;
+  if (st?.rtt && typeof st.rtt === 'object') {
+    const rt: Record<string, number> = {};
+    for (const k of ['r', 'j', 'l', 'o']) { const n = numOr(st.rtt[k]); if (n !== undefined) rt[k] = n; }
+    if (Object.keys(rt).length) out.rt = rt;
+  }
+  if (Array.isArray(st?.gpuProcs)) {
+    out.gp = st.gpuProcs.slice(0, 4).filter((p: unknown) => Array.isArray(p) && typeof p[0] === 'string')
+      .map((p: any[]) => [String(p[0]).slice(0, 40), numOr(p[1]) ?? 0, numOr(p[2]) ?? null]);
+  }
+  if (st?.stream && typeof st.stream === 'object') {
+    const ss: Record<string, unknown> = {};
+    const b = numOr(st.stream.b); if (b !== undefined) ss.b = b;
+    const f = numOr(st.stream.f); if (f !== undefined) ss.f = f;
+    for (const k of ['e', 'd', 'r']) if (typeof st.stream[k] === 'string') ss[k] = String(st.stream[k]).slice(0, 40);
+    if (Object.keys(ss).length && numOr(gpu?.encoders)) out.ss = ss;
   }
   return out;
 }
@@ -478,6 +503,11 @@ export async function localTelemetry(userId: string, id: string, minutes = 60) {
     if (st.sunshine && st.sunshine !== 'Running') alerts.push({ level: 'warning', key: 'sunshine', text: st.sunshine === 'NotInstalled' ? 'Sunshine is not installed on the PC.' : `Sunshine is ${String(st.sunshine).toLowerCase()}, so nobody can stream.` });
     const ram = numOr(st.ramGb), free = numOr(st.ramFreeGb);
     if (ram && free !== undefined && 1 - free / ram >= 0.92) alerts.push({ level: 'warning', key: 'ram', text: 'The PC is almost out of memory.' });
+  }
+  // The same checks the cloud machines get, for the stats both report.
+  if (online && latest) {
+    const known = new Set(alerts.map((a) => a.key));
+    for (const a of alertsFor(latest as any)) if (['neterr', 'loss', 'latency', 'jitter', 'disklat', 'pcie', 'core'].includes(a.key) && !known.has(a.key)) alerts.push(a);
   }
   const note = online ? undefined : (row.last_seen_at ? 'The PC is off, asleep or cannot reach GGGH. The charts show its last readings.' : 'This PC has not connected to GGGH yet.');
   return { samples, latest, alerts, readAt: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : null, note };
