@@ -357,6 +357,10 @@ mv $K.new $K
 chown -R dev: /home/dev/.ssh
 chmod 700 /home/dev/.ssh
 chmod 600 $K
+# dev may use sudo without a password (key-only SSH, allowlisted IPs, machines hold no personal data).
+echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-dev-nopasswd
+chmod 440 /etc/sudoers.d/90-dev-nopasswd
+visudo -cf /etc/sudoers.d/90-dev-nopasswd >/dev/null 2>&1 || rm -f /etc/sudoers.d/90-dev-nopasswd
 
 # ============================================================================
 # 1. Prepare the kernel side (once)

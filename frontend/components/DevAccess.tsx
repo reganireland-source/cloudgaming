@@ -94,7 +94,7 @@ export default function DevAccess({ machines: live }: { machines?: LiveMachine[]
 
       <div className="mt-4 space-y-5 text-xs text-slate-300">
         <p className="text-slate-400 max-w-3xl">
-          Every machine has a <strong className="text-slate-200">{data.user}</strong> login (SSH key only). Developer tools are not installed unless you tick them under
+          Every machine has a <strong className="text-slate-200">{data.user}</strong> login (SSH key only, with passwordless sudo). Developer tools are not installed unless you tick them under
           &quot;Extra tools&quot; when launching a machine; they install in the background after the machine is ready to play (follow <code className="text-slate-200">tail -f /var/log/cg-addons.log</code>).
           {' '}To see a program on your stream (Moonlight or the browser desktop), start it with <code className="text-slate-200">on-desktop</code>, e.g. <code className="text-slate-200">on-desktop xterm</code> — without it, programs run off-screen.
         </p>

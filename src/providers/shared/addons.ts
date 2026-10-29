@@ -59,7 +59,7 @@ $APT install --no-install-recommends git git-lfs curl wget unzip zip xz-utils rs
 git lfs install --system || true
 if ! id dev >/dev/null 2>&1; then useradd -m -s /bin/bash -p '*' dev; fi
 for g in video render; do if getent group "$g" >/dev/null; then usermod -aG "$g" dev; fi; done
-say "dev-base done. User dev exists (no password, no sudo): sudo -iu dev"
+say "dev-base done. User dev exists (key-only SSH, passwordless sudo): sudo -iu dev"
 `);
 
 const PYTHON = script(String.raw`
@@ -299,7 +299,7 @@ NOTE
 
 export const ADDONS: AddonDef[] = [
   { id: 'dev-base', name: 'Developer basics', diskGb: 2, requires: [], options: [],
-    description: 'git, git-lfs, build tools, cmake, jq, tmux, rsync, zip, and a "dev" login (no password, no sudo).', script: DEV_BASE },
+    description: 'git, git-lfs, build tools, cmake, jq, tmux, rsync, zip, and a "dev" login (key-only SSH, passwordless sudo).', script: DEV_BASE },
   { id: 'python', name: 'Python environment', diskGb: 1, requires: ['dev-base'],
     options: [
       { key: 'PY_PACKAGES', label: 'pip packages', default: '', help: 'Comma-separated, e.g. numpy,pillow,scipy' },
