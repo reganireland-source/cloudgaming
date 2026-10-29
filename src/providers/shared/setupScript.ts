@@ -341,6 +341,24 @@ is_done()   { [ -f "$STATE/$1.done" ]; }
 stage 5 boot "Machine booted, starting setup"
 
 # ============================================================================
+# 0. SSH keys for the "dev" user, from the app (key-only login; port 22 is
+#    only open to the IPs allowed in the app). Lines tagged cg-app are ours.
+#    Done FIRST, so a machine whose GPU or streaming setup fails can still be
+#    reached over SSH to look at why.
+# ============================================================================
+id dev >/dev/null 2>&1 || useradd -m -s /bin/bash -p '*' dev
+K=/home/dev/.ssh/authorized_keys
+mkdir -p /home/dev/.ssh
+{ grep -v ' cg-app' $K 2>/dev/null; cat <<'CGK'
+__DEV_SSH_KEYS__
+CGK
+} | grep -v '^$' > $K.new
+mv $K.new $K
+chown -R dev: /home/dev/.ssh
+chmod 700 /home/dev/.ssh
+chmod 600 $K
+
+# ============================================================================
 # 1. Prepare the kernel side (once)
 # ============================================================================
 if ! is_done prepare; then
@@ -1318,21 +1336,6 @@ fi
 
 stage 100 ready "Ready to stream - open Moonlight and add this machine's IP"
 
-# ============================================================================
-# 5b. SSH keys for the "dev" user, from the app (key-only login; port 22 is
-#     only open to the IPs allowed in the app). Lines tagged cg-app are ours.
-# ============================================================================
-id dev >/dev/null 2>&1 || useradd -m -s /bin/bash -p '*' dev
-K=/home/dev/.ssh/authorized_keys
-mkdir -p /home/dev/.ssh
-{ grep -v ' cg-app' $K 2>/dev/null; cat <<'CGK'
-__DEV_SSH_KEYS__
-CGK
-} | grep -v '^$' > $K.new
-mv $K.new $K
-chown -R dev: /home/dev/.ssh
-chmod 700 /home/dev/.ssh
-chmod 600 $K
 # on-desktop CMD: run a program from SSH on the streamed desktop (display :42
 # in the container, whose X socket folder is shared at $SUN_DIR/x11; the
 # server runs with -ac, so no cookie is needed).
