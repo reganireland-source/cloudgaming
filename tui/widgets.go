@@ -178,8 +178,8 @@ func spark(vals []float64, width int, max float64) string {
 	return sAccent.Render(b.String())
 }
 
-// bar: a horizontal gauge, value/max.
-func bar(v, max float64, width int, style lipgloss.Style) string {
+// bar: a progress bar (setup progress and the like): violet to cyan to green as it fills.
+func bar(v, max float64, width int, _ lipgloss.Style) string {
 	if max <= 0 {
 		max = 1
 	}
@@ -190,7 +190,19 @@ func bar(v, max float64, width int, style lipgloss.Style) string {
 	if f > width {
 		f = width
 	}
-	return style.Render(strings.Repeat("█", f)) + sDim.Render(strings.Repeat("░", width-f))
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		if i < f {
+			c := mix(gViol, gCyan, float64(i)/float64(width))
+			if v >= max {
+				c = mix(gCyan, gGreen, float64(i)/float64(width))
+			}
+			b.WriteString(lipgloss.NewStyle().Foreground(c.color()).Render("█"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(mix(gBG, gBlue, 0.25).color()).Render("░"))
+		}
+	}
+	return b.String()
 }
 
 // ---- tiles -------------------------------------------------------------------
@@ -202,23 +214,40 @@ type tile struct {
 	tone  string // "", "warn", "bad"
 	trend []float64
 	max   float64
+	// gauge: when gaugeMax > 0 a gradient bar shows gaugeVal/gaugeMax, and the value and the
+	// trend line are coloured by how full it is.
+	gaugeVal, gaugeMax float64
+	trendLoad          bool // colour the trend line by how high each point is against max (else a cyan ramp)
 }
 
-func (t tile) render(w int) string {
+func (t tile) render(w int) string { return t.renderMin(w, 0) }
+
+// renderMin: like render, at least minLines tall inside the border (so a row of tiles lines up).
+func (t tile) renderMin(w, minLines int) string {
 	inner := w - 4 // border + padding
 	if inner < 8 {
 		inner = 8
 	}
-	vs := sBold
+	border := lipgloss.AdaptiveColor{Light: "#b8c4d0", Dark: "#2f3b4a"}
+	vs := lipgloss.NewStyle().Bold(true).Foreground(cText)
 	switch t.tone {
 	case "warn":
+		border = lipgloss.AdaptiveColor{Light: "#a86a00", Dark: "#b8862f"}
 		vs = lipgloss.NewStyle().Bold(true).Foreground(cAmber)
 	case "bad":
+		border = lipgloss.AdaptiveColor{Light: "#b3263a", Dark: "#c4455a"}
 		vs = lipgloss.NewStyle().Bold(true).Foreground(cPink)
 	}
+	hasGauge := t.gaugeMax > 0
+	if hasGauge && t.tone == "" {
+		vs = lipgloss.NewStyle().Bold(true).Foreground(loadRGB(t.gaugeVal / t.gaugeMax).color())
+	}
 	lines := []string{
-		sDim.Render(strings.ToUpper(truncate(t.title, inner))),
+		lipgloss.NewStyle().Foreground(cDim).Render(strings.ToUpper(truncate(t.title, inner))),
 		vs.Render(truncate(t.value, inner)),
+	}
+	if hasGauge {
+		lines = append(lines, gauge(t.gaugeVal, t.gaugeMax, inner))
 	}
 	sub := wrap(t.sub, inner)
 	if len(sub) > 2 {
@@ -232,11 +261,14 @@ func (t tile) render(w int) string {
 		lines = append(lines, sDim.Render(s))
 	}
 	if len(t.trend) > 1 {
-		lines = append(lines, spark(t.trend, inner, t.max))
+		lines = append(lines, sparkColor(t.trend, inner, t.max, t.trendLoad))
 	} else {
 		lines = append(lines, sDim.Render("collecting…"))
 	}
-	return sBox.Width(w - 2).Render(strings.Join(lines, "\n"))
+	for len(lines) < minLines { // spare space goes above the trend line
+		lines = append(lines[:len(lines)-1], "", lines[len(lines)-1])
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Width(w - 2).Render(strings.Join(lines, "\n"))
 }
 
 // grid lays tiles out in `cols` equal columns.
@@ -251,8 +283,14 @@ func grid(tiles []tile, width, cols int) string {
 	var rows []string
 	for i := 0; i < len(tiles); i += cols {
 		var cells []string
+		tallest := 0
 		for j := i; j < i+cols && j < len(tiles); j++ {
-			cells = append(cells, tiles[j].render(w))
+			if h := lipgloss.Height(tiles[j].render(w)) - 2; h > tallest {
+				tallest = h
+			}
+		}
+		for j := i; j < i+cols && j < len(tiles); j++ {
+			cells = append(cells, tiles[j].renderMin(w, tallest))
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
 	}
@@ -344,3 +382,204 @@ func series(samples []Sample, pick func(*Sample) (float64, bool)) []float64 {
 func lipglossJoin(cells ...string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, cells...)
 }
+
+// ---- colour: gradients, pills, gauges ------------------------------------------
+
+type rgb struct{ r, g, b float64 }
+
+func (c rgb) color() lipgloss.Color {
+	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", int(c.r+0.5), int(c.g+0.5), int(c.b+0.5)))
+}
+
+func mix(a, b rgb, t float64) rgb {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return rgb{a.r + (b.r-a.r)*t, a.g + (b.g-a.g)*t, a.b + (b.b-a.b)*t}
+}
+
+var (
+	gTeal  = rgb{45, 212, 191}
+	gGreen = rgb{143, 214, 148}
+	gAmber = rgb{240, 184, 75}
+	gRed   = rgb{255, 107, 129}
+	gCyan  = rgb{79, 214, 230}
+	gBlue  = rgb{86, 130, 230}
+	gViol  = rgb{176, 124, 240}
+	gBG    = rgb{13, 17, 23}
+)
+
+// loadRGB: how worried to be about a 0..1 reading: teal, green, amber, red.
+func loadRGB(t float64) rgb {
+	switch {
+	case t < 0.5:
+		return mix(gTeal, gGreen, t/0.5)
+	case t < 0.8:
+		return mix(gGreen, gAmber, (t-0.5)/0.3)
+	}
+	return mix(gAmber, gRed, (t-0.8)/0.2)
+}
+
+// gradientText colours each character of s from a to b.
+func gradientText(s string, a, b rgb, bold bool) string {
+	r := []rune(s)
+	var out strings.Builder
+	for i, ch := range r {
+		t := 0.0
+		if len(r) > 1 {
+			t = float64(i) / float64(len(r)-1)
+		}
+		st := lipgloss.NewStyle().Foreground(mix(a, b, t).color())
+		if bold {
+			st = st.Bold(true)
+		}
+		out.WriteString(st.Render(string(ch)))
+	}
+	return out.String()
+}
+
+var pillInk = lipgloss.Color("#0d1117")
+
+// pill: a small coloured label, like a status badge.
+func pill(text string, bg rgb) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(pillInk).Background(bg.color()).Render(" " + text + " ")
+}
+
+func keyCap(k string) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(cCyan).Background(lipgloss.AdaptiveColor{Light: "#dbe7ee", Dark: "#1c2733"}).Render(" " + k + " ")
+}
+
+// gauge: a gradient bar (teal, green, amber, red along its length) filled to value/max.
+func gauge(v, max float64, width int) string {
+	if max <= 0 {
+		max = 1
+	}
+	if width < 4 {
+		width = 4
+	}
+	fill := v / max * float64(width)
+	if fill < 0 {
+		fill = 0
+	}
+	if fill > float64(width) {
+		fill = float64(width)
+	}
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		c := loadRGB(float64(i) / float64(width-1))
+		switch {
+		case float64(i)+1 <= fill:
+			b.WriteString(lipgloss.NewStyle().Foreground(c.color()).Render("█"))
+		case float64(i) < fill: // a partial cell
+			frac := fill - float64(i)
+			b.WriteString(lipgloss.NewStyle().Foreground(c.color()).Render(string(blocks[int(frac*7)])))
+		default:
+			b.WriteString(lipgloss.NewStyle().Foreground(mix(gBG, c, 0.22).color()).Render("▁"))
+		}
+	}
+	return b.String()
+}
+
+// sparkColor draws a trend line. mode "load" colours each column by how high it is against max
+// (teal to red); anything else uses a cyan-to-violet ramp by height. Older columns fade into the
+// background, so the newest reading stands out.
+func sparkColor(vals []float64, width int, max float64, load bool) string {
+	if width <= 0 {
+		return ""
+	}
+	if len(vals) == 0 {
+		return sDim.Render(strings.Repeat("·", width))
+	}
+	cols := make([]float64, width)
+	for i := range cols {
+		lo := i * len(vals) / width
+		hi := (i + 1) * len(vals) / width
+		if hi <= lo {
+			hi = lo + 1
+		}
+		if hi > len(vals) {
+			hi = len(vals)
+		}
+		sum, n := 0.0, 0
+		for _, v := range vals[lo:hi] {
+			if !math.IsNaN(v) {
+				sum += v
+				n++
+			}
+		}
+		if n == 0 {
+			cols[i] = math.NaN()
+		} else {
+			cols[i] = sum / float64(n)
+		}
+	}
+	top := max
+	if top <= 0 {
+		for _, v := range cols {
+			if !math.IsNaN(v) && v > top {
+				top = v
+			}
+		}
+	}
+	if top <= 0 {
+		top = 1
+	}
+	var b strings.Builder
+	for i, v := range cols {
+		if math.IsNaN(v) {
+			b.WriteRune(' ')
+			continue
+		}
+		ratio := v / top
+		if ratio < 0 {
+			ratio = 0
+		}
+		if ratio > 1 {
+			ratio = 1
+		}
+		idx := int(math.Round(ratio * float64(len(blocks)-1)))
+		var c rgb
+		if load {
+			c = loadRGB(ratio)
+		} else {
+			c = mix(gBlue, gCyan, ratio)
+			if ratio > 0.85 {
+				c = mix(gCyan, gViol, (ratio-0.85)/0.15*0.6)
+			}
+		}
+		fade := 0.62 + 0.38*float64(i)/float64(width)
+		c = mix(gBG, c, fade)
+		b.WriteString(lipgloss.NewStyle().Foreground(c.color()).Render(string(blocks[idx])))
+	}
+	return b.String()
+}
+
+// sectionTitle: a small coloured heading.
+func sectionTitle(s string) string {
+	return gradientText(s, gCyan, gViol, true)
+}
+
+// statusPill: the machine's state as a coloured badge (word + colour, never colour alone).
+func statusPill(status string) string {
+	switch status {
+	case "running":
+		return pill("● RUNNING", gGreen)
+	case "stopped":
+		return pill("■ STOPPED", rgb{125, 135, 150})
+	case "shelved":
+		return pill("▤ SHELVED", gViol)
+	case "failed", "missing":
+		return pill("✖ "+strings.ToUpper(status), gRed)
+	case "creating", "starting", "restoring":
+		return pill("◐ "+strings.ToUpper(status), gAmber)
+	case "stopping", "shelving", "deleting":
+		return pill("◑ "+strings.ToUpper(status), gAmber)
+	}
+	return pill("· "+strings.ToUpper(status), rgb{125, 135, 150})
+}
+
+// panel: the bordered frame around lists.
+var panel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.AdaptiveColor{Light: "#b8c4d0", Dark: "#2f3b4a"}).Padding(0, 1)

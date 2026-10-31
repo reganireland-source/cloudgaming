@@ -9,6 +9,14 @@ gggh-tui --demo     # try it with made-up machines: no login, no cost, nothing c
 gggh-tui            # sign in (email + password, or paste a token), then use your real machines
 ```
 
+## Screenshots
+
+![Monitor](screenshots/01-monitor.png)
+![Connect](screenshots/02-connect.png)
+![Launch wizard](screenshots/09-wizard-size.png)
+![Review](screenshots/12-wizard-review.png)
+![Local PC](screenshots/13-local-pc.png)
+
 ## Build and run (macOS)
 
 You need Go 1.22 or newer (`brew install go`).

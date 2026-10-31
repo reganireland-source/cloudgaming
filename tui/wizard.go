@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // The launch wizard: "what is this machine for?" first (it sets the size,
@@ -51,6 +52,7 @@ type wizard struct {
 
 func (m *model) openWizard() tea.Cmd {
 	m.screen = scrWizard
+	m.notice = ""
 	m.wiz = &wizard{intensity: 1, autoIx: 2, toggles: map[string]bool{}, addons: map[string]bool{}}
 	if m.options != nil {
 		m.wiz.start(m.options)
@@ -500,6 +502,89 @@ func (w *wizard) launch(m *model) tea.Cmd {
 // ---- view ------------------------------------------------------------------------
 
 func (m *model) wizardView(width, height int) string {
+	if width < 112 || m.wiz == nil || m.wiz.opts == nil {
+		return m.wizardBody(width, height)
+	}
+	const panelW = 44
+	return lipgloss.JoinHorizontal(lipgloss.Top, m.wizardBody(width-panelW-3, height), "   ", m.wiz.summary(panelW))
+}
+
+// summary: the side panel that fills in as you decide, with what it will cost.
+func (w *wizard) summary(width int) string {
+	var b strings.Builder
+	b.WriteString(sectionTitle("YOUR MACHINE") + "\n\n")
+	row := func(k, v string) {
+		b.WriteString(sDim.Render(pad(k, 11)) + sText.Render(truncate(v, width-16)) + "\n")
+	}
+	if pu := w.purpose(); pu != nil && w.step > stPurpose {
+		row("Purpose", pu.Name)
+	} else if w.step > stPurpose {
+		row("Purpose", "Custom")
+	}
+	var sh *Shape
+	if w.step > stCloud && w.provider() != nil {
+		row("Cloud", w.provider().Label)
+	}
+	if w.step > stRegion && w.region() != nil {
+		row("Region", w.region().Name)
+	}
+	if shapes := w.shapes(); len(shapes) > 0 {
+		switch {
+		case w.step == stSize && w.cursor < len(shapes):
+			sh = &shapes[w.cursor]
+		case w.step > stSize && w.shapeIx < len(shapes):
+			sh = &shapes[w.shapeIx]
+		}
+	}
+	if sh != nil {
+		row("GPU", sh.GPUModel)
+		row("CPU", fmt.Sprintf("%d vCPU · %.0f GB RAM", sh.VCPUs, sh.MemoryGb))
+	}
+	disk := 0
+	if w.step > stOptions {
+		disk, _ = strconv.Atoi(strings.TrimSpace(w.disk.Value()))
+		row("Disk", fmt.Sprintf("%d GB", disk))
+		row("Pricing", map[bool]string{true: "spot", false: "on-demand"}[w.spot && w.provider().SupportsSpot])
+		as := "never"
+		if autoStops[w.autoIx] > 0 {
+			as = fmt.Sprintf("%d min idle", autoStops[w.autoIx])
+		}
+		row("Auto-stop", as)
+	}
+	if w.step > stExtras {
+		if n := len(w.allAddons()); n > 0 {
+			row("Tools", fmt.Sprintf("%d (≈%.0f GB)", n, w.extraDisk()))
+		}
+	}
+	if sh != nil {
+		pr := w.price(*sh)
+		hourly := pr.OnDemand
+		if w.step > stOptions && w.spot && pr.Spot != nil {
+			hourly = *pr.Spot
+		}
+		maxP := 0.0
+		for _, s := range w.shapes() {
+			if p := w.price(s).OnDemand; p > maxP {
+				maxP = p
+			}
+		}
+		b.WriteString("\n" + sectionTitle("WHAT IT COSTS") + "\n\n")
+		big := lipgloss.NewStyle().Bold(true).Foreground(loadRGB(hourly / maxP * 0.9).color()).Render(fmt.Sprintf("%s / hour", money(hourly)))
+		b.WriteString(big + "\n" + gauge(hourly, maxP, width-6) + "\n")
+		if pr.Spot != nil && w.provider().SupportsSpot && !(w.step > stOptions && w.spot) {
+			b.WriteString(sDim.Render("spot would be ") + sGood.Render(money(*pr.Spot)+"/h") + "\n")
+		}
+		b.WriteString("\n" + sDim.Render(pad("10 h of play", 14)) + sText.Render(money(hourly*10)) + "\n")
+		b.WriteString(sDim.Render(pad("40 h of play", 14)) + sText.Render(money(hourly*40)) + "\n")
+		if disk > 0 {
+			b.WriteString(sDim.Render(pad("disk / month", 14)) + sText.Render(money(float64(disk)*w.provider().DiskPerGbMo)) + "\n")
+		}
+		b.WriteString("\n" + sDim.Render("Stopped machines cost only the disk;\nshelved ones only a snapshot."))
+	}
+	return panel.Width(width - 2).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+func (m *model) wizardBody(width, height int) string {
 	w := m.wiz
 	var b strings.Builder
 	// progress
@@ -510,12 +595,12 @@ func (m *model) wizardView(width, height int) string {
 		case i < w.step:
 			steps = append(steps, sGood.Render("✓"))
 		case i == w.step:
-			steps = append(steps, sKey.Render(fmt.Sprintf("● %d/%d %s", i+1, stCount, n)))
+			steps = append(steps, pill(fmt.Sprintf("%d/%d %s", i+1, stCount, n), gCyan))
 		default:
 			steps = append(steps, sDim.Render("○"))
 		}
 	}
-	b.WriteString(sTitle.Render("NEW MACHINE") + "  " + strings.Join(steps, sDim.Render(" ")) + "\n\n")
+	b.WriteString(gradientText("NEW MACHINE", gCyan, gViol, true) + "  " + strings.Join(steps, sDim.Render(" ")) + "\n\n")
 	if w.opts == nil {
 		if w.loadErr != "" {
 			b.WriteString(sBad.Render("✖ "+w.loadErr) + "\n\n" + sDim.Render("esc back"))
@@ -547,12 +632,12 @@ func (m *model) wizardView(width, height int) string {
 		b.WriteString(sBold.Render("Which cloud?") + "\n\n")
 		var rows []string
 		for _, p := range w.opts.Providers {
-			status := sGood.Render("ready")
+			status := pill("READY", gGreen)
 			switch {
 			case !p.Available:
-				status = sDim.Render("coming soon")
+				status = pill("COMING SOON", rgb{125, 135, 150})
 			case !p.Configured:
-				status = sWarn.Render("no keys yet")
+				status = pill("NO KEYS YET", gAmber)
 			}
 			rows = append(rows, pad(p.Label, 16)+status)
 		}
@@ -581,13 +666,19 @@ func (m *model) wizardView(width, height int) string {
 		}
 		b.WriteString("\n\n")
 		var rows []string
+		maxP := 0.0
+		for _, s := range w.shapes() {
+			if p := w.price(s).OnDemand; p > maxP {
+				maxP = p
+			}
+		}
 		for _, s := range w.shapes() {
 			pr := w.price(s)
-			price := fmt.Sprintf("%s/h", money(pr.OnDemand))
+			price := lipgloss.NewStyle().Foreground(loadRGB(pr.OnDemand / maxP * 0.9).color()).Render(fmt.Sprintf("%s/h", money(pr.OnDemand)))
 			if pr.Spot != nil && w.provider().SupportsSpot {
-				price += fmt.Sprintf(" (spot %s)", money(*pr.Spot))
+				price += sDim.Render("  spot ") + sGood.Render(money(*pr.Spot))
 			}
-			rows = append(rows, pad(s.Label, 34)+sDim.Render(price))
+			rows = append(rows, pad(s.Label, 34)+gauge(pr.OnDemand, maxP, 10)+"  "+price)
 		}
 		b.WriteString(listView(rows, w.cursor, body-3))
 		if sh := w.shapes(); w.cursor < len(sh) && sh[w.cursor].BestFor != "" {
@@ -684,7 +775,7 @@ func (m *model) wizardView(width, height int) string {
 		} else {
 			row("Extra tools", strings.Join(ids, ", "))
 		}
-		b.WriteString("\n" + sGood.Render(fmt.Sprintf("≈ %s/hour while running", money(hourly))) + sDim.Render(fmt.Sprintf(" · %s/month for the disk, even when stopped", money(disk))) + "\n")
+		b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(loadRGB(0.2).color()).Render(fmt.Sprintf("≈ %s/hour while running", money(hourly))) + sDim.Render(fmt.Sprintf("  ·  %s/month for the disk, even when stopped", money(disk))) + "\n")
 		if w.launching {
 			b.WriteString("\n" + m.spin.View() + " launching…")
 		} else {
@@ -709,7 +800,7 @@ func listView(rows []string, cursor, height int) string {
 	var out []string
 	for i := start; i < len(rows) && i < start+height; i++ {
 		if i == cursor {
-			out = append(out, sKey.Render("▸ ")+sBold.Render(rows[i]))
+			out = append(out, lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌ ")+sBold.Render(rows[i]))
 		} else {
 			out = append(out, "  "+rows[i])
 		}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func num(p *float64) (float64, bool) {
@@ -14,19 +16,22 @@ func num(p *float64) (float64, bool) {
 }
 
 func alertLine(a Alert, width int) string {
-	glyph, st := "ℹ", sAccent
+	bar, st, label := "▌", sAccent, "NOTE"
+	col := gCyan
 	switch a.Level {
 	case "critical":
-		glyph, st = "✖", sBad
+		st, label, col = sBad, "CRITICAL", gRed
 	case "warning":
-		glyph, st = "▲", sWarn
+		st, label, col = sWarn, "WARNING", gAmber
 	}
-	lines := wrap(a.Text, width-3)
+	b := lipgloss.NewStyle().Foreground(col.color()).Render(bar)
+	lines := wrap(a.Text, width-14)
 	for i := range lines {
 		if i == 0 {
-			lines[i] = st.Render(glyph) + " " + st.Render(lines[i])
+			lines[i] = b + " " + lipgloss.NewStyle().Bold(true).Foreground(col.color()).Render(label) + "  " + st.Render(lines[i])
+			// the label takes room: re-wrap the rest when the first line is too long
 		} else {
-			lines[i] = "  " + st.Render(lines[i])
+			lines[i] = b + " " + st.Render(lines[i])
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -116,7 +121,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 		if eu, ok := s.gnum("eu"); ok {
 			sub += fmt.Sprintf(" · encoder %.0f%%", eu)
 		}
-		tiles = append(tiles, tile{title: "GPU load", value: f0(u) + "%", sub: strings.TrimSpace(sub), max: 100,
+		tiles = append(tiles, tile{title: "GPU load", value: f0(u) + "%", sub: strings.TrimSpace(sub), max: 100, gaugeVal: u, gaugeMax: 100, trendLoad: true,
 			trend: series(sm, func(x *Sample) (float64, bool) { return x.gnum("u") })})
 	} else {
 		tiles = append(tiles, tile{title: "GPU load", value: "no GPU data", sub: "driver not loaded yet?"})
@@ -133,7 +138,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 			pl, _ := s.gnum("pl")
 			sub = fmt.Sprintf("%.0f of %.0f W", pw, pl)
 		}
-		tiles = append(tiles, tile{title: "GPU temp", value: f0(tp) + " °C", sub: sub, tone: tone,
+		tiles = append(tiles, tile{title: "GPU temp", value: f0(tp) + " °C", sub: sub, tone: tone, max: 95, gaugeVal: tp, gaugeMax: 95, trendLoad: true,
 			trend: series(sm, func(x *Sample) (float64, bool) { return x.gnum("tp") })})
 	}
 	if vu, ok := s.gnum("vu"); ok {
@@ -147,7 +152,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 			cx, _ := s.gnum("cx")
 			sub = fmt.Sprintf("%.0f of %.0f MHz", cl, cx)
 		}
-		tiles = append(tiles, tile{title: "Video memory", value: fmt.Sprintf("%.1f / %.0f GB", vu/1024, vt/1024), sub: sub, tone: tone, max: vt / 1024,
+		tiles = append(tiles, tile{title: "Video memory", value: fmt.Sprintf("%.1f / %.0f GB", vu/1024, vt/1024), sub: sub, tone: tone, max: vt / 1024, gaugeVal: vu, gaugeMax: vt, trendLoad: true,
 			trend: series(sm, func(x *Sample) (float64, bool) { v, ok := x.gnum("vu"); return v / 1024, ok })})
 	}
 
@@ -166,7 +171,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 		if g.Sc != nil && *g.Sc > 0 {
 			sub += fmt.Sprintf(" · %.0f stutters/min", *g.Sc)
 		}
-		tiles = append(tiles, tile{title: "Game fps · " + g.N, value: fp(g.F, 0) + " fps", sub: sub, tone: tone,
+		tiles = append(tiles, tile{title: "Game fps · " + g.N, value: fp(g.F, 0) + " fps", sub: sub, tone: tone, max: 240,
 			trend: series(sm, func(x *Sample) (float64, bool) {
 				if x.GF == nil || x.GF.F == nil {
 					return 0, false
@@ -214,7 +219,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 		if cm, ok := num(s.CM); ok && cm >= 97 {
 			tone = "warn"
 		}
-		tiles = append(tiles, tile{title: "CPU", value: f0(c) + "%", sub: sub, tone: tone, max: 100,
+		tiles = append(tiles, tile{title: "CPU", value: f0(c) + "%", sub: sub, tone: tone, max: 100, gaugeVal: c, gaugeMax: 100, trendLoad: true,
 			trend: series(sm, func(x *Sample) (float64, bool) { return num(x.C) })})
 	}
 	if len(s.M) == 2 && s.M[1] > 0 {
@@ -226,7 +231,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 		if v, ok := num(s.Sw); ok && v > 0 {
 			sub = fmt.Sprintf("swap %.1f GB", v)
 		}
-		tiles = append(tiles, tile{title: "RAM", value: fmt.Sprintf("%.1f / %.1f GB", s.M[0], s.M[1]), sub: sub, tone: tone, max: s.M[1],
+		tiles = append(tiles, tile{title: "RAM", value: fmt.Sprintf("%.1f / %.1f GB", s.M[0], s.M[1]), sub: sub, tone: tone, max: s.M[1], gaugeVal: s.M[0], gaugeMax: s.M[1], trendLoad: true,
 			trend: series(sm, func(x *Sample) (float64, bool) {
 				if len(x.M) == 2 {
 					return x.M[0], true
@@ -255,7 +260,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 		if t.DiskFullDay != nil {
 			sub += fmt.Sprintf(" · full in ~%.0f d", *t.DiskFullDay)
 		}
-		tiles = append(tiles, tile{title: "Disk", value: fmt.Sprintf("%.0f / %.0f GB", s.D[0], s.D[1]), sub: sub, tone: tone,
+		tiles = append(tiles, tile{title: "Disk", value: fmt.Sprintf("%.0f / %.0f GB", s.D[0], s.D[1]), sub: sub, tone: tone, gaugeVal: s.D[0], gaugeMax: s.D[1],
 			trend: series(sm, func(x *Sample) (float64, bool) {
 				if local {
 					if len(x.D) == 2 {
@@ -381,7 +386,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 			if worst >= 25 {
 				tone = "warn"
 			}
-			tiles = append(tiles, tile{title: "Waiting (stalls)", value: f0(worst) + "%", sub: sub, tone: tone, max: 100,
+			tiles = append(tiles, tile{title: "Waiting (stalls)", value: f0(worst) + "%", sub: sub, tone: tone, max: 100, gaugeVal: worst, gaugeMax: 100, trendLoad: true,
 				trend: series(sm, func(x *Sample) (float64, bool) {
 					m, any := 0.0, false
 					for _, v := range x.PR {
@@ -418,14 +423,14 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 
 	// Lists: programs, GPU programs, containers, errors
 	var left, mid, right []string
-	left = append(left, sAccent.Render("BUSIEST PROGRAMS"))
+	left = append(left, sectionTitle("BUSIEST PROGRAMS"))
 	for _, p := range s.P {
 		if len(p) == 2 {
 			left = append(left, pad(p[0], 24)+sDim.Render(p[1]+"%"))
 		}
 	}
 	if len(s.GP) > 0 {
-		left = append(left, "", sAccent.Render("ON THE GPU"))
+		left = append(left, "", sectionTitle("ON THE GPU"))
 		for _, p := range s.GP {
 			name, _ := p[0].(string)
 			mib, _ := p[1].(float64)
@@ -438,7 +443,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 			left = append(left, line)
 		}
 	}
-	mid = append(mid, sAccent.Render("CONTAINERS"))
+	mid = append(mid, sectionTitle("CONTAINERS"))
 	for _, k := range s.K {
 		if strings.Contains(k, ": Up") {
 			mid = append(mid, sGood.Render("✓ ")+truncate(k, 34))
@@ -455,7 +460,7 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 	if s.SN != nil && s.SN.X > 1 {
 		mid = append(mid, sWarn.Render(fmt.Sprintf("▲ Sunshine restarted %d times", s.SN.X)))
 	}
-	right = append(right, sAccent.Render("ERRORS SINCE BOOT"))
+	right = append(right, sectionTitle("ERRORS SINCE BOOT"))
 	if s.X > 0 {
 		right = append(right, sBad.Render(fmt.Sprintf("✖ %d GPU (Xid)", s.X)))
 	} else {

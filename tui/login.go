@@ -121,7 +121,8 @@ func (l *loginModel) focusOnly() {
 func (m *model) loginView() string {
 	l := m.login
 	var b strings.Builder
-	b.WriteString(sTitle.Render("GGGH") + sDim.Render("  Gints Global Gaming Hubjob · terminal edition") + "\n\n")
+	b.WriteString(gradientText("GGGH", gCyan, gViol, true) + sDim.Render("  Gints Global Gaming Hubjob · terminal edition") + "\n")
+	b.WriteString(gradientText(strings.Repeat("▀", 52), gCyan, gViol, false) + "\n\n")
 	if l.mode == 0 {
 		b.WriteString(sDim.Render("Email") + "\n" + l.email.View() + "\n\n")
 		b.WriteString(sDim.Render("Password") + "\n" + l.pass.View() + "\n\n")

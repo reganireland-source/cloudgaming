@@ -78,12 +78,16 @@ func (m *model) header() string {
 	} else {
 		lights = append(lights, sDim.Render("○ checking…"))
 	}
-	left := sTitle.Render("GGGH") + "  " + strings.Join(lights, "  ")
+	left := gradientText("GGGH", gCyan, gViol, true) + "  " + strings.Join(lights, "  ")
 	right := ""
 	if sp := m.spend; sp != nil {
 		full := sDim.Render("TODAY ") + sText.Render(money(sp.Today.Usd)) + sDim.Render("  WTD ") + sText.Render(money(sp.WeekToDate.Usd)) + sDim.Render("  MTD ") + sText.Render(money(sp.MonthToDate.Usd))
 		if sp.ProjectedMonthUsd > 0 {
 			full += sDim.Render("  →  ") + sText.Render(money(sp.ProjectedMonthUsd))
+		}
+		if sp.ProjectedMonthUsd > 0 {
+			full = sDim.Render("TODAY ") + sText.Render(money(sp.Today.Usd)) + sDim.Render("  WTD ") + sText.Render(money(sp.WeekToDate.Usd)) + sDim.Render("  MTD ") + sText.Render(money(sp.MonthToDate.Usd)) + " " +
+				gauge(sp.MonthToDate.Usd, sp.ProjectedMonthUsd, 10) + sDim.Render(" of ") + sText.Render(money(sp.ProjectedMonthUsd)) + sDim.Render(" projected")
 		}
 		short := sDim.Render("MTD ") + sText.Render(money(sp.MonthToDate.Usd))
 		switch {
@@ -104,13 +108,13 @@ func (m *model) header() string {
 
 	tab := func(n, label string, on bool) string {
 		if on {
-			return sSel.Render(" " + n + " " + label + " ")
+			return pill(n+" "+label, gCyan) + " "
 		}
 		return sDim.Render(" "+n+" ") + sText.Render(label) + " "
 	}
 	line2 := tab("1", "Machines", m.screen == scrMachines) + tab("2", "Activity", m.screen == scrActivity) + tab("3", "Local PCs", m.screen == scrLocal)
 	if m.screen == scrWizard {
-		line2 += sSel.Render(" n New machine ")
+		line2 += pill("n New machine", gViol)
 	}
 	rule := sDim.Render(strings.Repeat("─", m.w))
 	return line1 + "\n" + line2 + "\n" + rule
@@ -140,13 +144,13 @@ func wrapHints(pairs [][2]string, w int) []string {
 	var lines []string
 	cur := ""
 	for _, p := range pairs {
-		item := sKey.Render(p[0]) + " " + sDim.Render(p[1])
-		if cur != "" && lipgloss.Width(cur)+3+lipgloss.Width(item) > w {
+		item := keyCap(p[0]) + " " + sDim.Render(p[1])
+		if cur != "" && lipgloss.Width(cur)+2+lipgloss.Width(item) > w {
 			lines = append(lines, cur)
 			cur = ""
 		}
 		if cur != "" {
-			cur += sDim.Render(" · ")
+			cur += "  "
 		}
 		cur += item
 	}
@@ -228,14 +232,14 @@ func (m *model) wizardHints() [][2]string {
 // ---- machines ----------------------------------------------------------------------------
 
 func machineRow(x Machine, selected bool, w int) string {
-	badge, st := statusStyle(x.Status)
 	l1 := truncate(x.Name(), w-2)
-	l2 := st.Render(badge) + sDim.Render(fmt.Sprintf(" · %s · %s/h", x.Provider, money(x.CostPerHour)))
+	l2 := statusPill(x.Status) + sDim.Render(fmt.Sprintf(" %s · %s/h", x.Provider, money(x.CostPerHour)))
 	if x.Spot {
-		l2 += sWarn.Render(" spot")
+		l2 += " " + lipgloss.NewStyle().Foreground(cAmber).Render("spot")
 	}
+	bar := lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌")
 	if selected {
-		return sKey.Render("▸ ") + sBold.Render(l1) + "\n  " + l2
+		return bar + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(l1) + "\n" + bar + " " + l2
 	}
 	return "  " + sText.Render(l1) + "\n  " + l2
 }
@@ -250,7 +254,7 @@ func (m *model) machinesView(w, h int) string {
 	listW := 38
 	wide := w >= 100
 	var list strings.Builder
-	list.WriteString(sAccent.Render(fmt.Sprintf("MACHINES (%d)", len(m.machines))) + "\n")
+	list.WriteString(sectionTitle(fmt.Sprintf("MACHINES (%d)", len(m.machines))) + "\n\n")
 	for i, x := range m.machines {
 		list.WriteString(machineRow(x, i == m.sel, listW-4) + "\n")
 	}
@@ -259,10 +263,9 @@ func (m *model) machinesView(w, h int) string {
 		// stacked: a compact list on top, the detail underneath
 		var rows []string
 		for i, x := range m.machines {
-			badge, st := statusStyle(x.Status)
-			line := pad(x.Name(), 30) + st.Render(badge)
+			line := pad(x.Name(), 30) + statusPill(x.Status)
 			if i == m.sel {
-				line = sKey.Render("▸ ") + sBold.Render(line)
+				line = lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌ ") + line
 			} else {
 				line = "  " + line
 			}
@@ -271,7 +274,7 @@ func (m *model) machinesView(w, h int) string {
 		top := strings.Join(rows, "\n")
 		return top + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + m.detailView(s, w, h-len(rows)-1)
 	}
-	left := sBox.Width(listW - 2).Height(h - 2).Render(strings.TrimRight(list.String(), "\n"))
+	left := panel.Width(listW - 2).Height(h - 2).Render(strings.TrimRight(list.String(), "\n"))
 	right := m.detailView(s, w-listW-1, h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 }
@@ -280,9 +283,8 @@ func (m *model) detailView(s *Machine, w, h int) string {
 	if s == nil {
 		return ""
 	}
-	badge, st := statusStyle(s.Status)
 	var head []string
-	title := sBold.Render(s.Name()) + "  " + st.Render(badge)
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(s.Name()) + "  " + statusPill(s.Status)
 	if s.Busy() {
 		title += " " + m.spin.View()
 	}
@@ -318,7 +320,7 @@ func (m *model) detailView(s *Machine, w, h int) string {
 	var tabs []string
 	for i, n := range tabNames {
 		if detailTab(i) == m.detail {
-			tabs = append(tabs, sSel.Render(" "+n+" "))
+			tabs = append(tabs, pill(n, gCyan))
 		} else {
 			tabs = append(tabs, sDim.Render(" "+n+" "))
 		}
@@ -368,7 +370,7 @@ func (m *model) setupView(c *Connection, w int) string {
 	}
 	var b strings.Builder
 	cur := c.Setup.Stages[len(c.Setup.Stages)-1]
-	b.WriteString(sAccent.Render("ON-MACHINE SETUP") + "  " + bar(cur.Percent, 100, 24, sWarn) + fmt.Sprintf(" %.0f%%\n", cur.Percent))
+	b.WriteString(sectionTitle("ON-MACHINE SETUP") + "  " + bar(cur.Percent, 100, 28, sWarn) + fmt.Sprintf(" %.0f%%\n", cur.Percent))
 	b.WriteString(sText.Render(cur.Message) + "\n")
 	if cur.Detail != "" {
 		b.WriteString(sDim.Render(strings.Join(wrap(cur.Detail, w), "\n")) + "\n")
@@ -405,7 +407,7 @@ func (m *model) connectView(s *Machine, w int) string {
 	if c.Setup.Ready {
 		b.WriteString(sGood.Render("✓ Ready to stream") + sDim.Render(": open Moonlight and add this machine's IP.") + "\n\n")
 	}
-	row := func(k, v string) { b.WriteString(sDim.Render(pad(k, 16)) + v + "\n") }
+	row := func(k, v string) { b.WriteString(sDim.Render(pad(k, 20)) + v + "\n") }
 	if c.IP != "" {
 		row("Moonlight host", sBold.Render(c.IP)+sDim.Render("   (C copies)"))
 	}
@@ -555,7 +557,7 @@ func (m *model) activityView(w, h int) string {
 	if end > len(rows) {
 		end = len(rows)
 	}
-	return sAccent.Render("ACTIVITY") + sDim.Render(fmt.Sprintf("  (%d)", len(m.ops))) + "\n" + strings.Join(rows[start:end], "\n")
+	return sectionTitle("ACTIVITY") + sDim.Render(fmt.Sprintf("  (%d)", len(m.ops))) + "\n" + strings.Join(rows[start:end], "\n")
 }
 
 func (m *model) opViewView(w, h int) string {
@@ -617,17 +619,18 @@ func (m *model) localView(w, h int) string {
 	}
 	listW := 34
 	var l strings.Builder
-	l.WriteString(sAccent.Render(fmt.Sprintf("YOUR OWN PCS (%d)", len(m.local))) + "\n")
+	l.WriteString(sectionTitle(fmt.Sprintf("YOUR OWN PCS (%d)", len(m.local))) + "\n\n")
 	for i, p := range m.local {
-		dot, st := "● online", sGood
+		pl := pill("● ONLINE", gGreen)
 		if !p.Online {
-			dot, st = "○ offline", sDim
+			pl = pill("○ OFFLINE", rgb{125, 135, 150})
 		}
 		name := truncate(p.Name, listW-6)
+		bar := lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌")
 		if i == m.lsel {
-			l.WriteString(sKey.Render("▸ ") + sBold.Render(name) + "\n  " + st.Render(dot) + "\n")
+			l.WriteString(bar + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(name) + "\n" + bar + " " + pl + "\n")
 		} else {
-			l.WriteString("  " + sText.Render(name) + "\n  " + st.Render(dot) + "\n")
+			l.WriteString("  " + sText.Render(name) + "\n  " + pl + "\n")
 		}
 	}
 	p := m.local[m.lsel]
@@ -663,35 +666,36 @@ func (m *model) localView(w, h int) string {
 	d.WriteString(renderMonitor(m.localTele[p.ID], w-listW-4, true, teleRanges[m.rangeIx].label))
 	m.lvp.Width, m.lvp.Height = w-listW-2, h
 	m.lvp.SetContent(d.String())
-	return lipgloss.JoinHorizontal(lipgloss.Top, sBox.Width(listW-2).Height(h-2).Render(strings.TrimRight(l.String(), "\n")), " ", withMoreHint(m.lvp))
+	return lipgloss.JoinHorizontal(lipgloss.Top, panel.Width(listW-2).Height(h-2).Render(strings.TrimRight(l.String(), "\n")), " ", withMoreHint(m.lvp))
 }
 
 // ---- prompts and help ------------------------------------------------------------------------------
 
 func (m *model) promptView() string {
 	p := m.prompt
-	st := sBox
+	border := gCyan
 	if p.danger {
-		st = sBoxWarn
+		border = gRed
 	}
+	st := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border.color()).Padding(1, 3)
 	var b strings.Builder
-	title := sBold.Render(p.title)
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(p.title)
 	if p.danger {
-		title = sBad.Render("▲ ") + title
+		title = pill("▲ CAREFUL", gRed) + "  " + title
 	}
 	b.WriteString(title + "\n\n")
 	if p.body != "" {
-		b.WriteString(strings.Join(wrap(p.body, 62), "\n") + "\n\n")
+		b.WriteString(sText.Render(strings.Join(wrap(p.body, 62), "\n")) + "\n\n")
 	}
 	switch p.kind {
 	case pConfirm:
-		b.WriteString(sKey.Render("y") + " yes   " + sKey.Render("n") + " no")
+		b.WriteString(pill("y  YES", gGreen) + "   " + pill("n  NO", rgb{125, 135, 150}))
 	case pInput:
-		b.WriteString(p.ti.View() + "\n\n" + sKey.Render("enter") + " save   " + sKey.Render("esc") + " cancel")
+		b.WriteString(p.ti.View() + "\n\n" + pill("enter  SAVE", gGreen) + "   " + pill("esc  CANCEL", rgb{125, 135, 150}))
 	default:
-		b.WriteString(sKey.Render("enter") + " close")
+		b.WriteString(pill("enter  CLOSE", gCyan))
 	}
-	return st.Padding(1, 3).Render(b.String())
+	return st.Render(b.String())
 }
 
 func (m *model) helpView() string {

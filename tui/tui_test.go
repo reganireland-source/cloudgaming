@@ -179,7 +179,7 @@ func TestStartStopFlow(t *testing.T) {
 		t.Fatalf("after start: %s", got)
 	}
 	show(t, "starting", h.view())
-	if !strings.Contains(h.view(), "◐ starting") {
+	if !strings.Contains(h.view(), "◐ STARTING") {
 		t.Error("starting badge missing")
 	}
 	// stop key is refused for a non-running machine
@@ -407,7 +407,7 @@ func TestLocalPCs(t *testing.T) {
 	h.poll()
 	v := h.view()
 	show(t, "local", v)
-	if !strings.Contains(v, "Big Gaming PC") || !strings.Contains(v, "online") || !strings.Contains(v, "GPU LOAD") {
+	if !strings.Contains(v, "Big Gaming PC") || !strings.Contains(v, "ONLINE") || !strings.Contains(v, "GPU LOAD") {
 		t.Error("local screen incomplete")
 	}
 }
