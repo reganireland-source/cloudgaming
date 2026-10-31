@@ -11,6 +11,10 @@ gggh-tui            # sign in (email + password, or paste a token), then use you
 
 ## Screenshots
 
+![Machines and hardware](screenshots/17-machines-hardware.png)
+![Costs and billing](screenshots/18-costs.png)
+![Regions and quotas](screenshots/19-regions.png)
+![Fixing a region](screenshots/20-regions-fix.png)
 ![Monitor](screenshots/01-monitor.png)
 ![Connect](screenshots/02-connect.png)
 ![Launch wizard](screenshots/09-wizard-size.png)
@@ -62,9 +66,11 @@ gives the two-pane layout; narrower terminals stack it.
 
 | Screen | What it shows |
 |---|---|
-| **1 Machines** | Your cloud machines with status, cost per hour and a detail pane: **Monitor** (live telemetry with trend lines: GPU, VRAM, temperature, game FPS and frame pacing, CPU and busiest core, RAM, network, disk, ping to your device, network errors, data sent, session and idle cost, auto-stop countdown, stalls, GPU programs, alerts), **Connect** (IP, Sunshine login, setup progress), **Info**, **Activity** |
+| **1 Machines** | Your cloud machines (failed ones hidden; `f` shows them) with status, cost per hour and a detail pane with hardware cards (GPU, CPU, memory, disk, with live use gauges): **Monitor** (live telemetry with trend lines: GPU, VRAM, temperature, game FPS and frame pacing, CPU and busiest core, RAM, network, disk, ping to your device, network errors, data sent, session and idle cost, auto-stop countdown, stalls, GPU programs, alerts), **Connect** (IP, Sunshine login, setup progress), **Info**, **Activity** |
 | **2 Activity** | Every operation (launch, start, stop, shelve...) and a live step-by-step log |
 | **3 Local PCs** | Your own home gaming PCs and their telemetry |
+| **4 Costs & billing** | Today / this week / this month and the projected month (gauge against what you've spent), what's running now and what you pay when everything is idle, leftovers that still bill, a stacked 30-day chart (disks, machine time, data transfer), each cloud's estimate against what it actually billed, and recent invoices |
+| **5 Regions & quotas** | For each cloud: every region with whether you can use it (ready, no quota, not enabled, not sold there), your GPU quotas against what you use, what you can run in each region (normal / spot / big screen), and the exact fix and command for each gap (`c` copies it, `o` opens the console) |
 | **n New machine** | The launch wizard: what it is for, cloud, region, size (light / standard / heavy), options, extra tools, review |
 
 Keys (press `?` in the app for the list): `s` start, `x` stop, `z` shelve, `r` restore, `p` pair

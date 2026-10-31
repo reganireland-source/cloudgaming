@@ -14,7 +14,7 @@ func TestFooterShowsAllShortcuts(t *testing.T) {
 		check := func(label string, wants ...string) {
 			v := stripANSI(h.view())
 			lines := strings.Split(v, "\n")
-			foot := strings.Join(lines[len(lines)-5:], "\n")
+			foot := strings.Join(lines[len(lines)-9:], "\n")
 			for _, want := range wants {
 				if !strings.Contains(foot, want) {
 					t.Errorf("w=%d %s: footer lacks %q\n%s", w, label, want, foot)

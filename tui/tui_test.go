@@ -356,15 +356,15 @@ func TestLaunchWizard(t *testing.T) {
 	if !strings.Contains(v, "[Standard]") {
 		t.Error("size step lacks the intensity picker")
 	}
-	if got := h.m.wiz.shapes()[h.m.wiz.cursor].ID; got != "l4-16" {
+	if got := h.m.wiz.shapes()[h.m.wiz.cursor].ID; got != "g2-standard-16" {
 		t.Errorf("standard gamedev size = %s, want l4-16", got)
 	}
 	h.key("3")
-	if got := h.m.wiz.shapes()[h.m.wiz.cursor].ID; got != "l4-32" {
+	if got := h.m.wiz.shapes()[h.m.wiz.cursor].ID; got != "g2-standard-32" {
 		t.Errorf("heavy gamedev size = %s, want l4-32", got)
 	}
 	h.key("1")
-	if got := h.m.wiz.shapes()[h.m.wiz.cursor].ID; got != "l4-16" {
+	if got := h.m.wiz.shapes()[h.m.wiz.cursor].ID; got != "g2-standard-16" {
 		t.Errorf("light gamedev size = %s, want l4-16 (the cheapest dev size)", got)
 	}
 	h.key("enter")
@@ -436,5 +436,96 @@ func TestHelp(t *testing.T) {
 	h.key("x")
 	if h.m.help {
 		t.Fatal("help should close")
+	}
+}
+
+func TestFailedHiddenAndHardware(t *testing.T) {
+	h := newHarness(t, 150, 46)
+	h.m.authed = true
+	h.exec(h.m.afterLogin())
+	h.poll()
+	if len(h.m.allMachines) != 9 || len(h.m.machines) != 3 || h.m.failedCount != 6 {
+		t.Fatalf("all %d shown %d failed %d", len(h.m.allMachines), len(h.m.machines), h.m.failedCount)
+	}
+	v := h.view()
+	show(t, "hardware + hidden failed", v)
+	for _, want := range []string{"6 failed hidden", "GPU", "NVIDIA L4", "32 vCPU", "128 GB", "VRAM", "MEMORY", "DISK", "300 GB"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("machines view lacks %q", want)
+		}
+	}
+	if strings.Contains(v, "AWS-MUMBAI") {
+		t.Error("failed machines are visible by default")
+	}
+	h.key("f")
+	if len(h.m.machines) != 9 || !strings.Contains(h.view(), "AWS-MUMBAI") {
+		t.Error("f should show the failed machines")
+	}
+	h.key("f")
+	if len(h.m.machines) != 3 {
+		t.Error("f again should hide them")
+	}
+}
+
+func TestCostsPage(t *testing.T) {
+	h := newHarness(t, 150, 50)
+	h.m.authed = true
+	h.exec(h.m.afterLogin())
+	h.key("4")
+	h.poll()
+	h.poll()
+	v := h.m.costsContent(146)
+	show(t, "costs", h.view())
+	for _, want := range []string{"TODAY", "THIS MONTH SO FAR", "PROJECTED MONTH", "RIGHT NOW", "COSTS EVEN WHEN IDLE", "LEFTOVERS", "LAST 30 DAYS", "machine time", "BY CLOUD", "Google Cloud", "AWS", "RECENT INVOICES", "vol-0a1b2c", "set up"} {
+		if !strings.Contains(strings.ToUpper(v), strings.ToUpper(want)) {
+			t.Errorf("costs page lacks %q", want)
+		}
+	}
+	for i, l := range strings.Split(h.view(), "\n") {
+		if lenCells(l) > 150 {
+			t.Errorf("costs line %d is %d cells", i, lenCells(l))
+		}
+	}
+}
+
+func TestRegionsPage(t *testing.T) {
+	h := newHarness(t, 150, 50)
+	h.m.authed = true
+	h.exec(h.m.afterLogin())
+	h.key("5")
+	h.poll()
+	h.poll()
+	v := h.view()
+	show(t, "regions", v)
+	for _, want := range []string{"Google Cloud · 2/6 ready", "Singapore", "READY", "NO QUOTA", "YOUR QUOTAS", "WHAT YOU CAN RUN HERE", "AWS · 1/3 ready"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("regions page lacks %q", want)
+		}
+	}
+	// ready ones come first
+	list := h.m.regionList()
+	if list[0].Status != "ready" || list[len(list)-1].Status == "ready" {
+		t.Errorf("not sorted by usefulness: %+v", list)
+	}
+	h.key("f")
+	if got := len(h.m.regionList()); got != 2 {
+		t.Errorf("ready-only shows %d", got)
+	}
+	h.key("f")
+	h.key("down")
+	h.key("down") // a no-quota region
+	d := h.m.regionDetail(h.m.selectedRegion(h.m.regionList()), 100)
+	show(t, "regions no-quota", d)
+	if !strings.Contains(d, "HOW TO FIX IT") || !strings.Contains(d, "gcloud alpha") {
+		t.Error("no-quota region lacks the fix")
+	}
+	h.key("right")
+	if !strings.Contains(h.view(), "Ready") && h.m.cloudSel != 1 {
+		t.Error("cloud tab did not move")
+	}
+	h.key("right")
+	h.key("right")
+	if !strings.Contains(h.view(), "isn't connected") {
+		t.Error("unconnected cloud not explained")
 	}
 }

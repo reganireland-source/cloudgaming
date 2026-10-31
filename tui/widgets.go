@@ -217,6 +217,8 @@ type tile struct {
 	// gauge: when gaugeMax > 0 a gradient bar shows gaugeVal/gaugeMax, and the value and the
 	// trend line are coloured by how full it is.
 	gaugeVal, gaugeMax float64
+	compact            bool // no trend line (hardware cards, cost figures)
+	subLines           int  // detail lines for a compact tile (default 1)
 	trendLoad          bool // colour the trend line by how high each point is against max (else a cyan ramp)
 }
 
@@ -250,17 +252,26 @@ func (t tile) renderMin(w, minLines int) string {
 		lines = append(lines, gauge(t.gaugeVal, t.gaugeMax, inner))
 	}
 	sub := wrap(t.sub, inner)
-	if len(sub) > 2 {
-		sub = sub[:2]
-		sub[1] = truncate(sub[1], inner-1) + "…"
+	subN := 2
+	if t.compact {
+		subN = 1
+		if t.subLines > 0 {
+			subN = t.subLines
+		}
 	}
-	for len(sub) < 2 {
+	if len(sub) > subN {
+		sub = sub[:subN]
+		sub[subN-1] = truncate(sub[subN-1], inner-1) + "…"
+	}
+	for len(sub) < subN {
 		sub = append(sub, "")
 	}
 	for _, s := range sub {
 		lines = append(lines, sDim.Render(s))
 	}
-	if len(t.trend) > 1 {
+	if t.compact {
+		// no trend line
+	} else if len(t.trend) > 1 {
 		lines = append(lines, sparkColor(t.trend, inner, t.max, t.trendLoad))
 	} else {
 		lines = append(lines, sDim.Render("collecting…"))

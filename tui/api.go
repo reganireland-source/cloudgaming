@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -399,6 +400,13 @@ type Backend interface {
 	Operations(limit int, machineID string) ([]OpSummary, error)
 	Operation(id string, after int) (*Operation, error)
 	LocalMachines() ([]LocalMachine, error)
+	// costs, billing and quotas
+	Inventory(refresh bool) (*Inventory, error)
+	CostsDaily(days int) ([]CostDay, error)
+	CostsMonthly() (*CostsMonthly, error)
+	CostsActuals(refresh bool) (*Recon, error)
+	Invoices(refresh bool) ([]CloudInvoices, error)
+	RegionAccess(refresh bool) (*RegionAccessResp, error)
 }
 
 // APIError is a failed call, with the backend's own words and advice.
@@ -422,4 +430,201 @@ func opIDOf(res map[string]any) string {
 		return s
 	}
 	return ""
+}
+
+// ---- costs and billing -----------------------------------------------------------
+
+// flex reads a number that the backend sends as either a number or a string (Postgres decimals).
+type flex float64
+
+func (f *flex) UnmarshalJSON(b []byte) error {
+	t := strings.Trim(string(b), "\" ")
+	v, err := strconv.ParseFloat(t, 64)
+	if err != nil {
+		*f = 0
+		return nil
+	}
+	*f = flex(v)
+	return nil
+}
+
+type CostDay struct {
+	Date    string `json:"date"`
+	Compute flex   `json:"compute"`
+	Egress  flex   `json:"egress"`
+	Storage flex   `json:"storage"`
+	Total   flex   `json:"total"`
+}
+
+type CostsMonthly struct {
+	Total     flex `json:"total"`
+	Breakdown []struct {
+		Provider string `json:"provider"`
+		Compute  flex   `json:"compute"`
+		Egress   flex   `json:"egress"`
+		Storage  flex   `json:"storage"`
+	} `json:"breakdown"`
+}
+
+type InvItem struct {
+	Provider     string  `json:"provider"`
+	Type         string  `json:"type"`
+	Name         string  `json:"name"`
+	Region       string  `json:"region"`
+	Status       string  `json:"status"`
+	SizeGb       float64 `json:"sizeGb"`
+	HourlyCost   float64 `json:"hourlyCost"`
+	MonthlyCost  float64 `json:"monthlyCost"`
+	Orphan       bool    `json:"orphan"`
+	OrphanReason string  `json:"orphanReason"`
+}
+
+type Inventory struct {
+	Totals struct {
+		RunningMachines int     `json:"runningMachines"`
+		Hourly          float64 `json:"hourly"`
+		MonthlyStanding float64 `json:"monthlyStanding"`
+		Orphans         int     `json:"orphans"`
+		OrphanMonthly   float64 `json:"orphanMonthly"`
+		OrphanHourly    float64 `json:"orphanHourly"`
+	} `json:"totals"`
+	ByCloud map[string]struct {
+		Label    string  `json:"label"`
+		Machines int     `json:"machines"`
+		Running  int     `json:"running"`
+		Hourly   float64 `json:"hourly"`
+		Monthly  float64 `json:"monthly"`
+	} `json:"byCloud"`
+	Items []InvItem `json:"items"`
+}
+
+type ReconCloud struct {
+	Provider string `json:"provider"`
+	Label    string `json:"label"`
+	Status   string `json:"status"` // ok | needs-setup | error | not-connected
+	Error    *struct {
+		Title string `json:"title"`
+	} `json:"error"`
+	DataThrough string `json:"dataThrough"`
+	Actual      *struct {
+		Amount   float64  `json:"amount"`
+		Currency string   `json:"currency"`
+		Usd      *float64 `json:"usd"`
+	} `json:"actual"`
+	EstimateMonthUsd float64  `json:"estimateMonthUsd"`
+	DifferenceUsd    *float64 `json:"differenceUsd"`
+	DifferencePct    *float64 `json:"differencePct"`
+	Notes            []string `json:"notes"`
+}
+
+type Recon struct {
+	Month    string       `json:"month"`
+	Clouds   []ReconCloud `json:"clouds"`
+	Forecast struct {
+		SoFarUsd     float64 `json:"soFarUsd"`
+		DailyRateUsd float64 `json:"dailyRateUsd"`
+		ProjectedUsd float64 `json:"projectedUsd"`
+		DaysElapsed  float64 `json:"daysElapsed"`
+		DaysInMonth  float64 `json:"daysInMonth"`
+		Basis        string  `json:"basis"`
+	} `json:"forecast"`
+}
+
+type Invoice struct {
+	ID       string   `json:"id"`
+	Period   string   `json:"period"`
+	Due      string   `json:"due"`
+	Amount   *float64 `json:"amount"`
+	Currency string   `json:"currency"`
+	Status   string   `json:"status"`
+}
+
+type CloudInvoices struct {
+	Provider string    `json:"provider"`
+	Label    string    `json:"label"`
+	Status   string    `json:"status"`
+	Invoices []Invoice `json:"invoices"`
+	Notes    []string  `json:"notes"`
+}
+
+// ---- regions and quotas ------------------------------------------------------------
+
+type QuotaLine struct {
+	Label string  `json:"label"`
+	Limit float64 `json:"limit"`
+	Used  float64 `json:"used"`
+	Unit  string  `json:"unit"`
+}
+
+type PendingReq struct {
+	Requested float64 `json:"requested"`
+	Status    string  `json:"status"`
+}
+
+type QuotaDetail struct {
+	Key     string       `json:"key"`
+	Label   string       `json:"label"`
+	Used    *float64     `json:"used"`
+	Limit   float64      `json:"limit"`
+	Unit    string       `json:"unit"`
+	Unlocks []string     `json:"unlocks"`
+	Pending []PendingReq `json:"pending"`
+	Denied  []PendingReq `json:"denied"`
+	Short   bool         `json:"short"`
+	Request *struct {
+		ConsoleURL   string `json:"consoleUrl"`
+		ConsoleLabel string `json:"consoleLabel"`
+		CLI          string `json:"cli"`
+		Note         string `json:"note"`
+	} `json:"request"`
+}
+
+type RunCell struct {
+	OK    *bool  `json:"ok"`
+	NA    bool   `json:"na"`
+	InUse bool   `json:"inUse"`
+	Why   string `json:"why"`
+}
+
+type RunRow struct {
+	Label string             `json:"label"`
+	Shape string             `json:"shape"`
+	Cells map[string]RunCell `json:"cells"`
+}
+
+type RegionAccess struct {
+	Region      string      `json:"region"`
+	Name        string      `json:"name"`
+	Status      string      `json:"status"`
+	Summary     string      `json:"summary"`
+	Quotas      []QuotaLine `json:"quotas"`
+	Spot        *QuotaLine  `json:"spot"`
+	SpotReady   *bool       `json:"spotReady"`
+	MissingGPUs []string    `json:"missingGpus"`
+	NotSold     []string    `json:"notSold"`
+	Fix         *struct {
+		Steps        []string `json:"steps"`
+		ConsoleURL   string   `json:"consoleUrl"`
+		ConsoleLabel string   `json:"consoleLabel"`
+		CLI          string   `json:"cli"`
+	} `json:"fix"`
+	Run         []RunRow      `json:"run"`
+	QuotaDetail []QuotaDetail `json:"quotaDetail"`
+	PendingNote string        `json:"pendingNote"`
+}
+
+type CloudAccess struct {
+	Provider  string `json:"provider"`
+	Label     string `json:"label"`
+	Connected bool   `json:"connected"`
+	Error     *struct {
+		Title string `json:"title"`
+	} `json:"error"`
+	Regions   []RegionAccess `json:"regions"`
+	CheckedAt string         `json:"checkedAt"`
+}
+
+type RegionAccessResp struct {
+	GeneratedAt string        `json:"generatedAt"`
+	Clouds      []CloudAccess `json:"clouds"`
 }

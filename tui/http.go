@@ -190,3 +190,43 @@ func (h *HTTPBackend) LocalMachines() ([]LocalMachine, error) {
 	err := h.call("GET", "/local-machines", nil, &out)
 	return out, err
 }
+
+func (h *HTTPBackend) Inventory(refresh bool) (*Inventory, error) {
+	var out Inventory
+	err := h.call("GET", "/inventory"+map[bool]string{true: "?refresh=true", false: ""}[refresh], nil, &out)
+	return &out, err
+}
+
+func (h *HTTPBackend) CostsDaily(days int) ([]CostDay, error) {
+	var out struct {
+		History []CostDay `json:"history"`
+	}
+	err := h.call("GET", fmt.Sprintf("/costs/daily?days=%d", days), nil, &out)
+	return out.History, err
+}
+
+func (h *HTTPBackend) CostsMonthly() (*CostsMonthly, error) {
+	var out CostsMonthly
+	err := h.call("GET", "/costs/monthly", nil, &out)
+	return &out, err
+}
+
+func (h *HTTPBackend) CostsActuals(refresh bool) (*Recon, error) {
+	var out Recon
+	err := h.call("GET", "/costs/actuals"+map[bool]string{true: "?refresh=true", false: ""}[refresh], nil, &out)
+	return &out, err
+}
+
+func (h *HTTPBackend) Invoices(refresh bool) ([]CloudInvoices, error) {
+	var out struct {
+		Clouds []CloudInvoices `json:"clouds"`
+	}
+	err := h.call("GET", "/costs/invoices"+map[bool]string{true: "?refresh=true", false: ""}[refresh], nil, &out)
+	return out.Clouds, err
+}
+
+func (h *HTTPBackend) RegionAccess(refresh bool) (*RegionAccessResp, error) {
+	var out RegionAccessResp
+	err := h.call("GET", "/regions/access"+map[bool]string{true: "?refresh=true", false: ""}[refresh], nil, &out)
+	return &out, err
+}

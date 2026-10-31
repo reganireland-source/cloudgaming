@@ -19,6 +19,8 @@ const (
 	scrMachines screenID = iota
 	scrActivity
 	scrLocal
+	scrCosts
+	scrRegions
 	scrWizard
 )
 
@@ -135,22 +137,36 @@ type model struct {
 	status *SystemStatus
 	spend  *Spend
 
-	machines []Machine
-	sel      int
-	loaded   bool
-	detail   detailTab
-	rangeIx  int
-	tele     map[string]*Telemetry
-	teleErr  map[string]string
-	conn     map[string]*Connection
-	mops     map[string][]OpSummary
-	showPass bool
-	vp       viewport.Model
-	lvp      viewport.Model
+	allMachines []Machine // everything the backend sent
+	machines    []Machine // what is listed (failed ones hidden unless f)
+	showFailed  bool
+	failedCount int
+	sel         int
+	loaded      bool
+	detail      detailTab
+	rangeIx     int
+	tele        map[string]*Telemetry
+	teleErr     map[string]string
+	conn        map[string]*Connection
+	mops        map[string][]OpSummary
+	showPass    bool
+	vp          viewport.Model
+	lvp         viewport.Model
 
 	ops   []OpSummary
 	opSel int
 	opv   *opView
+
+	costs *costsData
+	cvp   viewport.Model
+
+	regions        *RegionAccessResp
+	regionsErr     string
+	regionsLoading bool
+	cloudSel       int
+	regSel         int
+	readyOnly      bool
+	rvp            viewport.Model
 
 	local     []LocalMachine
 	lsel      int
@@ -181,7 +197,7 @@ func newModel(be Backend, cfg config, demo bool) *model {
 		tele: map[string]*Telemetry{}, teleErr: map[string]string{}, conn: map[string]*Connection{}, mops: map[string][]OpSummary{},
 		localTele: map[string]*Telemetry{}, last: map[string]time.Time{}, inflight: map[string]bool{},
 		rangeIx: 0, login: newLogin(),
-		vp: viewport.New(60, 20), lvp: viewport.New(60, 20),
+		vp: viewport.New(60, 20), lvp: viewport.New(60, 20), cvp: viewport.New(60, 20), rvp: viewport.New(60, 20),
 	}
 }
 
@@ -443,6 +459,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wiz.start(msg.o)
 		}
 		return m, nil
+	case costsMsg:
+		m.inflight["costs"] = false
+		m.costs = msg.d
+		return m, nil
+	case regionsMsg:
+		m.inflight["regions"] = false
+		m.regionsLoading = false
+		if msg.err != nil {
+			if errors.Is(msg.err, ErrUnauthorized) {
+				return m, m.signedOut()
+			}
+			m.regionsErr = msg.err.Error()
+			if msg.refresh {
+				m.setNotice("Region check failed: "+msg.err.Error(), true)
+			}
+			return m, nil
+		}
+		m.regionsErr = ""
+		m.regions = msg.r
+		if msg.refresh {
+			m.setNotice("Regions re-checked live.", false)
+		}
+		return m, nil
 	case actMsg:
 		return m, m.onAct(msg)
 	case launchMsg:
@@ -477,7 +516,7 @@ func (m *model) signedOut() tea.Cmd {
 }
 
 func (m *model) afterLogin() tea.Cmd {
-	return tea.Batch(m.cmdMachines(), m.cmdStatus(), m.cmdSpend(), m.cmdOps(""))
+	return tea.Batch(m.cmdMachines(), m.cmdStatus(), m.cmdSpend(), m.cmdOps(""), m.cmdOptions())
 }
 
 func (m *model) onMachines(msg machinesMsg) tea.Cmd {
@@ -493,7 +532,8 @@ func (m *model) onMachines(msg machinesMsg) tea.Cmd {
 	if s := m.selected(); s != nil {
 		keep = s.ID
 	}
-	m.machines, m.loaded = msg.m, true
+	m.allMachines, m.loaded = msg.m, true
+	m.applyMachineFilter()
 	for i, x := range m.machines {
 		if x.ID == keep {
 			m.sel = i
@@ -553,7 +593,7 @@ func (m *model) pollDue() tea.Cmd {
 	switch m.screen {
 	case scrMachines:
 		if s := m.selected(); s != nil {
-			if (s.Status == "running" && m.detail == tabMonitor) && m.due("tele:"+s.ID, 5*time.Second) {
+			if s.Status == "running" && m.due("tele:"+s.ID, 5*time.Second) { // also feeds the hardware cards
 				m.inflight["tele:"+s.ID] = true
 				cmds = append(cmds, m.cmdTele(s.ID, false))
 			}
@@ -575,6 +615,16 @@ func (m *model) pollDue() tea.Cmd {
 		if o := m.opv; o != nil && !o.inflight && !o.done && time.Since(o.fetched) > 1500*time.Millisecond {
 			o.inflight, o.fetched = true, time.Now()
 			cmds = append(cmds, m.cmdOp(o.id, o.after))
+		}
+	case scrCosts:
+		if m.due("costs", 60*time.Second) {
+			m.inflight["costs"] = true
+			cmds = append(cmds, m.cmdCosts(false))
+		}
+	case scrRegions:
+		if m.due("regions", 5*time.Minute) {
+			m.inflight["regions"] = true
+			cmds = append(cmds, m.cmdRegions(false))
 		}
 	case scrLocal:
 		if m.due("local", 10*time.Second) {
@@ -639,6 +689,14 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = scrLocal
 		m.last["local"] = time.Time{}
 		return m, nil
+	case "4":
+		m.screen = scrCosts
+		m.last["costs"] = time.Time{}
+		return m, nil
+	case "5":
+		m.screen = scrRegions
+		m.last["regions"] = time.Time{}
+		return m, nil
 	case "n":
 		return m, m.openWizard()
 	case "ctrl+r", "f5":
@@ -663,8 +721,50 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.activityKey(k)
 	case scrLocal:
 		return m.localKey(k)
+	case scrCosts:
+		return m.costsKey(k)
+	case scrRegions:
+		return m.regionsKey(k)
 	}
 	return m, nil
+}
+
+func (m *model) costsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch k.String() {
+	case "up", "k":
+		m.cvp.LineUp(1)
+	case "down", "j":
+		m.cvp.LineDown(1)
+	case "pgup", "ctrl+u", "K":
+		m.cvp.HalfViewUp()
+	case "pgdown", "ctrl+d", "J":
+		m.cvp.HalfViewDown()
+	case "home", "g":
+		m.cvp.GotoTop()
+	case "r":
+		m.last["costs"] = time.Time{}
+		m.setNotice("Reloading costs…", false)
+	case "R":
+		m.setNotice("Asking each cloud for its latest bill and inventory (can take a minute)…", false)
+		m.inflight["costs"] = true
+		return m, m.cmdCosts(true)
+	}
+	return m, nil
+}
+
+func (m *model) applyMachineFilter() {
+	m.failedCount = 0
+	var shown []Machine
+	for _, x := range m.allMachines {
+		if x.Status == "failed" {
+			m.failedCount++
+			if !m.showFailed {
+				continue
+			}
+		}
+		shown = append(shown, x)
+	}
+	m.machines = shown
 }
 
 func (m *model) confirm(title, body string, danger bool, run func(m *model, val string) tea.Cmd) tea.Cmd {
@@ -852,6 +952,13 @@ func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setNotice("Opened "+c.SunshineURL+" in your browser.", false)
 			}
 		}
+	case "f":
+		m.showFailed = !m.showFailed
+		m.applyMachineFilter()
+		if m.sel >= len(m.machines) {
+			m.sel = max(0, len(m.machines)-1)
+		}
+		m.setNotice(map[bool]string{true: "Showing failed machines too.", false: "Failed machines hidden."}[m.showFailed], false)
 	case "a":
 		m.detail = tabActivity
 	case "i":
@@ -949,3 +1056,5 @@ func (m *model) bodyHeight() int {
 }
 
 var _ = lipgloss.Width
+
+var zeroTime time.Time

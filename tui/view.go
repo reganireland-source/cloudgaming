@@ -36,6 +36,12 @@ func (m *model) View() string {
 			body = m.activityView(m.w, bodyH)
 		case scrLocal:
 			body = m.localView(m.w, bodyH)
+		case scrCosts:
+			m.cvp.Width, m.cvp.Height = m.w, bodyH
+			m.cvp.SetContent(m.costsContent(m.w - 2))
+			body = withMoreHint(m.cvp)
+		case scrRegions:
+			body = m.regionsView(m.w, bodyH)
 		case scrWizard:
 			body = m.wizardView(m.w, bodyH)
 		}
@@ -112,7 +118,12 @@ func (m *model) header() string {
 		}
 		return sDim.Render(" "+n+" ") + sText.Render(label) + " "
 	}
-	line2 := tab("1", "Machines", m.screen == scrMachines) + tab("2", "Activity", m.screen == scrActivity) + tab("3", "Local PCs", m.screen == scrLocal)
+	costsLabel, regionsLabel, localLabel := "Costs & billing", "Regions & quotas", "Local PCs"
+	if m.w < 120 {
+		costsLabel, regionsLabel, localLabel = "Costs", "Regions", "PCs"
+	}
+	line2 := tab("1", "Machines", m.screen == scrMachines) + tab("2", "Activity", m.screen == scrActivity) + tab("3", localLabel, m.screen == scrLocal) +
+		tab("4", costsLabel, m.screen == scrCosts) + tab("5", regionsLabel, m.screen == scrRegions)
 	if m.screen == scrWizard {
 		line2 += pill("n New machine", gViol)
 	}
@@ -161,7 +172,7 @@ func wrapHints(pairs [][2]string, w int) []string {
 }
 
 func (m *model) hintPairs() [][2]string {
-	global := [][2]string{{"1 2 3", "screens"}, {"n", "new machine"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
+	global := [][2]string{{"1-5", "screens"}, {"n", "new machine"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
 	switch {
 	case m.prompt != nil:
 		switch m.prompt.kind {
@@ -177,7 +188,7 @@ func (m *model) hintPairs() [][2]string {
 		return m.wizardHints()
 	case m.screen == scrMachines:
 		s := m.selected()
-		p := [][2]string{{"↑↓", "machine"}, {"←→", "tab"}}
+		p := [][2]string{{"↑↓", "machine"}, {"←→", "tab"}, {"f", "show/hide failed"}}
 		if s != nil {
 			switch {
 			case s.Busy():
@@ -202,6 +213,10 @@ func (m *model) hintPairs() [][2]string {
 			return [][2]string{{"↑↓", "scroll"}, {"pgup pgdn", "page"}, {"G", "latest"}, {"esc", "back to list"}, {"1", "machines"}, {"ctrl+c", "quit"}}
 		}
 		return append([][2]string{{"↑↓", "choose"}, {"enter", "open log"}, {"r", "refresh"}}, global...)
+	case m.screen == scrCosts:
+		return append([][2]string{{"↑↓ J K", "scroll"}, {"r", "reload"}, {"R", "ask clouds for fresh bills"}}, global...)
+	case m.screen == scrRegions:
+		return append([][2]string{{"←→", "cloud"}, {"↑↓", "region"}, {"f", "ready only / all"}, {"c", "copy fix command"}, {"o", "open console"}, {"J K", "scroll"}, {"r", "reload"}, {"R", "re-check live"}}, global...)
 	case m.screen == scrLocal:
 		return append([][2]string{{"↑↓", "PC"}, {"w", "window"}, {"J K", "scroll"}, {"r", "refresh"}}, global...)
 	}
@@ -249,21 +264,34 @@ func (m *model) machinesView(w, h int) string {
 		return m.spin.View() + " loading your machines…"
 	}
 	if len(m.machines) == 0 {
-		return sDim.Render("No machines yet.") + "\n\n" + sDim.Render("Press ") + sKey.Render("n") + sDim.Render(" to launch one: choose what it's for and GGGH picks the size and tools.")
+		msg := sDim.Render("No machines yet.") + "\n\n" + sDim.Render("Press ") + sKey.Render("n") + sDim.Render(" to launch one: choose what it's for and GGGH picks the size and tools.")
+		if m.failedCount > 0 {
+			msg = sDim.Render(fmt.Sprintf("No working machines. %d failed machine%s hidden: press ", m.failedCount, plural(m.failedCount))) + sKey.Render("f") + sDim.Render(" to show them, or ") + sKey.Render("n") + sDim.Render(" to launch a new one.")
+		}
+		return msg
 	}
 	listW := 38
 	wide := w >= 100
-	var list strings.Builder
-	list.WriteString(sectionTitle(fmt.Sprintf("MACHINES (%d)", len(m.machines))) + "\n\n")
-	for i, x := range m.machines {
-		list.WriteString(machineRow(x, i == m.sel, listW-4) + "\n")
+	title := fmt.Sprintf("MACHINES (%d)", len(m.machines))
+	var note string
+	switch {
+	case m.failedCount > 0 && !m.showFailed:
+		note = sDim.Render(fmt.Sprintf("%d failed hidden · f shows", m.failedCount))
+	case m.failedCount > 0:
+		note = sWarn.Render(fmt.Sprintf("incl. %d failed · f hides", m.failedCount))
 	}
 	s := m.selected()
 	if !wide {
-		// stacked: a compact list on top, the detail underneath
+		// stacked: a compact list on top (a few rows around the selection), the detail underneath
+		rowsMax := 6
+		start := 0
+		if m.sel >= rowsMax {
+			start = m.sel - rowsMax + 1
+		}
 		var rows []string
-		for i, x := range m.machines {
-			line := pad(x.Name(), 30) + statusPill(x.Status)
+		for i := start; i < len(m.machines) && i < start+rowsMax; i++ {
+			x := m.machines[i]
+			line := pad(truncate(x.Name(), 30), 30) + statusPill(x.Status)
 			if i == m.sel {
 				line = lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌ ") + line
 			} else {
@@ -271,12 +299,132 @@ func (m *model) machinesView(w, h int) string {
 			}
 			rows = append(rows, line)
 		}
-		top := strings.Join(rows, "\n")
-		return top + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + m.detailView(s, w, h-len(rows)-1)
+		if note != "" {
+			rows = append(rows, note)
+		}
+		return strings.Join(rows, "\n") + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + m.detailView(s, w, h-len(rows)-1)
+	}
+	// wide: a scrolling list (two lines a machine) keeping the selection in view
+	var list strings.Builder
+	list.WriteString(sectionTitle(title) + "\n")
+	if note != "" {
+		list.WriteString(note + "\n")
+	} else {
+		list.WriteString("\n")
+	}
+	list.WriteString("\n")
+	visible := (h - 6) / 2
+	if visible < 1 {
+		visible = 1
+	}
+	start := 0
+	if m.sel >= visible {
+		start = m.sel - visible + 1
+	}
+	for i := start; i < len(m.machines) && i < start+visible; i++ {
+		list.WriteString(machineRow(m.machines[i], i == m.sel, listW-4) + "\n")
+	}
+	if start+visible < len(m.machines) {
+		list.WriteString(sDim.Render(fmt.Sprintf("  ▼ %d more", len(m.machines)-start-visible)))
 	}
 	left := panel.Width(listW - 2).Height(h - 2).Render(strings.TrimRight(list.String(), "\n"))
 	right := m.detailView(s, w-listW-1, h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+// shapeFor: the catalog entry (GPU, vCPU, RAM) for a machine, when the launch options are loaded.
+func (m *model) shapeFor(x *Machine) *Shape {
+	if m.options == nil || x == nil {
+		return nil
+	}
+	for i := range m.options.Providers {
+		p := &m.options.Providers[i]
+		if p.Provider != x.Provider {
+			continue
+		}
+		for j := range p.Shapes {
+			if p.Shapes[j].ID == x.InstanceType {
+				return &p.Shapes[j]
+			}
+		}
+	}
+	return nil
+}
+
+// hardwareView: the selected machine's GPU, CPU, RAM and disk as four cards. Sizes come from the
+// catalog; while it runs, gauges show how much of each is in use right now.
+func (m *model) hardwareView(x *Machine, w int) string {
+	sh := m.shapeFor(x)
+	var lt *Sample
+	if t := m.tele[x.ID]; t != nil && x.Status == "running" {
+		lt = t.Latest
+	}
+	gpu := tile{title: "GPU", compact: true, value: "—", sub: "size not in the catalog"}
+	cpu := tile{title: "CPU", compact: true, value: "—"}
+	ram := tile{title: "Memory", compact: true, value: "—"}
+	disk := tile{title: "Disk", compact: true, value: "—"}
+	if sh != nil {
+		gpu.value, gpu.sub = "NVIDIA "+sh.GPUModel, "one GPU"
+		cpu.value, cpu.sub = fmt.Sprintf("%d vCPU", sh.VCPUs), "virtual cores"
+		ram.value, ram.sub = fmt.Sprintf("%.0f GB", sh.MemoryGb), "RAM"
+	}
+	if x.DiskSizeGb > 0 {
+		disk.value, disk.sub = fmt.Sprintf("%.0f GB", x.DiskSizeGb), "billed even when stopped"
+		if x.Standing != nil {
+			disk.sub = fmt.Sprintf("%s/month, even when stopped", money(x.Standing.DiskMonthly))
+		}
+	}
+	if lt != nil {
+		if vt, ok := lt.gnum("vt"); ok && vt > 0 {
+			vu, _ := lt.gnum("vu")
+			gpu.sub = fmt.Sprintf("%.0f GB VRAM · %.1f used", vt/1024, vu/1024)
+			gpu.gaugeVal, gpu.gaugeMax = vu, vt
+		}
+		if len(lt.CC) == 2 {
+			cpu.value = fmt.Sprintf("%.0f vCPU", lt.CC[1])
+			if sh != nil && sh.VCPUs == int(lt.CC[1]) {
+				cpu.value = fmt.Sprintf("%d vCPU", sh.VCPUs)
+			}
+			cpu.sub = fmt.Sprintf("%.0f%% busy · core %.0f%%", derefF(lt.C), lt.CC[0])
+		} else if lt.C != nil {
+			cpu.sub = fmt.Sprintf("%.0f%% busy", *lt.C)
+		}
+		if lt.C != nil {
+			cpu.gaugeVal, cpu.gaugeMax = *lt.C, 100
+		}
+		if len(lt.M) == 2 && lt.M[1] > 0 {
+			if sh == nil { // the catalog's size is what you bought; the OS reports a little less
+				ram.value = fmt.Sprintf("%.0f GB", lt.M[1])
+			}
+			ram.sub = fmt.Sprintf("%.1f GB in use", lt.M[0])
+			ram.gaugeVal, ram.gaugeMax = lt.M[0], lt.M[1]
+		}
+		if len(lt.D) == 2 && lt.D[1] > 0 {
+			if x.DiskSizeGb == 0 {
+				disk.value = fmt.Sprintf("%.0f GB", lt.D[1])
+			}
+			disk.sub = fmt.Sprintf("%.0f GB used (%.0f%%)", lt.D[0], lt.D[0]/lt.D[1]*100)
+			disk.gaugeVal, disk.gaugeMax = lt.D[0], lt.D[1]
+		}
+	} else if x.Status != "running" {
+		gpu.sub = x.Status
+	}
+	cols := 4
+	if w < 90 {
+		cols = 2
+	}
+	out := grid([]tile{gpu, cpu, ram, disk}, w, cols)
+	if sh != nil && sh.BestFor != "" && sh.BestFor != "Demo size" {
+		out += "\n" + sDim.Render(truncate("Built for: "+sh.BestFor, w))
+	}
+	return out
+}
+
+func derefF(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 func (m *model) detailView(s *Machine, w, h int) string {
@@ -314,6 +462,9 @@ func (m *model) detailView(s *Machine, w, h int) string {
 		l3 += " · shelved " + ago(s.ShelvedAt)
 	}
 	head = append(head, sDim.Render(truncate(l3, w)))
+	if m.h >= 34 {
+		head = append(head, m.hardwareView(s, w))
+	}
 	if t := s.ErrorTitle(); t != "" && (s.Status == "failed" || s.Status == "stopped" || s.Status == "running") {
 		head = append(head, sBad.Render("✖ "+truncate(t, w-2)))
 	}
@@ -700,7 +851,8 @@ func (m *model) promptView() string {
 
 func (m *model) helpView() string {
 	rows := [][2]string{
-		{"1 2 3", "Machines · Activity · Local PCs"},
+		{"1-5", "Machines · Activity · Local PCs · Costs & billing · Regions & quotas"},
+		{"f", "show or hide failed machines (hidden by default)"},
 		{"n", "launch a new machine (what is it for? → size → tools)"},
 		{"↑ ↓  j k", "choose a machine"},
 		{"← →  tab", "Monitor · Connect · Info · Activity tabs"},
