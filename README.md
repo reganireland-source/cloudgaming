@@ -51,6 +51,12 @@ A multi-cloud gaming infrastructure platform that enables cost-optimized game st
 - **Health Checks**: Automatic detection of thermal throttling, high packet loss, low FPS
 - **Performance Tips**: Best practice guidance for each metric
 
+## Terminal app (TUI)
+
+`tui/` is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) terminal version of the app for macOS
+and Linux: monitor machines live, start / stop / shelve / restore, launch new ones, pair Moonlight and watch
+every operation. Try it with no login: `cd tui && go run . --demo`. See [tui/README.md](tui/README.md).
+
 ## Architecture
 
 ```
