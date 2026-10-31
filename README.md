@@ -55,7 +55,7 @@ A multi-cloud gaming infrastructure platform that enables cost-optimized game st
 
 `tui/` is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) terminal version of the app for macOS
 and Linux: monitor machines live, start / stop / shelve / restore, launch new ones, pair Moonlight and watch
-every operation. Try it with no login: `cd tui && go run . --demo`. See [tui/README.md](tui/README.md).
+every operation. Install: `brew tap reganireland-source/gggh https://github.com/reganireland-source/cloudgaming && brew install gggh-tui`, then `gggh-tui --demo` (no login). See [tui/README.md](tui/README.md).
 
 ## Architecture
 

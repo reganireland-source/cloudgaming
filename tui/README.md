@@ -17,7 +17,22 @@ gggh-tui            # sign in (email + password, or paste a token), then use you
 ![Review](screenshots/12-wizard-review.png)
 ![Local PC](screenshots/13-local-pc.png)
 
-## Build and run (macOS)
+## Install with Homebrew (macOS and Linux)
+
+```bash
+brew tap reganireland-source/gggh https://github.com/reganireland-source/cloudgaming
+brew install gggh-tui
+gggh-tui --demo          # try it with made-up machines
+gggh-tui                 # sign in and use your real machines
+```
+
+The formula lives in this repo (`Formula/gggh-tui.rb`), which is why the tap command names the
+repo's address. It builds from source, so Homebrew installs Go for you (build-time only).
+`brew install --HEAD gggh-tui` gets the newest code on `main`. `brew upgrade gggh-tui` picks up a new
+release once the formula's `url` and `sha256` are bumped. To remove it: `brew uninstall gggh-tui`
+and `brew untap reganireland-source/gggh`.
+
+## Or build it yourself (macOS)
 
 You need Go 1.22 or newer (`brew install go`).
 
