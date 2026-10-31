@@ -16,11 +16,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// version is set at build time: -ldflags "-X main.version=1.2.3" (Homebrew does this).
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	demo := flag.Bool("demo", false, "use made-up machines (no login, nothing is contacted)")
 	api := flag.String("api", "", "GGGH API address (default "+defaultAPI+", or GGGH_API)")
 	token := flag.String("token", "", "sign-in token (or GGGH_TOKEN)")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("gggh-tui", version)
+		return
+	}
 
 	cfg := loadConfig()
 	if v := os.Getenv("GGGH_API"); v != "" {
