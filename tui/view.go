@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func placeCenter(s string, w, h int) string {
@@ -47,7 +48,10 @@ func (m *model) View() string {
 	for len(lines) < bodyH {
 		lines = append(lines, "")
 	}
-	return m.header() + "\n" + strings.Join(lines, "\n") + "\n" + m.footer()
+	for i := range lines { // never wider than the terminal
+		lines[i] = ansi.Truncate(lines[i], m.w, "")
+	}
+	return m.header() + "\n" + strings.Join(lines, "\n") + "\n" + strings.Join(m.footerLines(), "\n")
 }
 
 // ---- header / footer ---------------------------------------------------------------------
@@ -112,7 +116,9 @@ func (m *model) header() string {
 	return line1 + "\n" + line2 + "\n" + rule
 }
 
-func (m *model) footer() string {
+// footerLines: a rule, one line for notices and errors, then EVERY shortcut that works
+// right now, wrapped to the terminal width.
+func (m *model) footerLines() []string {
 	rule := sDim.Render(strings.Repeat("─", m.w))
 	var msg string
 	switch {
@@ -124,40 +130,99 @@ func (m *model) footer() string {
 		msg = st.Render(truncate(m.notice, m.w))
 	case m.err != "":
 		msg = sBad.Render(truncate("✖ "+m.err, m.w))
-	default:
-		msg = sDim.Render(truncate(m.hints(), m.w))
 	}
-	return rule + "\n" + msg
+	out := []string{rule, msg}
+	return append(out, wrapHints(m.hintPairs(), m.w)...)
 }
 
-func (m *model) hints() string {
+// wrapHints lays "key label" pairs out in as many lines as the width needs.
+func wrapHints(pairs [][2]string, w int) []string {
+	var lines []string
+	cur := ""
+	for _, p := range pairs {
+		item := sKey.Render(p[0]) + " " + sDim.Render(p[1])
+		if cur != "" && lipgloss.Width(cur)+3+lipgloss.Width(item) > w {
+			lines = append(lines, cur)
+			cur = ""
+		}
+		if cur != "" {
+			cur += sDim.Render(" · ")
+		}
+		cur += item
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+func (m *model) hintPairs() [][2]string {
+	global := [][2]string{{"1 2 3", "screens"}, {"n", "new machine"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
 	switch {
 	case m.prompt != nil:
-		return "y yes · n / esc no"
-	case m.screen == scrWizard:
-		return "↑↓ choose · enter next · esc back"
+		switch m.prompt.kind {
+		case pInput:
+			return [][2]string{{"enter", "save"}, {"esc", "cancel"}}
+		case pInfo:
+			return [][2]string{{"enter", "close"}}
+		}
+		return [][2]string{{"y", "yes"}, {"n / esc", "no"}}
+	case m.help:
+		return [][2]string{{"any key", "close"}}
+	case m.screen == scrWizard && m.wiz != nil:
+		return m.wizardHints()
 	case m.screen == scrMachines:
-		if s := m.selected(); s != nil {
+		s := m.selected()
+		p := [][2]string{{"↑↓", "machine"}, {"←→", "tab"}}
+		if s != nil {
 			switch {
 			case s.Busy():
-				return "↑↓ machine · ←→ tab · w window · n new · ? help · q quit  (working…)"
+				p = append(p, [2]string{"e", "rename"}, [2]string{"w", "window"}, [2]string{"J K", "scroll"})
 			case s.Status == "running":
-				return "x stop · z shelve · p pair · e rename · u/U update · w window · ←→ tab · n new · ? help"
+				p = append(p, [2]string{"x", "stop"}, [2]string{"z", "shelve"}, [2]string{"p", "pair Moonlight"}, [2]string{"e", "rename"},
+					[2]string{"u", "update script"}, [2]string{"U", "update+restart"}, [2]string{"R", "resume setup"}, [2]string{"$", "spot/on-demand"},
+					[2]string{"y", "sync"}, [2]string{"D", "delete"}, [2]string{"w", "window"}, [2]string{"c", "copy password"}, [2]string{"v", "show password"},
+					[2]string{"C", "copy IP"}, [2]string{"o", "open Sunshine"}, [2]string{"J K", "scroll"})
 			case s.Status == "stopped":
-				return "s start · z shelve · D delete · e rename · ←→ tab · n new · ? help"
+				p = append(p, [2]string{"s", "start"}, [2]string{"z", "shelve"}, [2]string{"e", "rename"}, [2]string{"$", "spot/on-demand"},
+					[2]string{"R", "resume setup"}, [2]string{"y", "sync"}, [2]string{"D", "delete"}, [2]string{"C", "copy IP"}, [2]string{"J K", "scroll"})
 			case s.Status == "shelved":
-				return "r restore · D delete · e rename · n new · ? help"
+				p = append(p, [2]string{"r", "restore"}, [2]string{"e", "rename"}, [2]string{"$", "spot/on-demand"}, [2]string{"D", "delete"})
+			default:
+				p = append(p, [2]string{"e", "rename"}, [2]string{"y", "sync"}, [2]string{"D", "delete"})
 			}
-			return "D delete · y refresh · n new · ? help"
 		}
-		return "n new machine · ? help · q quit"
+		return append(p, global...)
 	case m.screen == scrActivity:
 		if m.opv != nil {
-			return "↑↓ scroll · G end · esc back"
+			return [][2]string{{"↑↓", "scroll"}, {"pgup pgdn", "page"}, {"G", "latest"}, {"esc", "back to list"}, {"1", "machines"}, {"ctrl+c", "quit"}}
 		}
-		return "↑↓ choose · enter open log · n new · ? help"
+		return append([][2]string{{"↑↓", "choose"}, {"enter", "open log"}, {"r", "refresh"}}, global...)
+	case m.screen == scrLocal:
+		return append([][2]string{{"↑↓", "PC"}, {"w", "window"}, {"J K", "scroll"}, {"r", "refresh"}}, global...)
 	}
-	return "↑↓ PC · w window · ? help · q quit"
+	return global
+}
+
+func (m *model) wizardHints() [][2]string {
+	w := m.wiz
+	base := [][2]string{{"enter", "next"}, {"esc", "back"}}
+	if w.opts == nil {
+		return [][2]string{{"esc", "cancel"}}
+	}
+	switch w.step {
+	case stPurpose:
+		return [][2]string{{"↑↓", "choose"}, {"enter", "next"}, {"esc", "cancel"}}
+	case stSize:
+		return [][2]string{{"↑↓", "choose"}, {"1 2 3", "light / standard / heavy"}, {"enter", "next"}, {"esc", "back"}}
+	case stOptions:
+		return [][2]string{{"↑↓ tab", "field"}, {"space", "toggle spot"}, {"← →", "auto-stop"}, {"enter", "next"}, {"esc", "back"}}
+	case stExtras:
+		return [][2]string{{"↑↓", "choose"}, {"space", "tick / untick"}, {"enter", "next"}, {"esc", "back"}}
+	case stReview:
+		return [][2]string{{"enter", "LAUNCH"}, {"esc", "back"}}
+	}
+	return append([][2]string{{"↑↓", "choose"}}, base...)
 }
 
 // ---- machines ----------------------------------------------------------------------------
@@ -180,7 +245,7 @@ func (m *model) machinesView(w, h int) string {
 		return m.spin.View() + " loading your machines…"
 	}
 	if len(m.machines) == 0 {
-		return sDim.Render("No machines yet.\n\nPress ") + sKey.Render("n") + sDim.Render(" to launch one: choose what it's for and GGGH picks the size and tools.")
+		return sDim.Render("No machines yet.") + "\n\n" + sDim.Render("Press ") + sKey.Render("n") + sDim.Render(" to launch one: choose what it's for and GGGH picks the size and tools.")
 	}
 	listW := 38
 	wide := w >= 100
@@ -466,7 +531,7 @@ func (m *model) activityView(w, h int) string {
 		return m.opViewView(w, h)
 	}
 	if len(m.ops) == 0 {
-		return sDim.Render("No activity yet. Launching, starting and stopping machines shows up here, step by step.")
+		return sDim.Render(strings.Join(wrap("No activity yet. Launching, starting and stopping machines shows up here, step by step.", w), "\n"))
 	}
 	var rows []string
 	for i, o := range m.ops {
@@ -548,7 +613,7 @@ func (m *model) opViewView(w, h int) string {
 
 func (m *model) localView(w, h int) string {
 	if len(m.local) == 0 {
-		return sDim.Render("No local PCs yet.\n\nA local PC is a gaming computer at home that you stream from. Add one in the web app (Machines → Your own PCs) and it reports here.")
+		return sDim.Render(strings.Join(wrap("No local PCs yet.\n\nA local PC is a gaming computer at home that you stream from. Add one in the web app (Machines → Your own PCs) and it reports here.", w), "\n"))
 	}
 	listW := 34
 	var l strings.Builder

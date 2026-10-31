@@ -508,14 +508,14 @@ func (m *model) wizardView(width, height int) string {
 		switch {
 		case w.opts == nil:
 		case i < w.step:
-			steps = append(steps, sGood.Render("✓ "+n))
+			steps = append(steps, sGood.Render("✓"))
 		case i == w.step:
-			steps = append(steps, sKey.Render("● "+n))
+			steps = append(steps, sKey.Render(fmt.Sprintf("● %d/%d %s", i+1, stCount, n)))
 		default:
-			steps = append(steps, sDim.Render("○ "+n))
+			steps = append(steps, sDim.Render("○"))
 		}
 	}
-	b.WriteString(sTitle.Render("NEW MACHINE") + "  " + strings.Join(steps, sDim.Render(" › ")) + "\n\n")
+	b.WriteString(sTitle.Render("NEW MACHINE") + "  " + strings.Join(steps, sDim.Render(" ")) + "\n\n")
 	if w.opts == nil {
 		if w.loadErr != "" {
 			b.WriteString(sBad.Render("✖ "+w.loadErr) + "\n\n" + sDim.Render("esc back"))
@@ -694,7 +694,6 @@ func (m *model) wizardView(width, height int) string {
 	if w.err != "" {
 		b.WriteString("\n\n" + sBad.Render("✖ "+w.err))
 	}
-	b.WriteString("\n\n" + sDim.Render("↑↓ choose · enter next · esc back (first step: cancel)"))
 	return b.String()
 }
 

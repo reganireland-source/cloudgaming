@@ -941,9 +941,9 @@ func (m *model) localKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // ---- helpers ------------------------------------------------------------------------------
 
 func (m *model) bodyHeight() int {
-	h := m.h - 5
-	if h < 8 {
-		h = 8
+	h := m.h - 3 - len(m.footerLines())
+	if h < 6 {
+		h = 6
 	}
 	return h
 }
