@@ -30,12 +30,14 @@ func (m *model) View() string {
 		body = placeCenter(m.helpView(), m.w, bodyH)
 	default:
 		switch m.screen {
+		case scrDashboard:
+			body = m.dashboardView(m.w, bodyH)
 		case scrMachines:
 			body = m.machinesView(m.w, bodyH)
+		case scrPerf:
+			body = m.perfView(m.w, bodyH)
 		case scrActivity:
 			body = m.activityView(m.w, bodyH)
-		case scrLocal:
-			body = m.localView(m.w, bodyH)
 		case scrCosts:
 			m.cvp.Width, m.cvp.Height = m.w, bodyH
 			m.cvp.SetContent(m.costsContent(m.w - 2))
@@ -118,17 +120,21 @@ func (m *model) header() string {
 		}
 		return sDim.Render(" "+n+" ") + sText.Render(label) + " "
 	}
-	costsLabel, regionsLabel, localLabel := "Costs & billing", "Regions & quotas", "Local PCs"
+	costsLabel, regionsLabel := "Costs & billing", "Regions & quotas"
 	if m.w < 120 {
-		costsLabel, regionsLabel, localLabel = "Costs", "Regions", "PCs"
+		costsLabel, regionsLabel = "Costs", "Regions"
 	}
-	line2 := tab("1", "Machines", m.screen == scrMachines) + tab("2", "Activity", m.screen == scrActivity) + tab("3", localLabel, m.screen == scrLocal) +
-		tab("4", costsLabel, m.screen == scrCosts) + tab("5", regionsLabel, m.screen == scrRegions)
+	dashLabel, perfLabel := "Dashboard", "Performance"
+	if m.w < 100 {
+		dashLabel, perfLabel = "Dash", "Perf"
+	}
+	line2 := tab("1", dashLabel, m.screen == scrDashboard) + tab("2", "Machines", m.screen == scrMachines) + tab("3", perfLabel, m.screen == scrPerf) +
+		tab("4", "Activity", m.screen == scrActivity) + tab("5", costsLabel, m.screen == scrCosts) + tab("6", regionsLabel, m.screen == scrRegions)
 	if m.screen == scrWizard {
 		line2 += pill("n New machine", gViol)
 	}
 	rule := sDim.Render(strings.Repeat("─", m.w))
-	return line1 + "\n" + line2 + "\n" + rule
+	return line1 + "\n" + ansi.Truncate(line2, m.w, "") + "\n" + rule
 }
 
 // footerLines: a rule, one line for notices and errors, then EVERY shortcut that works
@@ -172,7 +178,7 @@ func wrapHints(pairs [][2]string, w int) []string {
 }
 
 func (m *model) hintPairs() [][2]string {
-	global := [][2]string{{"1-5", "screens"}, {"n", "new machine"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
+	global := [][2]string{{"1-6", "screens"}, {"n", "new machine"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
 	switch {
 	case m.prompt != nil:
 		switch m.prompt.kind {
@@ -186,6 +192,8 @@ func (m *model) hintPairs() [][2]string {
 		return [][2]string{{"any key", "close"}}
 	case m.screen == scrWizard && m.wiz != nil:
 		return m.wizardHints()
+	case m.screen == scrMachines && m.selectedLocal() != nil:
+		return append([][2]string{{"↑↓", "machine"}, {"w", "window"}, {"J K", "scroll"}, {"f", "show/hide failed"}, {"r", "refresh"}}, global...)
 	case m.screen == scrMachines:
 		s := m.selected()
 		p := [][2]string{{"↑↓", "machine"}, {"←→", "tab"}, {"f", "show/hide failed"}}
@@ -210,15 +218,17 @@ func (m *model) hintPairs() [][2]string {
 		return append(p, global...)
 	case m.screen == scrActivity:
 		if m.opv != nil {
-			return [][2]string{{"↑↓", "scroll"}, {"pgup pgdn", "page"}, {"G", "latest"}, {"esc", "back to list"}, {"1", "machines"}, {"ctrl+c", "quit"}}
+			return [][2]string{{"↑↓", "scroll"}, {"pgup pgdn", "page"}, {"G", "latest"}, {"esc", "back to list"}, {"2", "machines"}, {"ctrl+c", "quit"}}
 		}
 		return append([][2]string{{"↑↓", "choose"}, {"enter", "open log"}, {"r", "refresh"}}, global...)
 	case m.screen == scrCosts:
 		return append([][2]string{{"↑↓ J K", "scroll"}, {"r", "reload"}, {"R", "ask clouds for fresh bills"}}, global...)
 	case m.screen == scrRegions:
 		return append([][2]string{{"←→", "cloud"}, {"↑↓", "region"}, {"f", "ready only / all"}, {"c", "copy fix command"}, {"o", "open console"}, {"J K", "scroll"}, {"r", "reload"}, {"R", "re-check live"}}, global...)
-	case m.screen == scrLocal:
-		return append([][2]string{{"↑↓", "PC"}, {"w", "window"}, {"J K", "scroll"}, {"r", "refresh"}}, global...)
+	case m.screen == scrDashboard:
+		return append([][2]string{{"↑↓ J K", "scroll"}, {"r", "refresh"}}, global...)
+	case m.screen == scrPerf:
+		return append([][2]string{{"↑↓", "machine"}, {"enter", "open on Machines"}, {"w", "window"}, {"J K", "scroll"}, {"r", "refresh"}}, global...)
 	}
 	return global
 }
@@ -263,7 +273,7 @@ func (m *model) machinesView(w, h int) string {
 	if !m.loaded {
 		return m.spin.View() + " loading your machines…"
 	}
-	if len(m.machines) == 0 {
+	if m.entries() == 0 {
 		msg := sDim.Render("No machines yet.") + "\n\n" + sDim.Render("Press ") + sKey.Render("n") + sDim.Render(" to launch one: choose what it's for and GGGH picks the size and tools.")
 		if m.failedCount > 0 {
 			msg = sDim.Render(fmt.Sprintf("No working machines. %d failed machine%s hidden: press ", m.failedCount, plural(m.failedCount))) + sKey.Render("f") + sDim.Render(" to show them, or ") + sKey.Render("n") + sDim.Render(" to launch a new one.")
@@ -272,7 +282,7 @@ func (m *model) machinesView(w, h int) string {
 	}
 	listW := 38
 	wide := w >= 100
-	title := fmt.Sprintf("MACHINES (%d)", len(m.machines))
+	title := fmt.Sprintf("MACHINES (%d)", m.entries())
 	var note string
 	switch {
 	case m.failedCount > 0 && !m.showFailed:
@@ -281,6 +291,12 @@ func (m *model) machinesView(w, h int) string {
 		note = sWarn.Render(fmt.Sprintf("incl. %d failed · f hides", m.failedCount))
 	}
 	s := m.selected()
+	detail := func(dw, dh int) string {
+		if p := m.selectedLocal(); p != nil {
+			return m.localDetail(p, dw, dh)
+		}
+		return m.detailView(s, dw, dh)
+	}
 	if !wide {
 		// stacked: a compact list on top (a few rows around the selection), the detail underneath
 		rowsMax := 6
@@ -289,9 +305,9 @@ func (m *model) machinesView(w, h int) string {
 			start = m.sel - rowsMax + 1
 		}
 		var rows []string
-		for i := start; i < len(m.machines) && i < start+rowsMax; i++ {
-			x := m.machines[i]
-			line := pad(truncate(x.Name(), 30), 30) + statusPill(x.Status)
+		for i := start; i < m.entries() && i < start+rowsMax; i++ {
+			name, pl := m.entryShort(i)
+			line := pad(truncate(name, 30), 30) + pl
 			if i == m.sel {
 				line = lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌ ") + line
 			} else {
@@ -302,7 +318,7 @@ func (m *model) machinesView(w, h int) string {
 		if note != "" {
 			rows = append(rows, note)
 		}
-		return strings.Join(rows, "\n") + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + m.detailView(s, w, h-len(rows)-1)
+		return strings.Join(rows, "\n") + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + detail(w, h-len(rows)-1)
 	}
 	// wide: a scrolling list (two lines a machine) keeping the selection in view
 	var list strings.Builder
@@ -321,15 +337,75 @@ func (m *model) machinesView(w, h int) string {
 	if m.sel >= visible {
 		start = m.sel - visible + 1
 	}
-	for i := start; i < len(m.machines) && i < start+visible; i++ {
-		list.WriteString(machineRow(m.machines[i], i == m.sel, listW-4) + "\n")
+	for i := start; i < m.entries() && i < start+visible; i++ {
+		list.WriteString(m.entryRow(i, i == m.sel, listW-4) + "\n")
 	}
-	if start+visible < len(m.machines) {
-		list.WriteString(sDim.Render(fmt.Sprintf("  ▼ %d more", len(m.machines)-start-visible)))
+	if start+visible < m.entries() {
+		list.WriteString(sDim.Render(fmt.Sprintf("  ▼ %d more", m.entries()-start-visible)))
 	}
 	left := panel.Width(listW - 2).Height(h - 2).Render(strings.TrimRight(list.String(), "\n"))
-	right := m.detailView(s, w-listW-1, h)
+	right := detail(w-listW-1, h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+// entryShort / entryRow: list entries 0..len(machines)-1 are cloud machines, the rest are your own PCs.
+func (m *model) entryShort(i int) (string, string) {
+	if i < len(m.machines) {
+		return m.machines[i].Name(), statusPill(m.machines[i].Status)
+	}
+	e := perfEntry{local: &m.local[i-len(m.machines)]}
+	return e.name() + " (PC)", e.pill()
+}
+
+func (m *model) entryRow(i int, selected bool, w int) string {
+	if i < len(m.machines) {
+		return machineRow(m.machines[i], selected, w)
+	}
+	p := m.local[i-len(m.machines)]
+	e := perfEntry{local: &p}
+	l1 := truncate(p.Name, w-2)
+	l2 := e.pill() + sDim.Render(" local PC")
+	bar := lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌")
+	if selected {
+		return bar + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(l1) + "\n" + bar + " " + l2
+	}
+	return "  " + sText.Render(l1) + "\n  " + l2
+}
+
+// localDetail: one of your own PCs: what it is, then the same monitor the cloud machines get.
+func (m *model) localDetail(p *LocalMachine, w, h int) string {
+	e := perfEntry{local: p}
+	head := sBold.Render(p.Name) + "  " + e.pill()
+	info := []string{"Local PC"}
+	if p.LanIP != "" {
+		info = append(info, "LAN "+p.LanIP)
+	}
+	if v, ok := p.Status["sunshine"].(string); ok {
+		info = append(info, "Sunshine "+strings.ToLower(v))
+	}
+	if v, ok := p.Status["link"].(string); ok {
+		wired := "wired"
+		if wv, ok := p.Status["wired"].(bool); ok && !wv {
+			wired = "Wi-Fi"
+		}
+		info = append(info, wired+" "+v)
+	}
+	if p.LastSeenAt != "" {
+		info = append(info, "seen "+ago(p.LastSeenAt))
+	}
+	hd := head + "\n" + sDim.Render(truncate(strings.Join(info, " · "), w))
+	m.vp.Width, m.vp.Height = w, h-3
+	if m.vp.Height < 3 {
+		m.vp.Height = 3
+	}
+	var body string
+	if !p.Online {
+		body = sDim.Render("Offline: the GGGH agent on this PC is not reporting. Readings return when it is back.")
+	} else {
+		body = renderMonitor(m.localTele[p.ID], w-1, true, teleRanges[m.rangeIx].label)
+	}
+	m.vp.SetContent(body)
+	return hd + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + withMoreHint(m.vp)
 }
 
 // shapeFor: the catalog entry (GPU, vCPU, RAM) for a machine, when the launch options are loaded.
@@ -673,7 +749,7 @@ func (m *model) machineOpsView(s *Machine, w int) string {
 			b.WriteString("      " + sDim.Render(truncate(o.LastMessage, w-8)) + "\n")
 		}
 	}
-	b.WriteString("\n" + sDim.Render("Open the Activity screen (2) for full logs."))
+	b.WriteString("\n" + sDim.Render("Open the Activity screen (4) for full logs."))
 	return b.String()
 }
 
@@ -762,64 +838,6 @@ func (m *model) opViewView(w, h int) string {
 	return head + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + o.vp.View()
 }
 
-// ---- local PCs ------------------------------------------------------------------------------------
-
-func (m *model) localView(w, h int) string {
-	if len(m.local) == 0 {
-		return sDim.Render(strings.Join(wrap("No local PCs yet.\n\nA local PC is a gaming computer at home that you stream from. Add one in the web app (Machines → Your own PCs) and it reports here.", w), "\n"))
-	}
-	listW := 34
-	var l strings.Builder
-	l.WriteString(sectionTitle(fmt.Sprintf("YOUR OWN PCS (%d)", len(m.local))) + "\n\n")
-	for i, p := range m.local {
-		pl := pill("● ONLINE", gGreen)
-		if !p.Online {
-			pl = pill("○ OFFLINE", rgb{125, 135, 150})
-		}
-		name := truncate(p.Name, listW-6)
-		bar := lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌")
-		if i == m.lsel {
-			l.WriteString(bar + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(name) + "\n" + bar + " " + pl + "\n")
-		} else {
-			l.WriteString("  " + sText.Render(name) + "\n  " + pl + "\n")
-		}
-	}
-	p := m.local[m.lsel]
-	var d strings.Builder
-	d.WriteString(sBold.Render(p.Name) + "\n")
-	info := []string{}
-	if p.LanIP != "" {
-		info = append(info, "LAN "+p.LanIP)
-	}
-	if v, ok := p.Status["sunshine"].(string); ok {
-		info = append(info, "Sunshine "+strings.ToLower(v))
-	}
-	if v, ok := p.Status["link"].(string); ok {
-		wired := "wired"
-		if wv, ok := p.Status["wired"].(bool); ok && !wv {
-			wired = "Wi-Fi"
-		}
-		info = append(info, wired+" "+v)
-	}
-	if p.LastSeenAt != "" {
-		info = append(info, "seen "+ago(p.LastSeenAt))
-	}
-	d.WriteString(sDim.Render(strings.Join(info, " · ")) + "\n\n")
-	if w < 100 {
-		d.WriteString(renderMonitor(m.localTele[p.ID], w-1, true, teleRanges[m.rangeIx].label))
-		m.lvp.Width, m.lvp.Height = w, h-len(m.local)*2-2
-		if m.lvp.Height < 3 {
-			m.lvp.Height = 3
-		}
-		m.lvp.SetContent(d.String())
-		return l.String() + "\n" + withMoreHint(m.lvp)
-	}
-	d.WriteString(renderMonitor(m.localTele[p.ID], w-listW-4, true, teleRanges[m.rangeIx].label))
-	m.lvp.Width, m.lvp.Height = w-listW-2, h
-	m.lvp.SetContent(d.String())
-	return lipgloss.JoinHorizontal(lipgloss.Top, panel.Width(listW-2).Height(h-2).Render(strings.TrimRight(l.String(), "\n")), " ", withMoreHint(m.lvp))
-}
-
 // ---- prompts and help ------------------------------------------------------------------------------
 
 func (m *model) promptView() string {
@@ -851,10 +869,11 @@ func (m *model) promptView() string {
 
 func (m *model) helpView() string {
 	rows := [][2]string{
-		{"1-5", "Machines · Activity · Local PCs · Costs & billing · Regions & quotas"},
+		{"1-6", "Dashboard · Machines · Performance · Activity · Costs & billing · Regions & quotas"},
 		{"f", "show or hide failed machines (hidden by default)"},
 		{"n", "launch a new machine (what is it for? → size → tools)"},
-		{"↑ ↓  j k", "choose a machine"},
+		{"↑ ↓  j k", "choose a machine (cloud machines and your own PCs share one list)"},
+		{"enter", "Performance: open that machine on Machines"},
 		{"← →  tab", "Monitor · Connect · Info · Activity tabs"},
 		{"w", "monitor window: 15 min · 1 h · 6 h · 24 h"},
 		{"s / x", "start a stopped machine / stop a running one"},

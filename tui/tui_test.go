@@ -43,6 +43,7 @@ func newHarness(t *testing.T, w, h int) *harness {
 	os.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	os.Setenv("HOME", t.TempDir())
 	m := newModel(NewDemo(), config{API: "demo"}, true)
+	m.screen = scrMachines // most tests start on the Machines screen
 	hr := &harness{t: t, m: m}
 	hr.send(tea.WindowSizeMsg{Width: w, Height: h})
 	hr.exec(m.Init())
@@ -119,7 +120,7 @@ func TestLoginThenMachines(t *testing.T) {
 	h.poll()
 	v := h.view()
 	show(t, "machines (monitor)", v)
-	for _, want := range []string{"SCUDRACE-ADELAIDE-DEV", "running", "AWS-VIRGINIA-T4", "stopped", "shelved", "GPU LOAD", "CONNECTION TO YOU", "CPU-bound", "Streaming now", "2560×1440", "MACHINES (3)"} {
+	for _, want := range []string{"SCUDRACE-ADELAIDE-DEV", "running", "AWS-VIRGINIA-T4", "stopped", "shelved", "GPU LOAD", "CONNECTION TO YOU", "CPU-bound", "Streaming now", "2560×1440", "MACHINES (4)"} {
 		if !strings.Contains(strings.ToLower(v), strings.ToLower(want)) {
 			t.Errorf("machines view lacks %q", want)
 		}
@@ -316,7 +317,7 @@ func TestActivityScreenAndOpLog(t *testing.T) {
 	h.key("down")
 	h.key("s")
 	h.key("y")
-	h.key("2")
+	h.key("4")
 	h.poll()
 	show(t, "activity", h.view())
 	if !strings.Contains(h.view(), "Start AWS-VIRGINIA-T4") {
@@ -402,13 +403,20 @@ func TestLocalPCs(t *testing.T) {
 	h := newHarness(t, 140, 40)
 	h.m.authed = true
 	h.exec(h.m.afterLogin())
-	h.key("3")
+	h.key("2")
+	h.poll()
+	for i := 0; i < 3; i++ { // past the three cloud machines: your own PCs share the list
+		h.key("down")
+	}
 	h.poll()
 	h.poll()
 	v := h.view()
 	show(t, "local", v)
 	if !strings.Contains(v, "Big Gaming PC") || !strings.Contains(v, "ONLINE") || !strings.Contains(v, "GPU LOAD") {
-		t.Error("local screen incomplete")
+		t.Error("local PC detail incomplete on the Machines screen")
+	}
+	if !strings.Contains(strings.Join(h.m.footerLines(), "\n"), "window") {
+		t.Error("local PC hints missing")
 	}
 }
 
@@ -471,7 +479,7 @@ func TestCostsPage(t *testing.T) {
 	h := newHarness(t, 150, 50)
 	h.m.authed = true
 	h.exec(h.m.afterLogin())
-	h.key("4")
+	h.key("5")
 	h.poll()
 	h.poll()
 	v := h.m.costsContent(146)
@@ -492,7 +500,7 @@ func TestRegionsPage(t *testing.T) {
 	h := newHarness(t, 150, 50)
 	h.m.authed = true
 	h.exec(h.m.afterLogin())
-	h.key("5")
+	h.key("6")
 	h.poll()
 	h.poll()
 	v := h.view()
@@ -527,5 +535,60 @@ func TestRegionsPage(t *testing.T) {
 	h.key("right")
 	if !strings.Contains(h.view(), "isn't connected") {
 		t.Error("unconnected cloud not explained")
+	}
+}
+
+func TestDashboardAndPerformance(t *testing.T) {
+	for _, size := range [][2]int{{150, 50}, {120, 36}, {80, 30}} {
+		h := newHarness(t, size[0], size[1])
+		h.m.authed = true
+		h.exec(h.m.afterLogin())
+		h.key("1")
+		h.poll()
+		h.poll()
+		h.poll()
+		v := h.view()
+		show(t, fmt.Sprintf("dashboard %d", size[0]), v)
+		if !strings.Contains(v, "Dash") {
+			t.Errorf("%d: no Dashboard tab", size[0])
+		}
+		content := h.m.dashContent(size[0] - 1)
+		for _, want := range []string{"RUNNING NOW", "THIS MONTH", "STANDING COST", "LEFTOVERS", "GPU LOAD (AVG)", "STREAMING NOW", "ACTIVE MACHINES", "SCUDRACE-ADELAIDE-DEV", "NEEDS ATTENTION", "RECENT ACTIVITY"} {
+			if !strings.Contains(strings.ToUpper(content), want) {
+				t.Errorf("%d: dashboard lacks %q", size[0], want)
+			}
+		}
+		for i, l := range strings.Split(v, "\n") {
+			if w := lenCells(l); w > size[0] {
+				t.Errorf("dashboard %d: line %d is %d cells", size[0], i, w)
+			}
+		}
+		h.key("3")
+		h.poll()
+		h.poll()
+		pv := h.view()
+		show(t, fmt.Sprintf("performance %d", size[0]), pv)
+		for _, want := range []string{"PERFORMANCE", "SCUDRACE-ADELAIDE-DEV", "GPU"} {
+			if !strings.Contains(strings.ToUpper(pv), want) {
+				t.Errorf("%d: performance lacks %q", size[0], want)
+			}
+		}
+		for i, l := range strings.Split(pv, "\n") {
+			if w := lenCells(l); w > size[0] {
+				t.Errorf("performance %d: line %d is %d cells", size[0], i, w)
+			}
+		}
+		// the local PC is on Performance too, and enter opens the machine on Machines
+		for i := 0; i < 5; i++ {
+			h.key("down")
+		}
+		h.poll()
+		if !strings.Contains(h.m.pvp.View()+h.view(), "Big Gaming PC") {
+			t.Errorf("%d: local PC missing from Performance", size[0])
+		}
+		h.key("enter")
+		if h.m.screen != scrMachines || h.m.selectedLocal() == nil {
+			t.Errorf("%d: enter should open the local PC on Machines (screen %d)", size[0], h.m.screen)
+		}
 	}
 }

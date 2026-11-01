@@ -16,9 +16,10 @@ import (
 type screenID int
 
 const (
-	scrMachines screenID = iota
+	scrDashboard screenID = iota
+	scrMachines
+	scrPerf
 	scrActivity
-	scrLocal
 	scrCosts
 	scrRegions
 	scrWizard
@@ -151,7 +152,6 @@ type model struct {
 	mops        map[string][]OpSummary
 	showPass    bool
 	vp          viewport.Model
-	lvp         viewport.Model
 
 	ops   []OpSummary
 	opSel int
@@ -168,9 +168,12 @@ type model struct {
 	readyOnly      bool
 	rvp            viewport.Model
 
-	local     []LocalMachine
-	lsel      int
+	local     []LocalMachine // your own PCs: listed with the cloud machines (Machines, Performance, Dashboard)
 	localTele map[string]*Telemetry
+	psel      int // selected card on Performance
+	pvp       viewport.Model
+	dvp       viewport.Model
+	inv       *Inventory // dashboard: live standing costs and leftovers
 
 	options *Options
 	wiz     *wizard
@@ -197,7 +200,7 @@ func newModel(be Backend, cfg config, demo bool) *model {
 		tele: map[string]*Telemetry{}, teleErr: map[string]string{}, conn: map[string]*Connection{}, mops: map[string][]OpSummary{},
 		localTele: map[string]*Telemetry{}, last: map[string]time.Time{}, inflight: map[string]bool{},
 		rangeIx: 0, login: newLogin(),
-		vp: viewport.New(60, 20), lvp: viewport.New(60, 20), cvp: viewport.New(60, 20), rvp: viewport.New(60, 20),
+		vp: viewport.New(60, 20), pvp: viewport.New(60, 20), dvp: viewport.New(60, 20), cvp: viewport.New(60, 20), rvp: viewport.New(60, 20),
 	}
 }
 
@@ -331,6 +334,24 @@ func (m *model) selected() *Machine {
 	return nil
 }
 
+// selectedLocal: the highlighted entry when it is one of your own PCs (they follow the cloud machines in the list).
+func (m *model) selectedLocal() *LocalMachine {
+	i := m.sel - len(m.machines)
+	if i >= 0 && i < len(m.local) {
+		return &m.local[i]
+	}
+	return nil
+}
+
+// entries: how many rows the Machines list has (cloud machines, then your own PCs).
+func (m *model) entries() int { return len(m.machines) + len(m.local) }
+
+func (m *model) clampSel() {
+	if m.sel >= m.entries() {
+		m.sel = max(0, m.entries()-1)
+	}
+}
+
 func (m *model) anyBusy() bool {
 	for _, x := range m.machines {
 		if x.Busy() {
@@ -440,9 +461,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inflight["local"] = false
 		if msg.err == nil {
 			m.local = msg.l
-			if m.lsel >= len(m.local) {
-				m.lsel = max(0, len(m.local)-1)
-			}
+			m.clampSel()
+		}
+		return m, nil
+	case invMsg:
+		m.inflight["inv"] = false
+		if msg.err == nil {
+			m.inv = msg.inv
 		}
 		return m, nil
 	case optionsMsg:
@@ -539,9 +564,7 @@ func (m *model) onMachines(msg machinesMsg) tea.Cmd {
 			m.sel = i
 		}
 	}
-	if m.sel >= len(m.machines) {
-		m.sel = max(0, len(m.machines)-1)
-	}
+	m.clampSel()
 	return nil
 }
 
@@ -590,12 +613,47 @@ func (m *model) pollDue() tea.Cmd {
 		m.inflight["spend"] = true
 		cmds = append(cmds, m.cmdSpend())
 	}
+	if m.due("local", 10*time.Second) {
+		m.inflight["local"] = true
+		cmds = append(cmds, m.cmdLocal())
+	}
+	// teleFor: refresh one machine's telemetry when due
+	teleFor := func(id string, local bool, every time.Duration) {
+		if m.due("tele:"+id, every) {
+			m.inflight["tele:"+id] = true
+			cmds = append(cmds, m.cmdTele(id, local))
+		}
+	}
 	switch m.screen {
+	case scrDashboard, scrPerf:
+		// everything that is on: its numbers feed the cards
+		for _, x := range m.machines {
+			if x.Status == "running" {
+				teleFor(x.ID, false, 10*time.Second)
+			}
+		}
+		for _, p := range m.local {
+			if p.Online {
+				teleFor(p.ID, true, 10*time.Second)
+			}
+		}
+		if m.screen == scrDashboard {
+			if m.due("inv", 60*time.Second) {
+				m.inflight["inv"] = true
+				cmds = append(cmds, m.cmdInv())
+			}
+			if m.due("ops:", 5*time.Second) {
+				m.inflight["ops:"] = true
+				cmds = append(cmds, m.cmdOps(""))
+			}
+		}
 	case scrMachines:
+		if p := m.selectedLocal(); p != nil && p.Online {
+			teleFor(p.ID, true, 5*time.Second)
+		}
 		if s := m.selected(); s != nil {
-			if s.Status == "running" && m.due("tele:"+s.ID, 5*time.Second) { // also feeds the hardware cards
-				m.inflight["tele:"+s.ID] = true
-				cmds = append(cmds, m.cmdTele(s.ID, false))
+			if s.Status == "running" {
+				teleFor(s.ID, false, 5*time.Second) // also feeds the hardware cards
 			}
 			needConn := m.detail == tabConnect || s.Busy() || (s.Status == "running" && m.conn[s.ID] == nil)
 			if (s.Status == "running" || s.Busy() || s.Status == "stopped") && needConn && m.due("conn:"+s.ID, 5*time.Second) {
@@ -625,18 +683,6 @@ func (m *model) pollDue() tea.Cmd {
 		if m.due("regions", 5*time.Minute) {
 			m.inflight["regions"] = true
 			cmds = append(cmds, m.cmdRegions(false))
-		}
-	case scrLocal:
-		if m.due("local", 10*time.Second) {
-			m.inflight["local"] = true
-			cmds = append(cmds, m.cmdLocal())
-		}
-		if len(m.local) > 0 && m.lsel < len(m.local) {
-			id := m.local[m.lsel].ID
-			if m.due("tele:"+id, 10*time.Second) {
-				m.inflight["tele:"+id] = true
-				cmds = append(cmds, m.cmdTele(id, true))
-			}
 		}
 	}
 	return tea.Batch(cmds...)
@@ -679,21 +725,24 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 		return m, nil
 	case "1":
-		m.screen = scrMachines
+		m.screen = scrDashboard
+		m.last["inv"] = time.Time{}
 		return m, nil
 	case "2":
+		m.screen = scrMachines
+		return m, nil
+	case "3":
+		m.screen = scrPerf
+		return m, nil
+	case "4":
 		m.screen = scrActivity
 		m.last["ops:"] = time.Time{}
 		return m, nil
-	case "3":
-		m.screen = scrLocal
-		m.last["local"] = time.Time{}
-		return m, nil
-	case "4":
+	case "5":
 		m.screen = scrCosts
 		m.last["costs"] = time.Time{}
 		return m, nil
-	case "5":
+	case "6":
 		m.screen = scrRegions
 		m.last["regions"] = time.Time{}
 		return m, nil
@@ -715,12 +764,14 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 	}
 	switch m.screen {
+	case scrDashboard:
+		return m.dashKey(k)
 	case scrMachines:
 		return m.machinesKey(k)
+	case scrPerf:
+		return m.perfKey(k)
 	case scrActivity:
 		return m.activityKey(k)
-	case scrLocal:
-		return m.localKey(k)
 	case scrCosts:
 		return m.costsKey(k)
 	case scrRegions:
@@ -812,6 +863,24 @@ func (m *model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := m.selected()
+	if m.selectedLocal() != nil { // your own PCs: choose, scroll, change the window; no cloud actions apply
+		switch k.String() {
+		case "w":
+			m.rangeIx = (m.rangeIx + 1) % len(teleRanges)
+			m.last = dropKeys(m.last, "tele:")
+			m.setNotice("Monitor window: "+teleRanges[m.rangeIx].label, false)
+			return m, nil
+		case "r":
+			m.refreshNow()
+			return m, nil
+		case "f":
+			// handled below like a cloud machine's filter toggle
+		case "up", "k", "down", "j", "pgdown", "ctrl+d", "J", "pgup", "ctrl+u", "K":
+			// handled below
+		default:
+			return m, nil
+		}
+	}
 	switch k.String() {
 	case "up", "k":
 		if m.sel > 0 {
@@ -819,11 +888,14 @@ func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.vp.GotoTop()
 		}
 	case "down", "j":
-		if m.sel < len(m.machines)-1 {
+		if m.sel < m.entries()-1 {
 			m.sel++
 			m.vp.GotoTop()
 		}
 	case "right", "tab", "l":
+		if m.selectedLocal() != nil {
+			return m, nil
+		}
 		m.detail = (m.detail + 1) % 4
 		m.vp.GotoTop()
 		m.last = dropKeys(m.last, "conn:", "ops:", "tele:")
@@ -955,9 +1027,7 @@ func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		m.showFailed = !m.showFailed
 		m.applyMachineFilter()
-		if m.sel >= len(m.machines) {
-			m.sel = max(0, len(m.machines)-1)
-		}
+		m.clampSel()
 		m.setNotice(map[bool]string{true: "Showing failed machines too.", false: "Failed machines hidden."}[m.showFailed], false)
 	case "a":
 		m.detail = tabActivity
@@ -1005,7 +1075,7 @@ func (m *model) opViewKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "q", "left", "h", "backspace":
 		m.opv = nil
 		return m, nil
-	case "1":
+	case "2":
 		m.opv, m.screen = nil, scrMachines
 		return m, nil
 	case "up", "k":
@@ -1018,29 +1088,6 @@ func (m *model) opViewKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.opv.vp.HalfViewDown()
 	case "G":
 		m.opv.vp.GotoBottom()
-	}
-	return m, nil
-}
-
-func (m *model) localKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch k.String() {
-	case "up", "k":
-		if m.lsel > 0 {
-			m.lsel--
-		}
-	case "down", "j":
-		if m.lsel < len(m.local)-1 {
-			m.lsel++
-		}
-	case "w":
-		m.rangeIx = (m.rangeIx + 1) % len(teleRanges)
-		m.last = dropKeys(m.last, "tele:")
-	case "pgdown", "ctrl+d", "J":
-		m.lvp.HalfViewDown()
-	case "pgup", "ctrl+u", "K":
-		m.lvp.HalfViewUp()
-	case "r":
-		m.refreshNow()
 	}
 	return m, nil
 }
