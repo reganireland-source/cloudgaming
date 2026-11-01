@@ -9,6 +9,8 @@
  *   GET  /virtual-display.ps1  installs a virtual display driver (for Headless mode; no secrets)
  *   GET  /install.ps1   the installer (no secrets in it; the token is passed on its command line)
  *   GET  /agent.ps1     the agent (it fetches newer copies of itself from here, checked against a SHA-256 GGGH sends)
+ *   GET  /install.sh    the same for macOS / Linux (run as root; token on its command line)
+ *   GET  /agent.sh      the macOS / Linux agent (self-updates the same way)
  *   GET  /boot.ps1      the small wrapper that keeps the agent running and rolls a bad update back
  *   POST /heartbeat     agent: "still here" during long jobs
  *   POST /report        agent: { commandId, kind, data } what it measured
@@ -22,6 +24,7 @@
 
 import { Router, Request, Response } from 'express';
 import { agentPoll, agentResult, launcherScreen, agentHeartbeat, agentReport, agentLive, launcherAddress } from '../../services/LocalMachineService';
+import { AGENT_SH, INSTALL_SH } from '../../providers/shared/localAgentUnix';
 import { AGENT_PS1, BOOT_PS1, INSTALL_PS1, VDISPLAY_PS1 } from '../../providers/shared/localAgent';
 
 const router = Router();
@@ -30,6 +33,8 @@ const bearer = (req: Request) => String(req.headers.authorization || '').replace
 router.get('/install.ps1', (_req, res) => { res.type('text/plain').send(INSTALL_PS1); });
 router.get('/virtual-display.ps1', (_req, res) => { res.type('text/plain').send(VDISPLAY_PS1); });
 router.get('/agent.ps1', (_req, res) => { res.type('text/plain').send(AGENT_PS1); });
+router.get('/install.sh', (_req, res) => { res.type('text/plain').send(INSTALL_SH); });
+router.get('/agent.sh', (_req, res) => { res.type('text/plain').send(AGENT_SH); });
 router.get('/boot.ps1', (_req, res) => { res.type('text/plain').send(BOOT_PS1); });
 
 router.post('/poll', async (req: Request, res: Response) => {

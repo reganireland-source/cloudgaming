@@ -48,6 +48,11 @@ function installCommand(api: string, token: string): string {
   return `& ([scriptblock]::Create((irm '${api}/local-agent/install.ps1'))) -Token '${token}' -Api '${api}'`;
 }
 
+/** The same for macOS / Linux, run in a terminal on the machine (sudo asks for its password). */
+function installCommandUnix(api: string, token: string): string {
+  return `curl -fsSL '${api}/local-agent/install.sh' | sudo bash -s -- --token '${token}' --api '${api}'`;
+}
+
 const noStore = (res: Response) => res.set('Cache-Control', 'no-store');
 
 router.get('/', async (req: Request, res: Response) => {
@@ -58,7 +63,7 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     noStore(res);
     const { machine, agentToken } = await createLocalMachine(req.userId!, req.body || {});
-    res.status(201).json({ machine, agentToken, installCommand: installCommand(publicApi(req), agentToken) });
+    res.status(201).json({ machine, agentToken, installCommand: installCommand(publicApi(req), agentToken), installCommandUnix: installCommandUnix(publicApi(req), agentToken) });
   } catch (e) { sendRouteError(res, e, 'Failed to add the local machine'); }
 });
 
@@ -74,7 +79,7 @@ router.post('/:id/token', async (req: Request, res: Response) => {
   try {
     noStore(res);
     const agentToken = await rotateAgentToken(req.userId!, req.params.id);
-    res.json({ agentToken, installCommand: installCommand(publicApi(req), agentToken) });
+    res.json({ agentToken, installCommand: installCommand(publicApi(req), agentToken), installCommandUnix: installCommandUnix(publicApi(req), agentToken) });
   } catch (e) { sendRouteError(res, e, 'Failed to make a new token'); }
 });
 

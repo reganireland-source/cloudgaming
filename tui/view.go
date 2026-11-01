@@ -178,7 +178,7 @@ func wrapHints(pairs [][2]string, w int) []string {
 }
 
 func (m *model) hintPairs() [][2]string {
-	global := [][2]string{{"1-6", "screens"}, {"n", "new machine"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
+	global := [][2]string{{"1-6", "screens"}, {"n", "new machine"}, {"P", "make this a local PC"}, {"ctrl+r", "refresh"}, {"?", "help"}, {"L", "sign out"}, {"q", "quit"}}
 	switch {
 	case m.prompt != nil:
 		switch m.prompt.kind {
@@ -872,6 +872,7 @@ func (m *model) helpView() string {
 		{"1-6", "Dashboard · Machines · Performance · Activity · Costs & billing · Regions & quotas"},
 		{"f", "show or hide failed machines (hidden by default)"},
 		{"n", "launch a new machine (what is it for? → size → tools)"},
+		{"P", "make THIS computer a local GGGH PC (adds it and installs the agent here)"},
 		{"↑ ↓  j k", "choose a machine (cloud machines and your own PCs share one list)"},
 		{"enter", "Performance: open that machine on Machines"},
 		{"← →  tab", "Monitor · Connect · Info · Activity tabs"},

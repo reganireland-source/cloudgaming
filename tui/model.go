@@ -457,6 +457,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case addLocalMsg:
+		return m, m.onAddLocal(msg)
+	case installDoneMsg:
+		return m, m.onInstallDone(msg)
 	case localMsg:
 		m.inflight["local"] = false
 		if msg.err == nil {
@@ -748,6 +752,8 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "n":
 		return m, m.openWizard()
+	case "P":
+		return m, m.startMakeLocal()
 	case "ctrl+r", "f5":
 		m.refreshNow()
 		return m, nil

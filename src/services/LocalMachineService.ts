@@ -30,6 +30,7 @@ import { MachineRequestError } from './MachineService';
 import { encryptCredentials, decryptCredentials, encryptionReady } from './CredentialService';
 import { SUNSHINE_SETTINGS, evaluateReport, reportText, stats } from './LocalDiagnostics';
 import { AGENT_SHA256, BOOT_SHA256 } from '../providers/shared/localAgent';
+import { AGENT_SH_SHA256 } from '../providers/shared/localAgentUnix';
 import { alertsFor } from './TelemetryService';
 
 const hash = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
@@ -270,6 +271,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export function updatesFor(st: any): Array<{ file: 'agent' | 'boot'; sha256: string }> {
   if (!st || st.canUpdate !== true) return [];
+  if (st.platform === 'macos' || st.platform === 'linux') { // the bash agent: one file, no boot wrapper
+    return typeof st.agentSha === 'string' && st.agentSha.toLowerCase() !== AGENT_SH_SHA256 ? [{ file: 'agent', sha256: AGENT_SH_SHA256 }] : [];
+  }
   const out: Array<{ file: 'agent' | 'boot'; sha256: string }> = [];
   if (typeof st.agentSha === 'string' && st.agentSha.toLowerCase() !== AGENT_SHA256) out.push({ file: 'agent', sha256: AGENT_SHA256 });
   if (typeof st.bootSha === 'string' && st.bootSha.toLowerCase() !== BOOT_SHA256) out.push({ file: 'boot', sha256: BOOT_SHA256 });

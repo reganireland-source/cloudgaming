@@ -191,6 +191,12 @@ func (h *HTTPBackend) LocalMachines() ([]LocalMachine, error) {
 	return out, err
 }
 
+func (h *HTTPBackend) AddLocalMachine(name string) (*NewLocalPC, error) {
+	var out NewLocalPC
+	err := h.call("POST", "/local-machines", map[string]any{"name": name}, &out)
+	return &out, err
+}
+
 func (h *HTTPBackend) Inventory(refresh bool) (*Inventory, error) {
 	var out Inventory
 	err := h.call("GET", "/inventory"+map[bool]string{true: "?refresh=true", false: ""}[refresh], nil, &out)

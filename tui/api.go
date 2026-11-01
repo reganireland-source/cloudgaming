@@ -400,6 +400,8 @@ type Backend interface {
 	Operations(limit int, machineID string) ([]OpSummary, error)
 	Operation(id string, after int) (*Operation, error)
 	LocalMachines() ([]LocalMachine, error)
+	// AddLocalMachine registers this computer as a local PC; the result carries the install command (macOS / Linux).
+	AddLocalMachine(name string) (*NewLocalPC, error)
 	// costs, billing and quotas
 	Inventory(refresh bool) (*Inventory, error)
 	CostsDaily(days int) ([]CostDay, error)

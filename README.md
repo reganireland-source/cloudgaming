@@ -57,6 +57,13 @@ A multi-cloud gaming infrastructure platform that enables cost-optimized game st
 and Linux: monitor machines live, start / stop / shelve / restore, launch new ones, pair Moonlight and watch
 every operation. Install: `brew tap reganireland-source/gggh https://github.com/reganireland-source/cloudgaming && brew install gggh-tui`, then `gggh-tui --demo` (no login). See [tui/README.md](tui/README.md).
 
+## Local PCs on Windows, macOS and Linux
+
+Your own computers can be controlled from the web app and the TUI. Windows uses the PowerShell agent; **macOS and Linux use a bash agent** (needs `curl` and `jq`, installed for you where possible; Sunshine is installed via Homebrew on macOS and Flatpak on Linux). It supports status/telemetry, sleep, restart, shutdown, Sunshine restart and Moonlight pairing; display modes, diagnostics, tuning and remote scripts are Windows-only for now.
+
+- **Web:** Machines → Local machines → **Make this a local GGGH PC** (picks your OS, gives a one-line command to paste into a terminal on that computer).
+- **TUI:** press **P**. It adds this computer and runs the installer right in your terminal (asks for your sudo password).
+
 ## Architecture
 
 ```

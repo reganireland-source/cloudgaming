@@ -124,7 +124,7 @@ function LocalCard({ m, onChanged }: { m: LocalMachine; onChanged: () => void })
   };
   const rotate = async () => {
     setBusy('token');
-    try { const r = await apiFetch<{ installCommand: string }>(`/local-machines/${m.id}/token`, { method: 'POST' }); setNewToken(r.installCommand); setConfirm(null); }
+    try { const r = await apiFetch<{ installCommand: string; installCommandUnix: string }>(`/local-machines/${m.id}/token`, { method: 'POST' }); setNewToken(m.status?.platform === 'macos' || m.status?.platform === 'linux' ? r.installCommandUnix : r.installCommand); setConfirm(null); }
     catch (e) { setNote({ ok: false, text: errText(e) }); } finally { setBusy(null); }
   };
 
@@ -498,6 +498,17 @@ function LogPanel({ id }: { id: string }) {
   );
 }
 
+type PcOs = 'windows' | 'macos' | 'linux';
+const OS_LABEL: Record<PcOs, string> = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+
+/** The computer this browser is running on (best effort: it only picks the default; the form lets you change it). */
+function detectOs(): PcOs {
+  const ua = typeof navigator === 'undefined' ? '' : `${navigator.userAgent} ${navigator.platform || ''}`;
+  if (/Mac/i.test(ua) && !/iPhone|iPad/i.test(ua)) return 'macos';
+  if (/Linux|X11/i.test(ua) && !/Android/i.test(ua)) return 'linux';
+  return 'windows';
+}
+
 export default function LocalMachines() {
   const [list, setList] = useState<LocalMachine[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -506,7 +517,8 @@ export default function LocalMachines() {
   const [mac, setMac] = useState('');
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ id: string; name: string; installCommand: string } | null>(null);
+  const [pcOs, setPcOs] = useState<PcOs>('windows');
+  const [created, setCreated] = useState<{ id: string; name: string; os: PcOs; installCommand: string } | null>(null);
 
   const load = useCallback(() => {
     apiFetch<LocalMachine[]>('/local-machines').then((l) => { setList(l); setLoadError(null); }).catch((e) => setLoadError(errText(e)));
@@ -517,8 +529,8 @@ export default function LocalMachines() {
   const add = async () => {
     setSaving(true); setFormErr(null);
     try {
-      const r = await apiFetch<{ machine: LocalMachine; installCommand: string }>('/local-machines', { method: 'POST', body: { name, mac: mac || undefined } });
-      setCreated({ id: r.machine.id, name: r.machine.name, installCommand: r.installCommand });
+      const r = await apiFetch<{ machine: LocalMachine; installCommand: string; installCommandUnix: string }>('/local-machines', { method: 'POST', body: { name, mac: mac || undefined } });
+      setCreated({ id: r.machine.id, name: r.machine.name, os: pcOs, installCommand: pcOs === 'windows' ? r.installCommand : r.installCommandUnix });
       setAdding(false); setName(''); setMac(''); load();
     } catch (e) { setFormErr(errText(e)); } finally { setSaving(false); }
   };
@@ -529,14 +541,25 @@ export default function LocalMachines() {
     <section className="space-y-3" aria-label="Local machines">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="label">Local machines <span className="normal-case tracking-normal text-slate-500">— a PC at home that you control from here</span></h2>
-        {!adding && <button type="button" className="btn-neon text-xs" onClick={() => { setAdding(true); setCreated(null); }}>+ Add a PC</button>}
+        {!adding && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-neon text-xs" onClick={() => { const o = detectOs(); setPcOs(o); setName(`My ${OS_LABEL[o]} PC`); setAdding(true); setCreated(null); }}>Make this a local GGGH PC</button>
+            <button type="button" className="btn-neon text-xs" onClick={() => { setPcOs('windows'); setName(''); setAdding(true); setCreated(null); }}>+ Add another PC</button>
+          </div>
+        )}
       </div>
 
       {loadError && <p className="text-xs text-neon-amber">⚠ {loadError} {loadError.includes('404') || /relation|redeploy/i.test(loadError) ? '' : 'If the app was just updated, redeploy the backend.'}</p>}
 
       {adding && (
         <div className="neon-card rounded-lg border border-white/10 p-4 space-y-3 text-xs">
-          <p className="text-slate-300">Add a Windows PC that streams with Sunshine. A small agent on it connects out to GGGH (nothing is opened on your router) so GGGH can see it and control it from here.</p>
+          <p className="text-slate-300">Add a Windows, macOS or Linux machine that streams with Sunshine. A small agent on it connects out to GGGH (nothing is opened on your router) so GGGH can see it and control it from here. Which computer is it?</p>
+          <div className="flex gap-2" role="radiogroup" aria-label="Operating system">
+            {(['windows', 'macos', 'linux'] as PcOs[]).map((o) => (
+              <button key={o} type="button" role="radio" aria-checked={pcOs === o} className={`px-3 py-1 rounded border ${pcOs === o ? 'border-neon-cyan text-neon-cyan' : 'border-white/10 text-slate-400 hover:text-slate-200'}`} onClick={() => setPcOs(o)}>{OS_LABEL[o]}</button>
+            ))}
+          </div>
+          {pcOs !== 'windows' && <p className="text-slate-500">Run the install command in a terminal <em>on that computer</em> (a browser can't install software). It needs your password once (sudo). Not on that computer right now? Add it here and run the command there later.</p>}
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="space-y-1"><span className="label">Name</span><input className="input-neon px-2 py-1 text-xs w-full" value={name} maxLength={40} placeholder="Gaming PC" onChange={(e) => setName(e.target.value)} /></label>
             <label className="space-y-1"><span className="label">MAC address (optional — the PC reports it itself)</span><input className="input-neon px-2 py-1 text-xs w-full" value={mac} placeholder="AA:BB:CC:DD:EE:FF" onChange={(e) => setMac(e.target.value)} /></label>
@@ -554,7 +577,9 @@ export default function LocalMachines() {
           {connected
             ? <p className="text-neon-lime">✓ {created.name} is connected. You can use it below.{' '}<button type="button" className="text-slate-400 hover:text-slate-200 underline" onClick={() => setCreated(null)}>Hide this</button></p>
             : <>
-              <p className="text-slate-100"><strong>Now connect {created.name}.</strong> On the PC (Windows 11): right-click Start → <strong>Terminal (Admin)</strong>, paste this and press Enter. It installs Sunshine if needed and starts the agent.</p>
+              <p className="text-slate-100"><strong>Now connect {created.name}.</strong> {created.os === 'windows'
+                ? <>On the PC (Windows 11): right-click Start → <strong>Terminal (Admin)</strong>, paste this and press Enter.</>
+                : <>On the {OS_LABEL[created.os]} computer: open <strong>Terminal</strong>, paste this and press Enter (it asks for your password).</>} It installs Sunshine if needed and starts the agent.</p>
               <CopyBox text={created.installCommand} />
               <p className="text-slate-500">Shown only now: it holds a private key for this PC. This panel updates by itself when the PC connects.</p>
               <p className="text-slate-500 animate-pulse">Waiting for the PC to connect…</p>

@@ -437,6 +437,10 @@ func (d *DemoBackend) LocalMachines() ([]LocalMachine, error) {
 		Status: map[string]any{"sunshine": "Running", "streaming": false, "wired": true, "link": "1000 Mbit/s", "gpu": map[string]any{"name": "RTX 4070", "util": 1.0, "tempC": 51.0}}}}, nil
 }
 
+func (d *DemoBackend) AddLocalMachine(name string) (*NewLocalPC, error) {
+	return &NewLocalPC{Machine: LocalMachine{ID: "l-demo-2", Name: name}}, nil
+}
+
 func titleCase(s string) string {
 	if s == "" {
 		return s
