@@ -142,10 +142,10 @@ func (m *model) perfEntries() []perfEntry {
 		}
 		out = append(out, perfEntry{cloud: x})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].on() && !out[j].on() })
 	for i := range m.local {
 		out = append(out, perfEntry{local: &m.local[i]})
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].on() && !out[j].on() }) // what is on comes first
 	return out
 }
 
@@ -422,7 +422,7 @@ func firstLine(s string) string {
 	return s
 }
 
-func (m *model) perfView(w, h int) string {
+func (m *model) perfCardsView(w, h int) string {
 	if !m.loaded {
 		return m.spin.View() + " loading your machines…"
 	}
@@ -751,4 +751,131 @@ func (m *model) recentActivity(w int) string {
 		rows = append(rows, truncateAnsi(opRow(o, false, w-2), w))
 	}
 	return title + sDim.Render("  (4 opens all)") + "\n" + strings.Join(rows, "\n")
+}
+
+// ---- Performance: verbose for what is on, one line for the rest --------------------------------------------
+
+// inactiveLine: a machine that is not running, as one line.
+func (m *model) inactiveLine(e perfEntry, selected bool, w int) string {
+	bar := "  "
+	name := sText.Render(pad(truncate(e.name(), 24), 25))
+	if selected {
+		bar = lipgloss.NewStyle().Foreground(gCyan.color()).Render("▌ ")
+		name = sBold.Render(pad(truncate(e.name(), 24), 25))
+	}
+	return truncateAnsi(bar+name+e.pill()+sDim.Render("  "+e.where()), w)
+}
+
+// perfView gives the machines that are on as much of the screen as they can use, split evenly:
+// one running machine gets nearly every reading, two get half each, and so on. Machines that are
+// off shrink to a line each at the bottom. With too many running for that, it falls back to cards.
+func (m *model) perfView(w, h int) string {
+	if !m.loaded {
+		return m.spin.View() + " loading your machines…"
+	}
+	es := m.perfEntries()
+	if len(es) == 0 {
+		return sDim.Render(strings.Join(wrap("No machines yet. Press n to launch one: it shows here with live GPU, CPU, memory and network readings.", w), "\n"))
+	}
+	if m.psel >= len(es) {
+		m.psel = len(es) - 1
+	}
+	nA := 0
+	for _, e := range es {
+		if e.on() {
+			nA++
+		}
+	}
+	rest := es[nA:]
+
+	// the lines under the active panels: one per machine that is off
+	restCap := 5
+	if nA == 0 {
+		restCap = max(3, h-4)
+	}
+	var restLines []string
+	if len(rest) > 0 {
+		sel := m.psel - nA
+		start := 0
+		if sel >= restCap {
+			start = sel - restCap + 1
+		}
+		for i := start; i < len(rest) && i < start+restCap; i++ {
+			restLines = append(restLines, m.inactiveLine(rest[i], nA+i == m.psel, w))
+		}
+		if n := len(rest) - start - restCap; n > 0 {
+			restLines = append(restLines, sDim.Render(fmt.Sprintf("  ▼ %d more", n)))
+		}
+		restLines = append([]string{sDim.Render(fmt.Sprintf("NOT RUNNING (%d)", len(rest)))}, restLines...)
+	}
+	restH := len(restLines)
+	if restH > 0 && nA > 0 {
+		restH++ // a blank line above
+	}
+
+	head := sectionTitle("PERFORMANCE") + sDim.Render(fmt.Sprintf("  %d running · ≈%s/hour right now · window %s", nA, money(m.hourlyNow()), teleRanges[m.rangeIx].label))
+	if nA > 0 && w >= 120 {
+		head += sDim.Render("  · enter opens a machine for everything else")
+	}
+	avail := h - 2 - restH
+	if nA > 0 {
+		per := avail / nA
+		if budget := per - 4; budget >= 8 {
+			var panels []string
+			for i := 0; i < nA; i++ {
+				bg := budget
+				if i < avail%nA { // spread the spare lines
+					bg++
+				}
+				panels = append(panels, m.perfPanel(es[i], i == m.psel, w, bg))
+			}
+			body := strings.Join(panels, "\n")
+			if restH > 0 {
+				body += "\n\n" + strings.Join(restLines, "\n")
+			}
+			return head + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + body
+		}
+		return m.perfCardsView(w, h) // too many on to show each one at length
+	}
+	return head + "\n" + sDim.Render(strings.Repeat("─", w)) + "\n" + sDim.Render("Nothing is running. Press n to launch a machine, or 2 to start one.") + "\n\n" + strings.Join(restLines, "\n")
+}
+
+func (m *model) hourlyNow() float64 {
+	t := 0.0
+	for _, e := range m.perfEntries() {
+		t += e.perHour()
+	}
+	return t
+}
+
+// perfPanel: a running machine with as many readings as `budget` lines allow.
+func (m *model) perfPanel(e perfEntry, selected bool, w, budget int) string {
+	iw := w - 4
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render(truncate(e.name(), iw-24)) + "  " + e.pill()
+	if c := e.perHour(); c > 0 {
+		title += sDim.Render("  " + money(c) + "/h")
+	}
+	sub := e.where()
+	if e.cloud != nil && e.cloud.LastStarted != "" {
+		sub += " · up " + strings.TrimSuffix(ago(e.cloud.LastStarted), " ago")
+	} else if v := m.vitalsFor(e); v.hasUp {
+		sub += " · up " + upFor(v.upSec)
+	}
+	var tele *Telemetry
+	if e.cloud != nil {
+		tele = m.tele[e.cloud.ID]
+	} else {
+		tele = m.localTele[e.local.ID]
+	}
+	body := m.spin.View() + sDim.Render(" reading telemetry…")
+	if tele != nil {
+		body = renderMonitorFit(tele, iw-1, e.local != nil, teleRanges[m.rangeIx].label, budget)
+	}
+	st := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Width(w - 2)
+	if selected {
+		st = st.BorderForeground(gCyan.color())
+	} else {
+		st = st.BorderForeground(lipgloss.AdaptiveColor{Light: "#b8c4d0", Dark: "#2f3b4a"})
+	}
+	return st.Render(title + "\n" + sDim.Render(truncate(sub, iw)) + "\n" + body)
 }

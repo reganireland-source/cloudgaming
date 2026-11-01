@@ -40,6 +40,12 @@ func alertLine(a Alert, width int) string {
 // renderMonitor: the same picture as the web Monitor tab, for a terminal.
 // local = a PC at home (a smaller set of readings).
 func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) string {
+	return renderMonitorFit(t, width, local, rangeLabel, 0)
+}
+
+// renderMonitorFit: the same picture squeezed into `budget` lines (0 = no limit). Tiles are already
+// in order of importance, so the least important are dropped first and a hint says how many.
+func renderMonitorFit(t *Telemetry, width int, local bool, rangeLabel string, budget int) string {
 	if t == nil {
 		return sDim.Render("Reading telemetry…")
 	}
@@ -65,13 +71,23 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 	head += sDim.Render("  ·  window " + rangeLabel)
 	out = append(out, head)
 
-	if t.Note != "" {
+	fit := budget > 0
+	if t.Note != "" && !fit {
 		out = append(out, sDim.Render(strings.Join(wrap(t.Note, width), "\n")))
 	}
+	shown := 0
 	for _, a := range t.Alerts {
+		if fit { // squeezed: only warnings and criticals, one line each, never more than two
+			if (a.Level != "warning" && a.Level != "critical") || shown >= 2 {
+				continue
+			}
+			shown++
+			out = append(out, truncate(firstLine(alertLine(a, width)), width))
+			continue
+		}
 		out = append(out, alertLine(a, width))
 	}
-	if ss := s.SS; ss != nil {
+	if ss := s.SS; ss != nil && !(fit && budget < 16) {
 		var p []string
 		if ss.R != "" {
 			r := strings.Replace(ss.R, "x", "×", 1)
@@ -419,6 +435,39 @@ func renderMonitor(t *Telemetry, width int, local bool, rangeLabel string) strin
 		tiles = append(tiles, tile{title: "GPU link", value: fmt.Sprintf("x%.0f · gen %.0f", lw, lg), sub: sub, tone: tone})
 	}
 
+	if budget > 0 {
+		used := lipgloss.Height(strings.Join(out, "\n"))
+		room := budget - used
+		fit := func(ts []tile) int {
+			n := len(ts)
+			for n > 0 && lipgloss.Height(grid(ts[:n], width, cols)) > room {
+				n--
+			}
+			return n
+		}
+		n := fit(tiles)
+		if n < len(tiles) { // try the compact tiles (no trend line): they may fit more
+			c := make([]tile, len(tiles))
+			copy(c, tiles)
+			for i := range c {
+				c[i].compact = true
+			}
+			if n2 := fit(c); n2 > n {
+				tiles, n = c, n2
+			}
+		}
+		if n > 0 {
+			out = append(out, grid(tiles[:n], width, cols))
+		}
+		if n < len(tiles) {
+			out = append(out, sDim.Render(fmt.Sprintf("+%d more readings: press enter to open this machine", len(tiles)-n)))
+		}
+		lines := strings.Split(strings.Join(out, "\n"), "\n")
+		if len(lines) > budget {
+			lines = lines[:budget]
+		}
+		return strings.Join(lines, "\n")
+	}
 	out = append(out, grid(tiles, width, cols))
 
 	// Lists: programs, GPU programs, containers, errors

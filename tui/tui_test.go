@@ -539,7 +539,7 @@ func TestRegionsPage(t *testing.T) {
 }
 
 func TestDashboardAndPerformance(t *testing.T) {
-	for _, size := range [][2]int{{150, 50}, {120, 36}, {80, 30}} {
+	for _, size := range [][2]int{{150, 50}, {120, 36}, {100, 46}, {80, 30}} {
 		h := newHarness(t, size[0], size[1])
 		h.m.authed = true
 		h.exec(h.m.afterLogin())
@@ -578,14 +578,16 @@ func TestDashboardAndPerformance(t *testing.T) {
 				t.Errorf("performance %d: line %d is %d cells", size[0], i, w)
 			}
 		}
-		// the local PC is on Performance too, and enter opens the machine on Machines
-		for i := 0; i < 5; i++ {
-			h.key("down")
+		// what is on gets the verbose view (the local PC too); the rest is one line each
+		if !strings.Contains(pv, "Big Gaming PC") {
+			t.Errorf("%d: the local PC is missing from Performance", size[0])
 		}
-		h.poll()
-		if !strings.Contains(h.m.pvp.View()+h.view(), "Big Gaming PC") {
-			t.Errorf("%d: local PC missing from Performance", size[0])
+		if size[1] >= 46 { // tall enough for the verbose view: tiles for what is on, a line each for the rest
+			if !strings.Contains(strings.ToUpper(pv), "NOT RUNNING (2)") || !strings.Contains(strings.ToUpper(pv), "GPU LOAD") {
+				t.Errorf("%d: verbose Performance incomplete", size[0])
+			}
 		}
+		h.key("down") // the local PC is the second machine that is on
 		h.key("enter")
 		if h.m.screen != scrMachines || h.m.selectedLocal() == nil {
 			t.Errorf("%d: enter should open the local PC on Machines (screen %d)", size[0], h.m.screen)
