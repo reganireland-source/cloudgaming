@@ -36,7 +36,7 @@ interface LocalMachine {
     away?: { upnp: string; webUi: string; profile: string };
     display?: { mode: LocalMode; virtual: boolean; virtualState?: string; seen?: string[] };
     host?: string; os?: string; uptimeHours?: number; cpuPercent?: number; ramGb?: number; ramFreeGb?: number;
-    wired?: boolean; link?: string; streaming?: boolean; sunshine?: string; agentVersion?: string;
+    wired?: boolean; link?: string; streaming?: boolean; sunshine?: string; agentVersion?: string; platform?: "macos" | "linux";
     gpu?: { name: string; util: number; tempC: number; encoders: number; vramUsedMb: number; vramTotalMb: number; driver: string };
   } | null;
   createdAt: string;
