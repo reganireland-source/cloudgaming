@@ -1,9 +1,9 @@
 class GgghTui < Formula
   desc "Terminal app for GGGH: monitor and control your cloud gaming machines"
   homepage "https://github.com/reganireland-source/cloudgaming/tree/main/tui"
-  url "https://github.com/reganireland-source/cloudgaming/archive/f2db4e1f4d40db95a2cb5c4830842a33c23d81b3.tar.gz"
-  version "0.3.0"
-  sha256 "b3105fbd0a14442013a149702c0b532b55cbf4376ed934e989eb1fd1d6396cd2"
+  url "https://github.com/reganireland-source/cloudgaming/archive/ccb0ae1b3e32e5ff41e610434aad8842a9ecb287.tar.gz"
+  version "0.3.1"
+  sha256 "229a5f41207ddcc3a478a4259eed9a906afddbafa3c1916adbe72f8b676fdeff"
   head "https://github.com/reganireland-source/cloudgaming.git", branch: "main"
 
   depends_on "go" => :build
