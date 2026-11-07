@@ -111,6 +111,7 @@ const (
 	pConfirm promptKind = iota
 	pInput
 	pInfo
+	pChoice
 )
 
 type prompt struct {
@@ -120,6 +121,11 @@ type prompt struct {
 	danger bool
 	ti     textinput.Model
 	run    func(m *model, val string) tea.Cmd
+	// pChoice: pick one of `choices` (the chosen text goes to run)
+	choices []string
+	cur     int
+	// onNo: extra work when a confirm is answered "no"
+	onNo func(m *model)
 }
 
 // ---- the model -----------------------------------------------------------------
@@ -513,6 +519,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case actMsg:
 		return m, m.onAct(msg)
+	case moonlightDoneMsg:
+		return m, m.onMoonlightDone(msg)
+	case brewDoneMsg:
+		return m, m.onBrewDone(msg)
 	case launchMsg:
 		if m.wiz != nil {
 			m.wiz.launching = false
@@ -585,8 +595,7 @@ func (m *model) onAct(msg actMsg) tea.Cmd {
 	if msg.pin {
 		pin, _ := msg.res["pin"].(string)
 		host, _ := msg.res["host"].(string)
-		m.prompt = &prompt{kind: pInfo, title: "Pair Moonlight", body: fmt.Sprintf("1. On your Mac, run:\n\n   moonlight pair %s --pin %s\n\n2. GGGH types the PIN into Sunshine for you (it keeps trying for 3 minutes).\n\nOr open Moonlight, add %s, and use the PIN %s when it asks.", host, pin, host, pin)}
-		return tea.Batch(m.cmdMachines(), m.cmdOps(""))
+		return tea.Batch(m.cmdMachines(), m.cmdOps(""), m.offerPair(host, pin))
 	}
 	m.setNotice(msg.label+": requested. It shows on the Activity tab.", false)
 	return tea.Batch(m.cmdMachines(), m.cmdOps(""))
@@ -838,6 +847,25 @@ func (m *model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.prompt = nil
 		}
 		return m, nil
+	case pChoice:
+		switch k.String() {
+		case "up", "k":
+			if p.cur > 0 {
+				p.cur--
+			}
+		case "down", "j":
+			if p.cur < len(p.choices)-1 {
+				p.cur++
+			}
+		case "enter":
+			m.prompt = nil
+			if p.run != nil {
+				return m, p.run(m, p.choices[p.cur])
+			}
+		case "esc", "q":
+			m.prompt = nil
+		}
+		return m, nil
 	case pConfirm:
 		switch k.String() {
 		case "y", "Y", "enter":
@@ -847,6 +875,9 @@ func (m *model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "n", "N", "esc", "q":
 			m.prompt = nil
+			if p.onNo != nil {
+				p.onNo(m)
+			}
 		}
 		return m, nil
 	default: // pInput
@@ -982,6 +1013,15 @@ func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.cmdAct(s.ID, "pair", "Pair", nil)
 		}
 		m.setNotice("Pairing needs a running machine.", true)
+	case "m":
+		if s != nil && s.Status == "running" {
+			return m, m.startStreamPicker(s)
+		}
+		m.setNotice("Streaming needs a running machine.", true)
+	case "M":
+		if s != nil && s.Status == "running" {
+			m.copyStreamCommand(s)
+		}
 	case "e":
 		if s != nil {
 			id := s.ID

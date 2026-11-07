@@ -594,3 +594,44 @@ func TestDashboardAndPerformance(t *testing.T) {
 		}
 	}
 }
+
+func TestMoonlightFromTheTUI(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	h.m.authed = true
+	h.exec(h.m.afterLogin())
+	h.poll()
+	// p: GGGH picks the PIN, the TUI offers to run `moonlight pair` here
+	h.key("p")
+	h.poll()
+	if h.m.prompt == nil || !strings.Contains(h.m.prompt.body, "moonlight pair") || !strings.Contains(h.m.prompt.body, "--pin") {
+		t.Fatalf("pair should offer the command: %+v", h.m.prompt)
+	}
+	show(t, "pair prompt", h.view())
+	h.key("y")
+	if !strings.Contains(h.m.notice, "Demo: would run") {
+		t.Errorf("notice %q", h.m.notice)
+	}
+	// m: choose an app, then Moonlight starts with the machine's quality preset
+	h.key("m")
+	if h.m.prompt == nil || h.m.prompt.kind != pChoice {
+		t.Fatal("m should open the app picker")
+	}
+	v := h.view()
+	show(t, "stream picker", v)
+	for _, want := range []string{"Desktop", "Steam (Big Picture)", "STREAM"} {
+		if !strings.Contains(strings.ToUpper(v), strings.ToUpper(want)) {
+			t.Errorf("picker lacks %q", want)
+		}
+	}
+	h.key("down")
+	h.key("enter")
+	if !strings.Contains(h.m.notice, "stream") || !strings.Contains(h.m.notice, "Steam (Big Picture)") || !strings.Contains(h.m.notice, "--resolution") {
+		t.Errorf("notice %q", h.m.notice)
+	}
+	args := strings.Join(streamArgs("1.2.3.4", "Desktop", "ultra"), " ")
+	for _, want := range []string{"stream 1.2.3.4 Desktop", "--resolution 2560x1440", "--bitrate 20000", "--video-codec HEVC", "--no-multi-controller"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("stream args lack %q: %s", want, args)
+		}
+	}
+}

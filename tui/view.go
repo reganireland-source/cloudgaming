@@ -186,6 +186,8 @@ func (m *model) hintPairs() [][2]string {
 			return [][2]string{{"enter", "save"}, {"esc", "cancel"}}
 		case pInfo:
 			return [][2]string{{"enter", "close"}}
+		case pChoice:
+			return [][2]string{{"↑↓", "choose"}, {"enter", "stream it"}, {"esc", "cancel"}}
 		}
 		return [][2]string{{"y", "yes"}, {"n / esc", "no"}}
 	case m.help:
@@ -202,7 +204,7 @@ func (m *model) hintPairs() [][2]string {
 			case s.Busy():
 				p = append(p, [2]string{"e", "rename"}, [2]string{"w", "window"}, [2]string{"J K", "scroll"})
 			case s.Status == "running":
-				p = append(p, [2]string{"x", "stop"}, [2]string{"z", "shelve"}, [2]string{"p", "pair Moonlight"}, [2]string{"e", "rename"},
+				p = append(p, [2]string{"x", "stop"}, [2]string{"z", "shelve"}, [2]string{"p", "pair Moonlight"}, [2]string{"m", "stream (Moonlight)"}, [2]string{"M", "copy stream command"}, [2]string{"e", "rename"},
 					[2]string{"u", "update script"}, [2]string{"U", "update+restart"}, [2]string{"R", "resume setup"}, [2]string{"$", "spot/on-demand"},
 					[2]string{"y", "sync"}, [2]string{"D", "delete"}, [2]string{"w", "window"}, [2]string{"c", "copy password"}, [2]string{"v", "show password"},
 					[2]string{"C", "copy IP"}, [2]string{"o", "open Sunshine"}, [2]string{"J K", "scroll"})
@@ -663,7 +665,7 @@ func (m *model) connectView(s *Machine, w int) string {
 		}
 		row("Play in browser", truncate(c.Browser.Play.URL, w-30)+" "+a)
 	}
-	b.WriteString("\n" + sDim.Render("Press p to pair Moonlight (GGGH picks a PIN and types it into Sunshine for you).") + "\n\n")
+	b.WriteString("\n" + sDim.Render("Press p to pair Moonlight (GGGH picks a PIN, types it into Sunshine and runs the pair command here), then m to stream.") + "\n\n")
 	b.WriteString(m.setupView(c, w))
 	return b.String()
 }
@@ -859,6 +861,15 @@ func (m *model) promptView() string {
 	switch p.kind {
 	case pConfirm:
 		b.WriteString(pill("y  YES", gGreen) + "   " + pill("n  NO", rgb{125, 135, 150}))
+	case pChoice:
+		for i, c := range p.choices {
+			if i == p.cur {
+				b.WriteString(sKey.Render("▸ ") + sBold.Render(c) + "\n")
+			} else {
+				b.WriteString("  " + sText.Render(c) + "\n")
+			}
+		}
+		b.WriteString("\n" + pill("enter  STREAM", gGreen) + "   " + pill("esc  CANCEL", rgb{125, 135, 150}))
 	case pInput:
 		b.WriteString(p.ti.View() + "\n\n" + pill("enter  SAVE", gGreen) + "   " + pill("esc  CANCEL", rgb{125, 135, 150}))
 	default:
@@ -880,7 +891,8 @@ func (m *model) helpView() string {
 		{"s / x", "start a stopped machine / stop a running one"},
 		{"z", "shelve (snapshot, then delete the machine: cheap)"},
 		{"r", "restore a shelved machine · otherwise refresh"},
-		{"p", "pair Moonlight (shows the PIN command)"},
+		{"p", "pair Moonlight: picks a PIN and runs `moonlight pair` here"},
+		{"m / M", "stream with Moonlight (pick an app) / copy the stream command"},
 		{"u / U", "update the on-machine script / and restart"},
 		{"R", "resume an unfinished setup"},
 		{"e", "rename"},

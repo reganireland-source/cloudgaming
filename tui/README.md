@@ -78,8 +78,8 @@ gives the two-pane layout; narrower terminals stack it.
 | **n New machine** | The launch wizard: what it is for, cloud, region, size (light / standard / heavy), options, extra tools, review |
 
 Keys (press `?` in the app for the list): `s` start, `x` stop, `z` shelve, `r` restore, `p` pair
-Moonlight, `u`/`U` update the on-machine script (and restart), `R` resume setup, `e` rename,
-`$` spot or on-demand, `D` delete, `w` monitor window, `c`/`C` copy password / IP, `o` open Sunshine,
+Moonlight (runs `moonlight pair` here), `u`/`U` update the on-machine script (and restart), `R` resume setup, `e` rename,
+`m` stream with Moonlight (pick an app), `M` copy the stream command, `$` spot or on-demand, `D` delete, `w` monitor window, `c`/`C` copy password / IP, `o` open Sunshine,
 `←→` tabs, `↑↓` machines, `ctrl+r` refresh, `q` quit. Anything that costs money or deletes asks first.
 
 ## How it works
