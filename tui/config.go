@@ -9,8 +9,16 @@ import (
 // The one place the app writes to: a small JSON file with the API address and
 // your sign-in token (permissions 600). Sign out (L) deletes the token.
 type config struct {
-	API   string `json:"api"`
-	Token string `json:"token"`
+	API       string  `json:"api"`
+	Token     string  `json:"token"`
+	Moonlight mlPrefs `json:"moonlight"`
+}
+
+// mlPrefs: what the Moonlight launcher remembers (the web app keeps the screen in the browser).
+type mlPrefs struct {
+	Screen   string `json:"screen"`
+	App      string `json:"app"`
+	Windowed bool   `json:"windowed"`
 }
 
 const defaultAPI = "https://cloudgaming-production.up.railway.app/api"

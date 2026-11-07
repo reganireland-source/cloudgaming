@@ -67,14 +67,15 @@ func moonlightBase() []string {
 	return nil
 }
 
-func streamArgs(host, app, quality string) []string {
-	p, ok := streamPresets[quality]
-	if !ok {
-		p = streamPresets["good"]
+// streamArgs: the Moonlight command line for the chosen settings (see mlSettings).
+func streamArgs(host, app string, st mlSettings) []string {
+	mode := "fullscreen"
+	if st.Windowed {
+		mode = "windowed"
 	}
 	return []string{"stream", host, app,
-		"--resolution", p.res, "--fps", fmt.Sprint(p.fps), "--bitrate", fmt.Sprint(p.kbps),
-		"--video-codec", p.codec, "--display-mode", "fullscreen", "--audio-config", "stereo",
+		"--resolution", fmt.Sprintf("%dx%d", st.W, st.H), "--fps", fmt.Sprint(st.FPS), "--bitrate", fmt.Sprint(st.Kbps),
+		"--video-codec", st.Codec, "--display-mode", mode, "--audio-config", "stereo",
 		"--game-optimization", "--quit-after", "--no-multi-controller"}
 }
 
@@ -175,7 +176,7 @@ func (m *model) streamHost(s *Machine) string {
 	return s.IP
 }
 
-// startStreamPicker: "m": choose an app, then Moonlight opens straight into the stream.
+// startStreamPicker: "m" opens the launcher (app, quality, your screen, full screen).
 func (m *model) startStreamPicker(s *Machine) tea.Cmd {
 	host := m.streamHost(s)
 	if host == "" {
@@ -186,44 +187,21 @@ func (m *model) startStreamPicker(s *Machine) tea.Cmd {
 		m.setNotice("Setup isn't finished: streaming works once the Connect tab says Ready to stream.", true)
 		return nil
 	}
-	base := moonlightBase()
-	if base == nil && !m.demo {
+	if moonlightBase() == nil && !m.demo {
 		return m.installMoonlight("")
 	}
-	quality := s.Quality
-	name := s.Name()
-	p, ok := streamPresets[quality]
-	if !ok {
-		quality, p = "good", streamPresets["good"]
-	}
-	m.prompt = &prompt{kind: pChoice, title: "Stream " + name + " (" + quality + ": " + p.label + ")", choices: streamApps,
-		body: "Pick what to open. Moonlight starts full screen; press Ctrl+Alt+Shift+Q to quit the stream.",
-		run: func(m *model, app string) tea.Cmd {
-			args := streamArgs(host, app, quality)
-			if m.demo {
-				m.setNotice("Demo: would run "+commandLine(base, args), false)
-				return nil
-			}
-			c := exec.Command(base[0], append(append([]string{}, base[1:]...), args...)...)
-			if err := c.Start(); err != nil {
-				m.setNotice("Could not start Moonlight: "+err.Error(), true)
-				return nil
-			}
-			go func() { _ = c.Wait() }()
-			m.setNotice("Moonlight is starting: "+app+" from "+host+" ("+p.label+").", false)
-			return nil
-		}}
+	m.ml = newMLPanel(m, s, host)
 	return nil
 }
 
-// copyStreamCommand: "M".
+// copyStreamCommand: "M" copies the command with the launcher's remembered settings.
 func (m *model) copyStreamCommand(s *Machine) {
 	host := m.streamHost(s)
 	if host == "" {
 		m.setNotice("This machine has no address yet.", true)
 		return
 	}
-	cmd := commandLine(moonlightBase(), streamArgs(host, "Desktop", s.Quality))
-	copyText(cmd)
-	m.setNotice("Stream command copied (Desktop). Paste it in a terminal.", false)
+	p := newMLPanel(m, s, host)
+	copyText(p.command())
+	m.setNotice("Stream command copied ("+p.app()+", "+p.settings().summary()+"). Paste it in a terminal.", false)
 }

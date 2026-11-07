@@ -111,7 +111,6 @@ const (
 	pConfirm promptKind = iota
 	pInput
 	pInfo
-	pChoice
 )
 
 type prompt struct {
@@ -121,9 +120,6 @@ type prompt struct {
 	danger bool
 	ti     textinput.Model
 	run    func(m *model, val string) tea.Cmd
-	// pChoice: pick one of `choices` (the chosen text goes to run)
-	choices []string
-	cur     int
 	// onNo: extra work when a confirm is answered "no"
 	onNo func(m *model)
 }
@@ -185,6 +181,7 @@ type model struct {
 	wiz     *wizard
 
 	prompt *prompt
+	ml     *mlPanel // the Moonlight launcher (m)
 	help   bool
 	spin   spinner.Model
 
@@ -720,6 +717,9 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.prompt != nil {
 		return m.promptKey(k)
 	}
+	if m.ml != nil {
+		return m.mlKey(k)
+	}
 	if m.help {
 		m.help = false
 		return m, nil
@@ -844,25 +844,6 @@ func (m *model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case pInfo:
 		switch k.String() {
 		case "esc", "enter", "q", " ":
-			m.prompt = nil
-		}
-		return m, nil
-	case pChoice:
-		switch k.String() {
-		case "up", "k":
-			if p.cur > 0 {
-				p.cur--
-			}
-		case "down", "j":
-			if p.cur < len(p.choices)-1 {
-				p.cur++
-			}
-		case "enter":
-			m.prompt = nil
-			if p.run != nil {
-				return m, p.run(m, p.choices[p.cur])
-			}
-		case "esc", "q":
 			m.prompt = nil
 		}
 		return m, nil

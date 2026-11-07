@@ -611,25 +611,75 @@ func TestMoonlightFromTheTUI(t *testing.T) {
 	if !strings.Contains(h.m.notice, "Demo: would run") {
 		t.Errorf("notice %q", h.m.notice)
 	}
-	// m: choose an app, then Moonlight starts with the machine's quality preset
+	// m: the launcher (what to open, quality, your screen, display mode), then Moonlight starts
 	h.key("m")
-	if h.m.prompt == nil || h.m.prompt.kind != pChoice {
-		t.Fatal("m should open the app picker")
+	if h.m.ml == nil {
+		t.Fatal("m should open the Moonlight launcher")
 	}
 	v := h.view()
-	show(t, "stream picker", v)
-	for _, want := range []string{"Desktop", "Steam (Big Picture)", "STREAM"} {
-		if !strings.Contains(strings.ToUpper(v), strings.ToUpper(want)) {
-			t.Errorf("picker lacks %q", want)
+	show(t, "moonlight launcher", v)
+	for _, want := range []string{"What to open", "Quality", "Your screen", "Display mode", "Desktop", "START STREAMING", "--resolution"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("launcher lacks %q", want)
 		}
 	}
+	h.key("right") // app: Steam (Big Picture)
 	h.key("down")
+	h.key("right") // quality: next preset
+	h.key("down")
+	h.key("right") // screen: next shape
+	h.key("down")
+	h.key("right") // windowed
 	h.key("enter")
-	if !strings.Contains(h.m.notice, "stream") || !strings.Contains(h.m.notice, "Steam (Big Picture)") || !strings.Contains(h.m.notice, "--resolution") {
+	if h.m.ml != nil || !strings.Contains(h.m.notice, "Steam (Big Picture)") || !strings.Contains(h.m.notice, "Demo: would run") || !strings.Contains(h.m.notice, "--display-mode windowed") {
 		t.Errorf("notice %q", h.m.notice)
 	}
-	args := strings.Join(streamArgs("1.2.3.4", "Desktop", "ultra"), " ")
-	for _, want := range []string{"stream 1.2.3.4 Desktop", "--resolution 2560x1440", "--bitrate 20000", "--video-codec HEVC", "--no-multi-controller"} {
+	if h.m.cfg.Moonlight.App != "Steam (Big Picture)" || !h.m.cfg.Moonlight.Windowed || h.m.cfg.Moonlight.Screen == "" {
+		t.Errorf("choices not remembered: %+v", h.m.cfg.Moonlight)
+	}
+	h.key("M")
+	if !strings.Contains(h.m.notice, "copied") {
+		t.Errorf("M notice %q", h.m.notice)
+	}
+}
+
+func TestMoonlightSettingsMatchTheWeb(t *testing.T) {
+	m := newModel(NewDemo(), config{API: "demo"}, true)
+	mk := func(quality string, big bool, screen string) mlSettings {
+		d := ""
+		if big {
+			d = "grid"
+		}
+		p := newMLPanel(m, &Machine{Nickname: "x", Quality: quality, DisplayDriver: d}, "1.2.3.4")
+		for i, s := range p.screens {
+			if s.id == screen {
+				p.screenIx = i
+			}
+		}
+		return p.settings()
+	}
+	// plain 16:9 uses the preset as-is
+	if s := mk("good", false, "16x9"); s.W != 1920 || s.H != 1080 || s.Kbps != 8000 || s.FPS != 60 || s.Codec != "HEVC" {
+		t.Errorf("good 16x9: %+v", s)
+	}
+	if s := mk("budget", false, "16x9"); s.W != 1280 || s.H != 720 || s.FPS != 30 || s.Codec != "H.264" || s.Kbps != 3000 {
+		t.Errorf("budget: %+v", s)
+	}
+	// a 14-inch MacBook Pro keeps its shape, in a box the datacenter GPU can drive
+	s := mk("high", false, "mbp14")
+	if s.W%8 != 0 || s.H%8 != 0 || s.W > 2560 || s.H > 1600 || float64(s.W)/float64(s.H) < 1.5 || float64(s.W)/float64(s.H) > 1.58 {
+		t.Errorf("mbp14: %+v", s)
+	}
+	// super ultrawide: capped by width, flagged
+	if s := mk("ultra", false, "suw-5120"); s.W != 2560 || !s.Capped {
+		t.Errorf("suw-5120: %+v", s)
+	}
+	// big-screen (GRID) machines may go bigger
+	if sb, sd := mk("ultra", true, "mbp16"), mk("ultra", false, "mbp16"); sb.W*sb.H <= sd.W*sd.H {
+		t.Errorf("big-screen should allow more pixels: %+v vs %+v", sb, sd)
+	}
+	args := strings.Join(streamArgs("1.2.3.4", "Desktop", mk("ultra", false, "16x9")), " ")
+	for _, want := range []string{"stream 1.2.3.4 Desktop", "--resolution 2560x1440", "--bitrate 20000", "--video-codec HEVC", "--display-mode fullscreen", "--no-multi-controller"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("stream args lack %q: %s", want, args)
 		}
