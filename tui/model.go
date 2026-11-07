@@ -881,8 +881,30 @@ func (m *model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := m.selected()
-	if m.selectedLocal() != nil { // your own PCs: choose, scroll, change the window; no cloud actions apply
+	if lp := m.selectedLocal(); lp != nil { // your own PCs: choose, scroll, change the window, Moonlight; no cloud actions apply
 		switch k.String() {
+		case "m":
+			return m, m.startLocalStream(lp)
+		case "M":
+			m.copyLocalStreamCommand(lp)
+			return m, nil
+		case "p":
+			if m.localReady(lp) {
+				return m, m.pairLocal(lp.Name, localHost(lp))
+			}
+			return m, nil
+		case "o":
+			if lp.LanIP != "" {
+				openURL("https://" + lp.LanIP + ":47990")
+				m.setNotice("Opened Sunshine on "+lp.Name+" in your browser.", false)
+			}
+			return m, nil
+		case "C":
+			if lp.LanIP != "" {
+				copyText(lp.LanIP)
+				m.setNotice("IP "+lp.LanIP+" copied to the clipboard.", false)
+			}
+			return m, nil
 		case "w":
 			m.rangeIx = (m.rangeIx + 1) % len(teleRanges)
 			m.last = dropKeys(m.last, "tele:")

@@ -79,7 +79,7 @@ gives the two-pane layout; narrower terminals stack it.
 
 Keys (press `?` in the app for the list): `s` start, `x` stop, `z` shelve, `r` restore, `p` pair
 Moonlight (runs `moonlight pair` here), `u`/`U` update the on-machine script (and restart), `R` resume setup, `e` rename,
-`m` Moonlight launcher (app, quality, your screen shape, full screen or windowed; remembered), `M` copy the stream command, `$` spot or on-demand, `D` delete, `w` monitor window, `c`/`C` copy password / IP, `o` open Sunshine,
+`m` Moonlight launcher (app, quality, your screen shape, full screen or windowed; remembered), `M` copy the stream command, `$` spot or on-demand, `D` delete, `w` monitor window, `c`/`C` copy password / IP, `o` open Sunshine (works on your own PCs too: `m`, `M`, `p` do as well),
 `←→` tabs, `↑↓` machines, `ctrl+r` refresh, `q` quit. Anything that costs money or deletes asks first.
 
 ## How it works

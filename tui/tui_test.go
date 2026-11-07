@@ -685,3 +685,39 @@ func TestMoonlightSettingsMatchTheWeb(t *testing.T) {
 		}
 	}
 }
+
+func TestMoonlightOnALocalPC(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	h.m.authed = true
+	h.exec(h.m.afterLogin())
+	h.poll()
+	for i := 0; i < 3; i++ {
+		h.key("down") // past the three cloud machines
+	}
+	h.poll()
+	if h.m.selectedLocal() == nil {
+		t.Fatal("expected a local PC to be selected")
+	}
+	foot := strings.Join(h.m.footerLines(), "\n")
+	for _, want := range []string{"Moonlight launcher", "pair Moonlight", "copy stream command"} {
+		if !strings.Contains(foot, want) {
+			t.Errorf("local footer lacks %q", want)
+		}
+	}
+	h.key("m")
+	if h.m.ml == nil || !h.m.ml.local || h.m.ml.host != "192.168.1.157" {
+		t.Fatalf("launcher should open for the local PC: %+v", h.m.ml)
+	}
+	if !strings.Contains(h.view(), "stream 192.168.1.157 Desktop") {
+		t.Error("command should use the PC's LAN address")
+	}
+	h.key("enter")
+	if !strings.Contains(h.m.notice, "Demo: would run") || !strings.Contains(h.m.notice, "192.168.1.157") {
+		t.Errorf("notice %q", h.m.notice)
+	}
+	h.key("p")
+	if h.m.prompt == nil || !strings.Contains(h.m.prompt.body, "47990") || !strings.Contains(h.m.prompt.body, "moonlight pair 192.168.1.157") {
+		t.Fatalf("local pairing should explain the Sunshine PIN step: %+v", h.m.prompt)
+	}
+	h.key("n")
+}

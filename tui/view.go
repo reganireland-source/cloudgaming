@@ -198,7 +198,7 @@ func (m *model) hintPairs() [][2]string {
 	case m.screen == scrWizard && m.wiz != nil:
 		return m.wizardHints()
 	case m.screen == scrMachines && m.selectedLocal() != nil:
-		return append([][2]string{{"↑↓", "machine"}, {"w", "window"}, {"J K", "scroll"}, {"f", "show/hide failed"}, {"r", "refresh"}}, global...)
+		return append([][2]string{{"↑↓", "machine"}, {"m", "Moonlight launcher"}, {"M", "copy stream command"}, {"p", "pair Moonlight"}, {"o", "open Sunshine"}, {"C", "copy IP"}, {"w", "window"}, {"J K", "scroll"}, {"f", "show/hide failed"}, {"r", "refresh"}}, global...)
 	case m.screen == scrMachines:
 		s := m.selected()
 		p := [][2]string{{"↑↓", "machine"}, {"←→", "tab"}, {"f", "show/hide failed"}}

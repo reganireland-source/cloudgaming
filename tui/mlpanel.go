@@ -93,6 +93,7 @@ type mlScreen struct {
 type mlPanel struct {
 	machine  string
 	host     string
+	local    bool // one of your own PCs (pairing is manual)
 	big      bool // GRID-driver machine
 	def      string
 	presetIx int
@@ -107,7 +108,11 @@ type mlPanel struct {
 var presetOrder = []string{"budget", "good", "high", "ultra"}
 
 func newMLPanel(m *model, s *Machine, host string) *mlPanel {
-	p := &mlPanel{machine: s.Name(), host: host, big: s.DisplayDriver == "grid", def: s.Quality, presets: presetOrder}
+	return newMLPanelFor(m, s.Name(), host, s.Quality, s.DisplayDriver == "grid", false)
+}
+
+func newMLPanelFor(m *model, name, host, quality string, big, local bool) *mlPanel {
+	p := &mlPanel{machine: name, host: host, big: big, local: local, def: quality, presets: presetOrder}
 	if _, ok := streamPresets[p.def]; !ok {
 		p.def = "high" // the web launcher's fallback
 	}
@@ -227,6 +232,11 @@ func (m *model) mlKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		copyText(p.command())
 		m.setNotice("Stream command copied. Paste it in a terminal.", false)
 	case "p":
+		if p.local {
+			host, name := p.host, p.machine
+			m.ml = nil
+			return m, m.pairLocal(name, host)
+		}
 		s := m.selected()
 		m.ml = nil
 		if s != nil {

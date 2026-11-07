@@ -205,3 +205,67 @@ func (m *model) copyStreamCommand(s *Machine) {
 	copyText(p.command())
 	m.setNotice("Stream command copied ("+p.app()+", "+p.settings().summary()+"). Paste it in a terminal.", false)
 }
+
+// ---- your own PCs --------------------------------------------------------------------------------------
+
+// localHost: where Moonlight finds a local PC (its address on your network).
+func localHost(p *LocalMachine) string { return p.LanIP }
+
+func (m *model) localReady(p *LocalMachine) bool {
+	if !p.Online {
+		m.setNotice(p.Name+" is offline: the GGGH agent on it isn't reporting.", true)
+		return false
+	}
+	if localHost(p) == "" {
+		m.setNotice(p.Name+" has no network address yet.", true)
+		return false
+	}
+	if v, ok := p.Status["sunshine"].(string); ok && strings.EqualFold(v, "NotInstalled") {
+		m.setNotice("Sunshine isn't installed on "+p.Name+": install it there first (it streams the PC).", true)
+		return false
+	}
+	return true
+}
+
+// startLocalStream: "m" on one of your own PCs: the same launcher, streaming from its LAN address.
+func (m *model) startLocalStream(p *LocalMachine) tea.Cmd {
+	if !m.localReady(p) {
+		return nil
+	}
+	if moonlightBase() == nil && !m.demo {
+		return m.installMoonlight("")
+	}
+	m.ml = newMLPanelFor(m, p.Name, localHost(p), "high", false, true)
+	return nil
+}
+
+func (m *model) copyLocalStreamCommand(p *LocalMachine) {
+	if !m.localReady(p) {
+		return
+	}
+	pn := newMLPanelFor(m, p.Name, localHost(p), "high", false, true)
+	copyText(pn.command())
+	m.setNotice("Stream command copied ("+pn.app()+", "+pn.settings().summary()+"). Paste it in a terminal.", false)
+}
+
+// pairLocal: "p" on one of your own PCs. GGGH can't type the PIN into a PC at home, so Moonlight
+// shows the PIN here and you enter it in that PC's Sunshine page (opened for you).
+func (m *model) pairLocal(name, host string) tea.Cmd {
+	base := moonlightBase()
+	if base == nil && !m.demo {
+		return m.installMoonlight("")
+	}
+	cmd := commandLine(base, []string{"pair", host})
+	url := "https://" + host + ":47990"
+	return m.confirm("Pair Moonlight with "+name+"?",
+		"Moonlight prints a PIN here. Enter it in Sunshine's page on that PC ("+url+", opened for you now; accept the certificate warning and sign in). Run this?\n\n"+cmd, false,
+		func(m *model, _ string) tea.Cmd {
+			if m.demo {
+				m.setNotice("Demo: would run "+cmd, false)
+				return nil
+			}
+			openURL(url)
+			c := exec.Command(base[0], append(append([]string{}, base[1:]...), "pair", host)...)
+			return tea.ExecProcess(c, func(err error) tea.Msg { return moonlightDoneMsg{"Pair", "", err} })
+		})
+}
