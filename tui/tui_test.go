@@ -712,9 +712,37 @@ func TestMoonlightOnALocalPC(t *testing.T) {
 		t.Error("command should use the PC's LAN address")
 	}
 	h.key("enter")
-	if !strings.Contains(h.m.notice, "Demo: would run") || !strings.Contains(h.m.notice, "192.168.1.157") {
-		t.Errorf("notice %q", h.m.notice)
+	if !strings.Contains(h.m.notice, "Demo: would") || !strings.Contains(h.m.notice, "192.168.1.157") || !strings.Contains(h.m.notice, "--audio-on-host") {
+		t.Errorf("Mirror should keep the sound on the PC: %q", h.m.notice)
 	}
+	// Headless (gaming): screens off, virtual display, sound plays here
+	h.key("m")
+	if h.m.ml == nil {
+		t.Fatal("launcher should reopen")
+	}
+	v := h.view()
+	for _, want := range []string{"Screens & sound", "Mirror (control)", "Wake the PC first", "Performance overlay", "Connection", "Frame rate"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("local launcher lacks %q", want)
+		}
+	}
+	for h.m.ml.fields[h.m.ml.field].label != "Screens & sound" {
+		h.key("down")
+	}
+	h.key("right") // Mirror -> Headless
+	h.poll()
+	if h.m.ml.mode != "headless" || h.m.local[0].DisplayMode != "headless" {
+		t.Errorf("mode %q, saved default %q", h.m.ml.mode, h.m.local[0].DisplayMode)
+	}
+	if v := h.view(); !strings.Contains(v, "Headless (gaming)") || !strings.Contains(v, "--no-audio-on-host") || strings.Contains(v, "--audio-on-host") {
+		t.Error("Headless should send the sound here (--no-audio-on-host)")
+	}
+	h.key("enter")
+	if !strings.Contains(h.m.notice, "virtual display") || !strings.Contains(h.m.notice, "--no-audio-on-host") {
+		t.Errorf("headless notice %q", h.m.notice)
+	}
+	h.key("X")
+	h.poll()
 	h.key("p")
 	if h.m.prompt == nil || !strings.Contains(h.m.prompt.body, "47990") || !strings.Contains(h.m.prompt.body, "moonlight pair 192.168.1.157") {
 		t.Fatalf("local pairing should explain the Sunshine PIN step: %+v", h.m.prompt)

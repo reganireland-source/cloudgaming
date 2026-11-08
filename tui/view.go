@@ -198,7 +198,7 @@ func (m *model) hintPairs() [][2]string {
 	case m.screen == scrWizard && m.wiz != nil:
 		return m.wizardHints()
 	case m.screen == scrMachines && m.selectedLocal() != nil:
-		return append([][2]string{{"↑↓", "machine"}, {"m", "Moonlight launcher"}, {"M", "copy stream command"}, {"p", "pair Moonlight"}, {"o", "open Sunshine"}, {"C", "copy IP"}, {"w", "window"}, {"J K", "scroll"}, {"f", "show/hide failed"}, {"r", "refresh"}}, global...)
+		return append([][2]string{{"↑↓", "machine"}, {"m", "Moonlight launcher"}, {"M", "copy stream command"}, {"p", "pair Moonlight"}, {"X", "screens back on"}, {"o", "open Sunshine"}, {"C", "copy IP"}, {"w", "window"}, {"J K", "scroll"}, {"f", "show/hide failed"}, {"r", "refresh"}}, global...)
 	case m.screen == scrMachines:
 		s := m.selected()
 		p := [][2]string{{"↑↓", "machine"}, {"←→", "tab"}, {"f", "show/hide failed"}}
@@ -394,6 +394,16 @@ func (m *model) localDetail(p *LocalMachine, w, h int) string {
 			wired = "Wi-Fi"
 		}
 		info = append(info, wired+" "+v)
+	}
+	if d, ok := p.Status["display"].(map[string]any); ok {
+		if mode, _ := d["mode"].(string); mode == "headless" {
+			info = append(info, "screens: headless")
+		} else {
+			info = append(info, "screens: mirror")
+		}
+	}
+	if p.DisplayMode != "" {
+		info = append(info, "default mode "+p.DisplayMode)
 	}
 	if p.LastSeenAt != "" {
 		info = append(info, "seen "+ago(p.LastSeenAt))

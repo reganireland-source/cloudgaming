@@ -197,6 +197,40 @@ func (h *HTTPBackend) AddLocalMachine(name string) (*NewLocalPC, error) {
 	return &out, err
 }
 
+func (h *HTTPBackend) LocalCommand(id, kind string, args map[string]any, waitSec int) (bool, string, error) {
+	var sent struct {
+		ID string `json:"id"`
+	}
+	if err := h.call("POST", "/local-machines/"+id+"/commands", map[string]any{"kind": kind, "args": args}, &sent); err != nil {
+		return false, "", err
+	}
+	until := time.Now().Add(time.Duration(waitSec) * time.Second)
+	for time.Now().Before(until) {
+		var c struct {
+			Status string `json:"status"`
+			Result string `json:"result"`
+		}
+		if err := h.call("GET", "/local-machines/"+id+"/commands/"+sent.ID, nil, &c); err == nil {
+			switch c.Status {
+			case "done":
+				return true, c.Result, nil
+			case "failed", "expired":
+				msg := c.Result
+				if msg == "" {
+					msg = c.Status
+				}
+				return false, msg, nil
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false, "The PC didn't answer in time.", nil
+}
+
+func (h *HTTPBackend) SetLocalMode(id, mode string) error {
+	return h.call("PATCH", "/local-machines/"+id, map[string]any{"displayMode": mode}, nil)
+}
+
 func (h *HTTPBackend) Inventory(refresh bool) (*Inventory, error) {
 	var out Inventory
 	err := h.call("GET", "/inventory"+map[bool]string{true: "?refresh=true", false: ""}[refresh], nil, &out)

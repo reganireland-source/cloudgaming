@@ -373,12 +373,14 @@ type Operation struct {
 // ---- your own PCs ----------------------------------------------------------
 
 type LocalMachine struct {
-	ID         string         `json:"id"`
-	Name       string         `json:"name"`
-	LanIP      string         `json:"lanIp"`
-	Online     bool           `json:"online"`
-	LastSeenAt string         `json:"lastSeenAt"`
-	Status     map[string]any `json:"status"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	LanIP       string         `json:"lanIp"`
+	Online      bool           `json:"online"`
+	LastSeenAt  string         `json:"lastSeenAt"`
+	Mac         string         `json:"mac"`
+	DisplayMode string         `json:"displayMode"` // "mirror" or "headless": the PC's default for streaming
+	Status      map[string]any `json:"status"`
 }
 
 // ---- the backend ------------------------------------------------------------
@@ -402,6 +404,11 @@ type Backend interface {
 	LocalMachines() ([]LocalMachine, error)
 	// AddLocalMachine registers this computer as a local PC; the result carries the install command (macOS / Linux).
 	AddLocalMachine(name string) (*NewLocalPC, error)
+	// LocalCommand asks the PC's agent to do something (display-headless, display-set, display-restore...) and
+	// waits up to waitSec seconds for the answer.
+	LocalCommand(id, kind string, args map[string]any, waitSec int) (ok bool, message string, err error)
+	// SetLocalMode remembers "mirror" or "headless" as the PC's default.
+	SetLocalMode(id, mode string) error
 	// costs, billing and quotas
 	Inventory(refresh bool) (*Inventory, error)
 	CostsDaily(days int) ([]CostDay, error)

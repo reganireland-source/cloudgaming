@@ -180,10 +180,11 @@ type model struct {
 	options *Options
 	wiz     *wizard
 
-	prompt *prompt
-	ml     *mlPanel // the Moonlight launcher (m)
-	help   bool
-	spin   spinner.Model
+	prompt  *prompt
+	ml      *mlPanel                // the Moonlight launcher (m)
+	streams map[string]*streamState // streams started here on your own PCs (to put their screens back)
+	help    bool
+	spin    spinner.Model
 
 	notice    string
 	noticeBad bool
@@ -518,6 +519,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onAct(msg)
 	case moonlightDoneMsg:
 		return m, m.onMoonlightDone(msg)
+	case localPreparedMsg:
+		return m, m.onLocalPrepared(msg)
+	case streamEndedMsg:
+		return m, m.onStreamEnded(msg)
+	case screensBackMsg:
+		m.setNotice(msg.name+": "+msg.msg, false)
+		m.last["local"] = time.Time{}
+		return m, nil
+	case modeSavedMsg:
+		if msg.err != nil {
+			m.setNotice("Couldn't save the mode: "+msg.err.Error(), true)
+		} else {
+			for i := range m.local {
+				if m.local[i].ID == msg.id {
+					m.local[i].DisplayMode = msg.mode
+				}
+			}
+		}
+		return m, nil
 	case brewDoneMsg:
 		return m, m.onBrewDone(msg)
 	case launchMsg:
@@ -732,6 +752,10 @@ func (m *model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch k.String() {
 	case "q":
+		if len(m.streams) > 0 {
+			return m, m.confirm("A stream is running", "Moonlight keeps running if you quit, but the PC's screens and this computer's sound are only put back when the stream ends while this app is open. Quit anyway?", true,
+				func(m *model, _ string) tea.Cmd { m.quitting = true; return tea.Quit })
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "?":
@@ -899,6 +923,8 @@ func (m *model) machinesKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setNotice("Opened Sunshine on "+lp.Name+" in your browser.", false)
 			}
 			return m, nil
+		case "X":
+			return m, m.screensBack(lp)
 		case "C":
 			if lp.LanIP != "" {
 				copyText(lp.LanIP)

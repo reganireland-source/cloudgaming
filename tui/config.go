@@ -16,9 +16,13 @@ type config struct {
 
 // mlPrefs: what the Moonlight launcher remembers (the web app keeps the screen in the browser).
 type mlPrefs struct {
-	Screen   string `json:"screen"`
-	App      string `json:"app"`
-	Windowed bool   `json:"windowed"`
+	Screen    string `json:"screen"`
+	App       string `json:"app"`
+	Windowed  bool   `json:"windowed"`
+	Conn      string `json:"conn"`      // local PCs: "" = best, else a connection id
+	NoWake    bool   `json:"noWake"`    // local PCs: don't wake the PC first
+	NoMute    bool   `json:"noMute"`    // local PCs, Mirror on a Mac: don't mute this computer
+	NoOverlay bool   `json:"noOverlay"` // local PCs: don't show Moonlight's performance overlay
 }
 
 const defaultAPI = "https://cloudgaming-production.up.railway.app/api"

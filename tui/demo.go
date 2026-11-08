@@ -11,10 +11,11 @@ import (
 // DemoBackend is a made-up GGGH account that lives in memory, so you can try
 // every screen and key with `gggh-tui --demo` without a cloud, a login or any cost.
 type DemoBackend struct {
-	mu       sync.Mutex
-	machines []*demoMachine
-	ops      []*demoOp
-	nextOp   int
+	mu        sync.Mutex
+	machines  []*demoMachine
+	ops       []*demoOp
+	nextOp    int
+	localMode string // the demo PC's saved default: mirror or headless
 }
 
 type demoMachine struct {
@@ -433,8 +434,31 @@ func (d *DemoBackend) Operation(id string, after int) (*Operation, error) {
 }
 
 func (d *DemoBackend) LocalMachines() ([]LocalMachine, error) {
-	return []LocalMachine{{ID: "l-demo-1", Name: "Big Gaming PC", LanIP: "192.168.1.157", Online: true, LastSeenAt: time.Now().UTC().Format(time.RFC3339),
-		Status: map[string]any{"sunshine": "Running", "streaming": false, "wired": true, "link": "1000 Mbit/s", "gpu": map[string]any{"name": "RTX 4070", "util": 1.0, "tempC": 51.0}}}}, nil
+	d.mu.Lock()
+	mode := d.localMode
+	d.mu.Unlock()
+	if mode == "" {
+		mode = "mirror"
+	}
+	return []LocalMachine{{ID: "l-demo-1", Name: "Big Gaming PC", LanIP: "192.168.1.157", Mac: "AA:BB:CC:DD:EE:FF", DisplayMode: mode, Online: true, LastSeenAt: time.Now().UTC().Format(time.RFC3339),
+		Status: map[string]any{"sunshine": "Running", "streaming": false, "display": map[string]any{"mode": "mirror", "virtual": true}, "wired": true, "link": "1000 Mbit/s", "gpu": map[string]any{"name": "RTX 4070", "util": 1.0, "tempC": 51.0}}}}, nil
+}
+
+func (d *DemoBackend) LocalCommand(id, kind string, args map[string]any, waitSec int) (bool, string, error) {
+	switch kind {
+	case "display-headless":
+		return true, "Headless: the PC's screens are off and a virtual display is on.", nil
+	case "display-restore":
+		return true, "The PC's own screens are back on.", nil
+	}
+	return true, "Done.", nil
+}
+
+func (d *DemoBackend) SetLocalMode(id, mode string) error {
+	d.mu.Lock()
+	d.localMode = mode
+	d.mu.Unlock()
+	return nil
 }
 
 func (d *DemoBackend) AddLocalMachine(name string) (*NewLocalPC, error) {
